@@ -11,6 +11,12 @@ android {
   defaultConfig {
     minSdk = 28
   }
+
+  val protocol = rootProject.file("protocol")
+  testOptions.unitTests.all {
+    it.systemProperty("quack.protocol", protocol.path)
+    it.inputs.dir(protocol).withPropertyName("protocol").withPathSensitivity(PathSensitivity.RELATIVE)
+  }
 }
 
 dependencies {
@@ -19,5 +25,6 @@ dependencies {
 
   testImplementation(libs.junit)
   testImplementation(libs.kotest.assertions)
+  testImplementation(libs.kotest.assertions.json)
   testImplementation(libs.kotlinx.coroutines.test)
 }

@@ -1,0 +1,8 @@
+{
+  "method": "call",
+  "action": "app.params",
+  "args": {
+    "text": "hi",
+    "tag": ["a", "b"]
+  }
+}

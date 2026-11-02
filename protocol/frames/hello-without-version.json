@@ -1,0 +1,8 @@
+{
+  "hello": {
+    "protocol": 1,
+    "app": {
+      "package": "io.mehow.quack.sample"
+    }
+  }
+}

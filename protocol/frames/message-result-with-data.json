@@ -1,0 +1,11 @@
+{
+  "result": {
+    "message": "Signed in as alice",
+    "data": {
+      "username": "alice",
+      "tags": ["a", "b"],
+      "verified": true,
+      "age": 7
+    }
+  }
+}

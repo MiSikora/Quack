@@ -1,0 +1,78 @@
+{
+  "result": {
+    "actions": [
+      {
+        "id": "app.greet",
+        "description": "Say hello",
+        "params": [
+          {
+            "name": "name",
+            "type": "string",
+            "required": true,
+            "description": "Who to greet"
+          },
+          {
+            "name": "times",
+            "type": "int",
+            "required": false,
+            "default": "1",
+            "description": ""
+          }
+        ]
+      },
+      {
+        "id": "app.params",
+        "description": "",
+        "params": [
+          {
+            "name": "text",
+            "type": "string",
+            "required": false,
+            "description": ""
+          },
+          {
+            "name": "size",
+            "type": "long",
+            "required": false,
+            "default": "5000000000",
+            "description": ""
+          },
+          {
+            "name": "ratio",
+            "type": "double",
+            "required": false,
+            "default": "0.5",
+            "description": ""
+          },
+          {
+            "name": "flag",
+            "type": "boolean",
+            "required": false,
+            "default": "false",
+            "description": ""
+          },
+          {
+            "name": "theme",
+            "type": "enum",
+            "choices": ["light", "dark"],
+            "required": false,
+            "default": "dark",
+            "description": ""
+          },
+          {
+            "name": "tag",
+            "type": "string_list",
+            "required": false,
+            "default": ["a", "b"],
+            "description": ""
+          }
+        ]
+      },
+      {
+        "id": "account.delete",
+        "description": "Delete the account",
+        "params": []
+      }
+    ]
+  }
+}
