@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The keep-alive notification shares the app's channel and notification ids, and startForeground takes no tag. An app that already
+         uses these values overrides them by declaring resources with the same names. 0x7175616B is "quak" in ASCII. -->
+    <string name="io_mehow_quack_notification_channel_id" translatable="false">quack</string>
+    <integer name="io_mehow_quack_notification_id">0x7175616B</integer>
+</resources>
