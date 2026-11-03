@@ -5,7 +5,9 @@ junit = "4.13.2"
 kotest = "6.2.6"
 # The compiler for AGP's built-in Kotlin.
 kotlin = "2.2.10"
+ktfmt = "0.65"
 serialization = "1.9.0"
+spotless = "8.11.0"
 
 [libraries]
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -14,7 +16,10 @@ kotest-assertions-json = { group = "io.kotest", name = "kotest-assertions-json",
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
+# Included to be picked up by dependency update automation. Spotless runs ktfmt.
+ktfmt = { group = "org.jetbrains.kotlinx", name = "ktfmt", version.ref = "ktfmt" }
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
