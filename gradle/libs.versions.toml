@@ -6,6 +6,7 @@ kotest = "6.2.6"
 # The compiler for AGP's built-in Kotlin.
 kotlin = "2.2.10"
 ktfmt = "0.65"
+okio = "3.18.2"
 serialization = "1.9.0"
 spotless = "8.11.0"
 
@@ -18,6 +19,7 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 # Included to be picked up by dependency update automation. Spotless runs ktfmt.
 ktfmt = { group = "org.jetbrains.kotlinx", name = "ktfmt", version.ref = "ktfmt" }
+okio = { group = "com.squareup.okio", name = "okio", version.ref = "okio" }
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }
