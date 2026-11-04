@@ -11,6 +11,7 @@ android {
 
   defaultConfig {
     minSdk = 28
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   val protocol = rootProject.file("protocol")
@@ -29,4 +30,9 @@ dependencies {
   testImplementation(libs.kotest.assertions)
   testImplementation(libs.kotest.assertions.json)
   testImplementation(libs.kotlinx.coroutines.test)
+
+  androidTestImplementation(libs.androidx.test.runner)
+  androidTestImplementation(libs.junit)
+  androidTestImplementation(libs.kotest.assertions)
+  androidTestImplementation(libs.kotest.assertions.json)
 }
