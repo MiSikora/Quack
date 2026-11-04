@@ -6,6 +6,14 @@
 
     <application>
         <!-- Only adb's shell holds DUMP, so only the CLI can reach these components. -->
+        <receiver
+            android:name="io.mehow.quack.android.QuackWakeReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="io.mehow.quack.WAKE" />
+            </intent-filter>
+        </receiver>
         <service
             android:name="io.mehow.quack.android.QuackService"
             android:exported="true"
