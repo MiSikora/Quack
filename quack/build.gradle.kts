@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
+
 plugins {
   alias(libs.plugins.android.library)
   alias(libs.plugins.kotlin.serialization)
@@ -18,6 +20,15 @@ android {
   testOptions.unitTests.all {
     it.systemProperty("quack.protocol", protocol.path)
     it.inputs.dir(protocol).withPropertyName("protocol").withPathSensitivity(PathSensitivity.RELATIVE)
+  }
+}
+
+kotlin {
+  explicitApi()
+  compilerOptions {
+    allWarningsAsErrors = true
+    progressiveMode = true
+    jvmDefault = JvmDefaultMode.NO_COMPATIBILITY
   }
 }
 
