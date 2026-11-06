@@ -13,3 +13,9 @@ build/
 
 # OSX
 .DS_Store
+
+# Go CLI
+/cli/quack
+/cli/cmd/quack/quack
+/cli/**/*.test
+/cli/**/*.out
