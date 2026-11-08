@@ -43,6 +43,7 @@ type options struct {
 	pkg          string
 	json         bool
 	listActions  bool
+	listDevices  bool
 	startTimeout time.Duration
 	// help asks for usage, which holds quack's own help.
 	help   bool
@@ -62,10 +63,12 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	fs.StringVar(&opts.device, "device", "", "the device, by its `serial` as adb devices lists it (default: $ANDROID_SERIAL)")
 	boolFlag(fs, &opts.json, "json", "print JSON lines: each event, then the outcome with its code")
 	boolFlag(fs, &opts.listActions, "list-actions", "list the app's actions, or only those whose id matches regex")
+	boolFlag(fs, &opts.listDevices, "list-devices", "list the devices and the quack-enabled apps on each")
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
 	boolFlag(fs, &opts.help, "help", "show this help")
 	opts.usage = "usage: quack [options] <action> [key=value]...\n" +
-		"       quack [options] --list-actions [regex]\n\n" +
+		"       quack [options] --list-actions [regex]\n" +
+		"       quack [options] --list-devices\n\n" +
 		"options:\n" + fs.FlagUsages()
 	if err := fs.Parse(argv); err != nil {
 		return opts, usageErrorf("%v. See quack --help.", err)
@@ -81,6 +84,10 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	}
 	rest := fs.Args()
 	switch {
+	case opts.listDevices:
+		if len(rest) > 0 || opts.listActions {
+			return opts, usageErrorf("--list-devices takes no action or --list-actions")
+		}
 	case opts.listActions:
 		if len(rest) > 1 {
 			return opts, usageErrorf("--list-actions takes at most one regex")
@@ -109,6 +116,9 @@ func run(opts options, terminal Terminal) error {
 	if opts.help {
 		fmt.Fprint(terminal.Out, opts.usage)
 		return nil
+	}
+	if opts.listDevices {
+		return printDevices(terminal.Out, adb.Device(opts.device), opts.pkg, opts.json)
 	}
 	target, err := client.Find(adb.Device(opts.device), opts.pkg)
 	if err != nil {

@@ -1,0 +1,73 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"slices"
+
+	"quack/internal/adb"
+	"quack/internal/client"
+)
+
+// deviceJSON is a device as quack --list-devices --json prints it.
+type deviceJSON struct {
+	Serial string    `json:"serial"`
+	Model  string    `json:"model"`
+	State  string    `json:"state"`
+	Apps   []appJSON `json:"apps"`
+}
+
+type appJSON struct {
+	Package string `json:"package"`
+}
+
+// printDevices lists the devices adb knows, each with its quack-enabled apps indented under it: only device when it is
+// not "", and only the devices that have pkg when it is not "". With asJSON each device is an object on a line of its
+// own instead.
+func printDevices(w io.Writer, device adb.Device, pkg string, asJSON bool) error {
+	listings, err := adb.Devices()
+	if err != nil {
+		return err
+	}
+	var devices []client.Device
+	for _, l := range listings {
+		if device != "" && l.Device != device {
+			continue
+		}
+		d, err := client.Inspect(l)
+		if err != nil {
+			return err
+		}
+		if pkg != "" && !slices.Contains(d.Packages, pkg) {
+			continue
+		}
+		devices = append(devices, d)
+	}
+	if asJSON {
+		for _, d := range devices {
+			apps := []appJSON{}
+			for _, p := range d.Packages {
+				apps = append(apps, appJSON{p})
+			}
+			line, err := json.Marshal(deviceJSON{string(d.Device), d.Model, d.State, apps})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(w, string(line))
+		}
+		return nil
+	}
+	serials, models := 0, 0
+	for _, d := range devices {
+		serials = max(serials, len(d.Device))
+		models = max(models, len(d.Model))
+	}
+	for _, d := range devices {
+		fmt.Fprintf(w, "%-*s   %-*s   %s\n", serials, d.Device, models, d.Model, d.State)
+		for _, p := range d.Packages {
+			fmt.Fprintf(w, "  %s\n", p)
+		}
+	}
+	return nil
+}
