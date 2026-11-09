@@ -44,6 +44,7 @@ type options struct {
 	json         bool
 	listActions  bool
 	listDevices  bool
+	openApp      bool
 	startTimeout time.Duration
 	// help asks for usage, which holds quack's own help.
 	help   bool
@@ -64,6 +65,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	boolFlag(fs, &opts.json, "json", "print JSON lines: each event, then the outcome with its code")
 	boolFlag(fs, &opts.listActions, "list-actions", "list the app's actions, or only those whose id matches regex")
 	boolFlag(fs, &opts.listDevices, "list-devices", "list the devices and the quack-enabled apps on each")
+	boolFlag(fs, &opts.openApp, "open-app", "show the app's main screen first, instead of starting it in the background")
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
 	boolFlag(fs, &opts.help, "help", "show this help")
 	opts.usage = "usage: quack [options] <action> [key=value]...\n" +
@@ -120,13 +122,17 @@ func run(opts options, terminal Terminal) error {
 	if opts.listDevices {
 		return printDevices(terminal.Out, adb.Device(opts.device), opts.pkg, opts.json)
 	}
+	mode := client.Wake
+	if opts.openApp {
+		mode = client.Open
+	}
 	target, err := client.Find(adb.Device(opts.device), opts.pkg)
 	if err != nil {
 		return err
 	}
 	app, err := client.Resolve(client.Options{
 		Target:       target,
-		Mode:         client.Wake,
+		Mode:         mode,
 		StartTimeout: opts.startTimeout,
 		Status:       terminal.Err,
 	})
