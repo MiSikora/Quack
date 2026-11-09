@@ -1,4 +1,4 @@
-// Package cli is the quack command: it parses the command line, runs one request, and turns
+// Package cli is the quack command: it parses the command line, runs one request or the interactive TUI, and turns
 // what happened into output and an exit code.
 package cli
 
@@ -17,6 +17,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/tui"
 	"quack/internal/wire"
 )
 
@@ -43,6 +44,7 @@ type options struct {
 	pkg          string
 	json         bool
 	listActions  bool
+	interactive  bool
 	listDevices  bool
 	openApp      bool
 	startTimeout time.Duration
@@ -62,6 +64,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&opts.pkg, "app", "", "the app, by its `package` (default: the only quack-enabled app on the device)")
 	fs.StringVar(&opts.device, "device", "", "the device, by its `serial` as adb devices lists it (default: $ANDROID_SERIAL)")
+	boolFlag(fs, &opts.interactive, "interactive", "pick and run actions in a terminal UI")
 	boolFlag(fs, &opts.json, "json", "print JSON lines: each event, then the outcome with its code")
 	boolFlag(fs, &opts.listActions, "list-actions", "list the app's actions, or only those whose id matches regex")
 	boolFlag(fs, &opts.listDevices, "list-devices", "list the devices and the quack-enabled apps on each")
@@ -70,6 +73,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	boolFlag(fs, &opts.help, "help", "show this help")
 	opts.usage = "usage: quack [options] <action> [key=value]...\n" +
 		"       quack [options] --list-actions [regex]\n" +
+		"       quack [options] --interactive\n" +
 		"       quack [options] --list-devices\n\n" +
 		"options:\n" + fs.FlagUsages()
 	if err := fs.Parse(argv); err != nil {
@@ -87,8 +91,18 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	rest := fs.Args()
 	switch {
 	case opts.listDevices:
+		if len(rest) > 0 || opts.listActions || opts.interactive {
+			return opts, usageErrorf("--list-devices takes no action, --list-actions or --interactive")
+		}
+	case opts.interactive:
 		if len(rest) > 0 || opts.listActions {
-			return opts, usageErrorf("--list-devices takes no action or --list-actions")
+			return opts, usageErrorf("--interactive takes no action or --list-actions")
+		}
+		if opts.json {
+			return opts, usageErrorf("--interactive does not print --json")
+		}
+		if !terminal.Prompts {
+			return opts, usageErrorf("--interactive needs a terminal. Run actions as separate quack commands.")
 		}
 	case opts.listActions:
 		if len(rest) > 1 {
@@ -125,6 +139,9 @@ func run(opts options, terminal Terminal) error {
 	mode := client.Wake
 	if opts.openApp {
 		mode = client.Open
+	}
+	if opts.interactive {
+		return tui.Run(client.Target{Device: adb.Device(opts.device), Package: opts.pkg}, mode, opts.startTimeout)
 	}
 	target, err := client.Find(adb.Device(opts.device), opts.pkg)
 	if err != nil {

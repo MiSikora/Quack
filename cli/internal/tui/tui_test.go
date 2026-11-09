@@ -1,0 +1,1295 @@
+package tui
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"os/exec"
+	"reflect"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"quack/internal/adb"
+	"quack/internal/client"
+	"quack/internal/wire"
+)
+
+func TestPanelShowsTheTitleTheInputTheListAndTheKeys(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	lines := h.panel()
+	want := []string{
+		"",
+		"quack · io.mehow.quack.sample 1.0 · emulator-5554",
+		strings.Repeat("─", 100),
+		"> find an action, or / for commands",
+		strings.Repeat("─", 100),
+		"▸ app.greet        Say hello",
+		"  app.params       Show the parsed value of each param type",
+		"  account.create   Create the account",
+		"  account.delete   Delete the account",
+		"  account.watch    Print the account each time it changes, until stopped",
+		strings.Repeat("─", 100),
+		" enter run · tab params · ↑↓ select · ctrl+c stop/quit",
+	}
+	if len(lines) != len(want) {
+		t.Fatalf("the panel has %d lines, want %d:\n%s", len(lines), len(want), h.view())
+	}
+	for i := range want {
+		if !strings.HasPrefix(lines[i], want[i]) || want[i] == "" && lines[i] != "" {
+			t.Errorf("line %d is %q, want %q", i, lines[i], want[i])
+		}
+	}
+	if !strings.HasSuffix(lines[3], " 6/6") {
+		t.Errorf("the input line is %q, want the counter at its end", lines[3])
+	}
+}
+
+func TestBestMatchSitsRightUnderTheInputOverBlankRows(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.typing("acc")
+	h.waitFor("3/6")
+
+	lines := h.panel()
+	if !strings.HasPrefix(lines[3], "> acc") {
+		t.Errorf("the fourth line is %q, want the input", lines[3])
+	}
+	if lines[4] != strings.Repeat("─", 100) || !strings.HasPrefix(lines[5], "▸ account.") {
+		t.Errorf("the lines under the input are %q and %q, want a rule over the best match", lines[4], lines[5])
+	}
+	if !strings.HasPrefix(lines[6], "  account.") || !strings.HasPrefix(lines[7], "  account.") || lines[8] != "" || lines[9] != "" {
+		t.Errorf("the list is %q, want the matches over two blank lines", lines[5:10])
+	}
+}
+
+func TestNoMatchShowsOnTheFirstRowOfTheList(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.typing("zz")
+	h.waitFor("0/6")
+
+	if lines := h.panel(); lines[5] != "  no match" {
+		t.Errorf("the first row of the list is %q, want no match", lines[5])
+	}
+}
+
+func TestBoxReplacesTheInputAndTheListWithThePreviewLast(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.press("tab")
+	h.waitFor("▸ name")
+
+	lines := h.panel()
+	n := len(lines)
+	if !strings.HasPrefix(lines[3], "app.greet · Say hello") {
+		t.Errorf("the first line of the box is %q, want the action", lines[3])
+	}
+	if !strings.HasPrefix(lines[n-3], "› app.greet") || lines[n-2] != strings.Repeat("─", 100) {
+		t.Errorf("the lines over the footer are %q and %q, want the preview over a rule", lines[n-3], lines[n-2])
+	}
+}
+
+func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
+	app := newFakeApp()
+	releaseStops := app.holdStops()
+	h := start(t, app)
+	h.resetHeights()
+	check := func(state string) {
+		t.Helper()
+		if got := h.panelRows(); got != 12 {
+			t.Errorf("%s: the panel takes the last %d rows, want 12:\n%s", state, got, h.view())
+		}
+		if got := h.lines(); got != 30 {
+			t.Errorf("%s: the view has %d rows, want the window's 30", state, got)
+		}
+	}
+
+	check("idle")
+	h.typing("acc")
+	h.waitFor("3/6")
+	check("filtering")
+	h.typing("zz")
+	h.waitFor("no match")
+	check("no match")
+	h.press("esc")
+	h.typing("/")
+	h.waitFor("▸ /reload-actions")
+	check("commands")
+	h.press("esc")
+	h.typing("account.create")
+	h.press("tab")
+	h.waitFor("▸ username")
+	check("box with fewer params than fit")
+	h.press("esc", "esc")
+	h.typing("app.params")
+	h.press("tab", "tab", "tab", "tab", "tab", "tab", "tab")
+	h.waitFor("▸ tag")
+	check("box with more params than fit")
+	h.press("esc", "esc")
+	h.typing("account.watch")
+	h.press("enter")
+	h.waitFor("account.watch · ctrl+c stop action")
+	check("one run")
+	h.press("ctrl+c")
+	h.waitFor("account.watch stopping… · ctrl+c stop")
+	check("stopping")
+	releaseStops()
+	h.waitForLog("\ncanceled · ")
+	h.waitFor("enter run")
+	h.press("ctrl+c")
+	h.waitFor("press ctrl+c again to quit")
+	check("quit prompt")
+
+	if heights := h.heights(); !reflect.DeepEqual(heights, []int{12}) {
+		t.Errorf("the panel had these heights: %v, want only 12", heights)
+	}
+}
+
+func TestViewTakesTheAlternateScreenAndTheMouse(t *testing.T) {
+	app := newFakeApp()
+	m := newModel(newFakeSource(app), newActivity(t.Context()), client.Target{}, client.Wake)
+
+	view := m.View()
+
+	if !view.AltScreen || view.MouseMode != tea.MouseModeCellMotion {
+		t.Errorf("the view has AltScreen %v and MouseMode %v, want the alternate screen and cell motion", view.AltScreen, view.MouseMode)
+	}
+}
+
+func TestWheelAndPageUpScrollBackAndEndReturnsToTheNewest(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.typing("app.count")
+	h.press("enter")
+	h.waitForLog("  50\nCounted · ")
+	bottom := func() string {
+		rows := strings.Split(h.logText(), "\n")
+		return rows[len(rows)-1]
+	}
+
+	h.program.Send(tea.MouseWheelMsg{X: 10, Y: 5, Button: tea.MouseWheelUp})
+	h.wait(bottom, func(row string) bool { return row == "  48" }, "a turn of the wheel 3 rows back")
+	h.waitFor("scrolled back · end newest · enter run")
+	h.press("pgup")
+	h.wait(bottom, func(row string) bool { return row == "  30" }, "pgup a page of 18 rows further back")
+
+	h.typing("account.delete")
+	h.press("enter")
+	h.waitForRunning()
+	if got := bottom(); got != "  30" {
+		t.Errorf("new output moved the view scrolled back to %q", got)
+	}
+
+	h.press("end")
+	h.waitForLog("› account.delete\n[rejected] there is no account · ")
+	h.waitFor(" enter run")
+	h.waitForNo("scrolled back")
+	h.program.Send(tea.MouseWheelMsg{X: 10, Y: 5, Button: tea.MouseWheelDown})
+	h.typing("x")
+	h.waitFor("> x")
+	if got := bottom(); !strings.HasPrefix(got, "[rejected]") {
+		t.Errorf("the wheel scrolled past the newest output to %q", got)
+	}
+}
+
+func TestResizeCutsTheLogAgainAtTheNewWidth(t *testing.T) {
+	h := start(t, newFakeApp())
+	greeting := "Hello, " + strings.Repeat("a", 70) + "!"
+	h.typing("app.greet")
+	h.press("tab")
+	h.typing(strings.Repeat("a", 70))
+	h.press("enter", "enter")
+	h.waitForLog(greeting)
+
+	h.resize(50, 30)
+	h.waitForLog("Hello, " + strings.Repeat("a", 43) + "\n" + strings.Repeat("a", 27) + "! · ")
+	for _, row := range strings.Split(h.view(), "\n") {
+		if ansi.StringWidth(row) > 50 {
+			t.Errorf("row wider than the window: %q", row)
+		}
+	}
+	if got := h.panelRows(); got != 12 {
+		t.Errorf("the panel takes the last %d rows, want 12", got)
+	}
+
+	h.resize(100, 30)
+	h.waitForLog(greeting + " · ")
+}
+
+func TestEmptyQueryListsEveryActionInTheAppsOrder(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.waitFor("▸ app.greet", "  app.params", "  account.create", "  account.delete", "  account.watch")
+	h.press("down", "down", "down", "down", "down", "down")
+	h.waitFor("  account.watch", "▸ app.count")
+	h.waitForNo("app.greet")
+	h.press("up")
+	h.waitFor("▸ account.watch")
+}
+
+func TestDownMovesToTheNextMatchAndUpBackToTheBest(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.typing("count")
+
+	h.waitFor("> count", "4/6", "▸ app.count", "  account.")
+	h.press("down")
+	h.waitFor("  app.count", "▸ account.")
+	h.press("ctrl+p")
+	h.waitFor("▸ app.count")
+	h.press("ctrl+n", "up", "up")
+	h.waitFor("▸ app.count")
+	h.typing("x")
+	h.waitFor("> countx", "0/6", "  no match")
+	h.press("esc")
+	h.waitFor("> find an action", "▸ app.greet")
+}
+
+func TestSlashListsTheCommands(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.typing("/")
+
+	h.waitFor("6/6", "▸ /reload-actions", "/open-app", "/switch-device", "/switch-app", "/stop-action", "/quit")
+	h.waitForNo("app.greet")
+	h.typing("q")
+	h.waitFor("▸ /quit")
+}
+
+func TestQuestionMarkIsAnOrdinaryCharacter(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.typing("?")
+
+	h.waitFor("> ?", "no match")
+}
+
+func TestEnterRunsAnActionWithoutRequiredParamsAndPrintsItsError(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+
+	h.typing("account.delete")
+	h.press("enter")
+
+	h.waitForLog("› account.delete\n[rejected] there is no account · ")
+	h.waitFor("> find an action", "▸ app.greet")
+	if got, want := app.received(), []wire.Call{{Action: "account.delete"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestRunPrintsABlankLineBeforeItsHeaderAndItsDurationAfterItsEnd(t *testing.T) {
+	h := start(t, newFakeApp(), withClock(0, 1234*time.Millisecond, 0, 65*time.Second))
+
+	h.typing("account.delete")
+	h.press("enter")
+	h.waitForLog("there is no account · 1.23s")
+	h.typing("account.delete")
+	h.press("enter")
+
+	h.waitForLog("\n› account.delete\n[rejected] there is no account · 1.23s\n" +
+		"\n› account.delete\n[rejected] there is no account · 1m05s")
+}
+
+func TestEnterOnAnActionWithARequiredParamOpensTheBox(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+
+	h.press("enter")
+
+	h.waitFor("app.greet · Say hello", "▸ name", "Required. Who to greet", "  times", "Default: 1.", "› app.greet")
+	h.typing("Bob Smith")
+	h.waitFor(`› app.greet name='Bob Smith'`)
+	h.press("enter")
+	h.waitFor("▸ times")
+	h.press("enter")
+	h.waitForLog("› app.greet name='Bob Smith'\nHello, Bob Smith! · ")
+	h.waitFor("> find an action")
+	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bob Smith"}}}}
+	if got := app.received(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestMissingRequiredParamBlocksTheRunAndTurnsItsHintRed(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+	red := lipgloss.NewStyle().Foreground(lipgloss.Red).Render("Required. Who to greet")
+
+	h.press("enter")
+	h.waitFor("▸ name")
+	h.press("enter")
+	h.waitFor("▸ times")
+	h.press("enter")
+
+	h.waitFor("▸ name")
+	if !strings.Contains(h.raw(), red) {
+		t.Errorf("the hint of the missing param is not red:\n%q", h.raw())
+	}
+	h.typing("x")
+	h.waitFor("› app.greet name=x")
+	if strings.Contains(h.raw(), red) {
+		t.Errorf("the hint stayed red after the param was set")
+	}
+	if got := app.received(); len(got) != 0 {
+		t.Errorf("calls: got %v, want none", got)
+	}
+}
+
+func TestEscAndCtrlCCloseTheBoxAndKeepTheQuery(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+	h.typing("app.p")
+	h.waitFor("▸ app.params")
+
+	for _, key := range []string{"esc", "ctrl+c"} {
+		h.press("tab")
+		h.waitFor("app.params · Show")
+		h.press(key)
+
+		h.waitFor("> app.p", "▸ app.params")
+	}
+	h.waitFor("enter run")
+	if got := app.received(); len(got) != 0 {
+		t.Errorf("calls: got %v, want none", got)
+	}
+}
+
+func TestChoicesCycleWithLeftAndRight(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.typing("app.params")
+	h.press("tab", "tab", "tab", "tab", "tab")
+	h.waitFor("▸ flag   ‹not set› true false")
+
+	h.press("right")
+	h.waitFor("not set ‹true› false", "› app.params flag=true")
+	h.press("right", "right")
+	h.waitFor("‹not set› true false", "› app.params\n")
+	h.press("left")
+	h.waitFor("not set true ‹false›", "› app.params flag=false")
+}
+
+func TestStringListSplitsOnCommasAndKeepsEscapedOnes(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+	h.typing("app.params")
+	h.press("tab", "tab", "tab", "tab", "tab", "tab", "tab")
+	h.waitFor("▸ tag")
+
+	h.typing(`a, b\,c, ,d `)
+
+	h.waitFor("› app.params tag=a tag=b,c tag=d")
+	h.press("enter")
+	h.waitForLog("› app.params tag=a tag=b,c tag=d\ndone · ")
+	want := []wire.Call{{Action: "app.params", Args: map[string]wire.RawArg{"tag": {"a", "b,c", "d"}}}}
+	if got := app.received(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestBoxSendsOnlyTheParamsTheUserSet(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+
+	h.typing("app.params")
+	h.press("tab")
+	h.waitFor("▸ text")
+	h.typing("hi")
+	h.press("enter", "enter", "enter", "enter")
+	h.waitFor("▸ flag")
+	h.press("right", "enter")
+	h.waitFor("▸ theme")
+	h.press("left", "enter")
+	h.waitFor("▸ tag")
+	h.typing("a, b c")
+	h.press("enter")
+
+	h.waitForLog("› app.params text=hi flag=true theme=dark tag=a tag='b c'\nhi · ")
+	want := []wire.Call{{Action: "app.params", Args: map[string]wire.RawArg{
+		"text":  {"hi"},
+		"flag":  {"true"},
+		"theme": {"dark"},
+		"tag":   {"a", "b c"},
+	}}}
+	if got := app.received(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestDataOfARunPrintsIndentedUnderItsMessage(t *testing.T) {
+	app := newFakeApp()
+	app.setActions(append(app.actions(), wire.Action{ID: "account.show", Description: "Show the account"}))
+	h := start(t, app, withClock(0, 1234*time.Millisecond))
+
+	h.typing("account.show")
+	h.press("enter")
+
+	h.waitForLog("\n› account.show\nSigned in as alice · 1.23s\n" +
+		"  {\n" +
+		"    \"username\": \"alice\",\n" +
+		"    \"tags\": [\n" +
+		"      \"a\"\n" +
+		"    ]\n" +
+		"  }")
+}
+
+func TestEventsOfARunPrintUnderItsCommand(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.typing("account.create")
+	h.press("enter")
+	h.typing("alice")
+	h.press("enter")
+
+	h.waitForLog("\n› account.create username=alice\n  Started\n  Creating account\nCreated · ")
+}
+
+func TestOutputKeepsItsOrder(t *testing.T) {
+	h := start(t, newFakeApp())
+	var want []string
+	for i := 1; i <= 50; i++ {
+		want = append(want, "  "+strconv.Itoa(i))
+	}
+
+	h.resize(100, 100)
+	h.typing("app.count")
+	h.press("enter")
+
+	h.waitForLog("› app.count\n" + strings.Join(want, "\n") + "\nCounted")
+}
+
+func TestActionsDoNotRunWhileARunRunsButTheBoxOpens(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+	h.typing("account.watch")
+	h.press("enter")
+	h.waitForLog("› account.watch\n  Signed out")
+
+	h.typing("account.delete")
+	h.press("enter")
+	h.waitFor("> account.delete", "stop the running action first (ctrl+c)")
+	h.press("esc")
+	h.typing("account.create")
+	h.press("enter")
+	h.waitFor("▸ username")
+	h.typing("alice")
+	h.press("enter")
+	h.waitFor("▸ username", "stop the running action first (ctrl+c)")
+	h.press("backspace")
+	h.waitFor("▸ username", "› account.create username=alic\n")
+	if got, want := app.received(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls while the watch runs: got %v, want %v", got, want)
+	}
+
+	// ctrl+c stops the watch and keeps the box, and then the same Enter runs the action.
+	h.press("ctrl+c")
+	h.waitForLog("\ncanceled · ")
+	h.waitFor("▸ username", "› account.create username=alic", "enter next")
+	h.press("enter")
+	h.waitForLog("\n› account.create username=alic\n  Started\n  Creating account\nCreated · ")
+	h.typing("account.delete")
+	h.press("enter")
+	h.waitForLog("\n› account.delete\n[rejected] there is no account · ")
+	want := []wire.Call{
+		{Action: "account.watch"},
+		{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alic"}}},
+		{Action: "account.delete"},
+	}
+	if got := app.received(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestEscNeverStopsARun(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+	h.typing("account.watch")
+	h.press("enter")
+	h.waitForLog("  Signed out")
+
+	h.press("esc", "esc")
+	app.signIn("alice")
+
+	h.waitForLog("  Signed in as alice")
+	h.waitFor("account.watch · ctrl+c stop action")
+	select {
+	case <-app.canceled(0):
+		t.Fatal("esc stopped the watch")
+	default:
+	}
+}
+
+func TestCtrlCStopsTheRunAndKeepsTheTextThenClearsThenAsksThenQuits(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+	h.typing("account.watch")
+	h.press("enter")
+	h.waitFor("account.watch · ctrl+c stop action")
+	h.typing("abc")
+	h.waitFor("> abc")
+
+	h.press("ctrl+c")
+	h.waitForLog("› account.watch\n  Signed out\ncanceled · ")
+	h.waitFor("> abc", "enter run")
+	h.press("ctrl+c")
+	h.waitFor("> find an action", "enter run")
+	h.press("ctrl+c")
+	h.waitFor("press ctrl+c again to quit")
+	h.waitForRunning()
+	h.press("ctrl+c")
+
+	h.waitForExit()
+}
+
+func TestCtrlCWhileTheRunStopsAsksToQuit(t *testing.T) {
+	app := newFakeApp()
+	release := app.holdStops()
+	h := start(t, app)
+	t.Cleanup(release)
+	h.typing("account.watch")
+	h.press("enter")
+	h.waitFor("account.watch · ctrl+c stop action")
+	h.typing("abc")
+
+	h.press("ctrl+c")
+	h.waitFor("account.watch stopping…")
+	h.press("ctrl+c")
+
+	h.waitFor("> abc", "press ctrl+c again to quit")
+	h.press("ctrl+c")
+	h.waitForExit()
+}
+
+func TestQuitPromptEndsAfterTwoSeconds(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.press("ctrl+c")
+	h.waitFor("press ctrl+c again to quit")
+	shown := time.Now()
+
+	h.waitFor("enter run")
+	if waited := time.Since(shown); waited < noticeTime-200*time.Millisecond {
+		t.Errorf("the prompt went after %v, want %v", waited, noticeTime)
+	}
+	h.press("ctrl+c")
+	h.waitFor("press ctrl+c again to quit")
+	h.waitForRunning()
+}
+
+func TestCtrlDQuitsOnlyOnAnEmptyQuery(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.typing("ab")
+	h.press("left")
+
+	h.press("ctrl+d")
+	h.waitFor("> a ")
+	h.waitForRunning()
+	h.press("esc", "ctrl+d")
+
+	h.waitForExit()
+}
+
+func TestReloadKeepsTheSelectedAction(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+	h.press("down", "down")
+	h.waitFor("▸ account.create")
+
+	app.setActions(append([]wire.Action{{ID: "aaa.new", Description: "A new action"}}, app.actions()...))
+	h.press("ctrl+r")
+
+	h.waitForLog("reloaded 7 actions")
+	h.waitFor("7/7", "aaa.new", "▸ account.create")
+
+	app.setActions(append([]wire.Action{{ID: "aab.newer", Description: "A newer action"}}, app.actions()...))
+	h.typing("/reload-actions")
+	h.press("enter")
+	h.waitForLog("reloaded 8 actions")
+	h.waitFor("8/8", "aab.newer")
+}
+
+func TestFailedReloadKeepsTheActions(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+
+	app.setActions(nil)
+	h.press("ctrl+r")
+
+	h.waitForLog("reload: the app is gone")
+	h.waitFor("6/6", "▸ app.greet")
+}
+
+func TestStatusLinesGoIntoTheLog(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+
+	h.press("ctrl+o")
+
+	h.waitForLog("starting io.mehow.quack.sample…\nshowed the app's main screen")
+}
+
+func TestSmallWindowsShrinkTheList(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	for _, size := range []struct{ width, height, rows int }{{100, 21, 10}, {100, 18, 9}, {100, 14, 8}, {100, 8, 8}} {
+		h.resize(size.width, size.height)
+		h.waitForPanelRows(size.rows)
+		h.waitFor("> find an action", "▸ app.greet", "enter run")
+	}
+	h.press("tab")
+	h.waitFor("▸ name", "› app.greet", "enter next")
+	h.waitForPanelRows(8)
+}
+
+func TestTinyWindowsShowOnlyTheMessage(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	for _, size := range []struct{ width, height int }{{100, 7}, {100, 1}, {23, 30}, {10, 8}} {
+		h.resize(size.width, size.height)
+		h.waitForLines(size.height)
+		h.waitFor(ansi.Truncate("Make the window larger.", size.width, "…"))
+		for _, line := range strings.Split(h.view(), "\n") {
+			if w := ansi.StringWidth(line); w > size.width {
+				t.Errorf("line wider than the window: %q", line)
+			}
+		}
+	}
+	h.waitForNo("find an action")
+}
+
+// harness runs the TUI as a program without a terminal and keeps its latest view.
+type harness struct {
+	t       *testing.T
+	program *tea.Program
+	// exited is closed once the program ends.
+	exited chan struct{}
+
+	mu        sync.Mutex
+	latest    string
+	latestRaw string
+	// height is the height of the window the harness gave the TUI last.
+	height int
+	// seen are the numbers of rows the panel took at the bottom of the views since the last resetHeights.
+	seen map[int]bool
+}
+
+// settled is a message the probe closes instead of handing it to the model. The program handles messages in order, so
+// once it is closed, every message sent before it has been handled.
+type settled chan struct{}
+
+// probe records the view after every update.
+type probe struct {
+	h     *harness
+	model *model
+}
+
+// start runs the TUI for app, the only app on the only device, in a window 100 columns wide and 30 rows high, after
+// options change its model, and waits for the actions.
+func start(t *testing.T, app *fakeApp, options ...func(*model)) *harness {
+	h := startPicking(t, newFakeSource(app), client.Target{}, client.Wake, options...)
+	h.waitFor("enter run")
+	return h
+}
+
+// startPicking runs the TUI on the devices of source, picking among those that want leaves and starting the first app
+// in mode, in a window 100 columns wide and 30 rows high, after options change its model.
+func startPicking(t *testing.T, source *fakeSource, want client.Target, mode client.StartMode, options ...func(*model)) *harness {
+	ctx, cancel := context.WithCancel(context.Background())
+	activity := newActivity(ctx)
+	h := &harness{t: t, exited: make(chan struct{}), height: 30, seen: map[int]bool{}}
+	m := newModel(source, activity, want, mode)
+	for _, option := range options {
+		option(m)
+	}
+	h.program = tea.NewProgram(probe{h, m},
+		tea.WithInput(nil),
+		tea.WithOutput(io.Discard),
+		tea.WithWindowSize(100, 30),
+		tea.WithoutSignals(),
+	)
+	go func() {
+		defer close(h.exited)
+		h.program.Run()
+	}()
+	t.Cleanup(func() {
+		cancel()
+		h.program.Kill()
+		<-h.exited
+	})
+	return h
+}
+
+// withPollTime has an open picker ask the devices for their apps every d.
+func withPollTime(d time.Duration) func(*model) {
+	return func(m *model) { m.pollTime = d }
+}
+
+// withClock has the runs tell the time from a clock that moves on by the next of steps each time it is read.
+func withClock(steps ...time.Duration) func(*model) {
+	return func(m *model) {
+		now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+		m.runs.now = func() time.Time {
+			now = now.Add(steps[0])
+			steps = steps[1:]
+			return now
+		}
+	}
+}
+
+func (p probe) Init() tea.Cmd { return p.model.Init() }
+
+func (p probe) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if s, ok := msg.(settled); ok {
+		close(s)
+		return p, nil
+	}
+	_, cmd := p.model.Update(msg)
+	raw := p.model.View().Content
+	p.h.mu.Lock()
+	p.h.latestRaw = raw
+	p.h.latest = ansi.Strip(raw)
+	p.h.seen[titleFromBottom(p.h.latest)] = true
+	p.h.mu.Unlock()
+	return p, cmd
+}
+
+func (p probe) View() tea.View { return p.model.View() }
+
+// resize gives the TUI a window of width and height.
+func (h *harness) resize(width, height int) {
+	h.mu.Lock()
+	h.height = height
+	h.mu.Unlock()
+	h.program.Send(tea.WindowSizeMsg{Width: width, Height: height})
+}
+
+func (h *harness) view() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.latest
+}
+
+// raw is the latest view with its styles.
+func (h *harness) raw() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.latestRaw
+}
+
+// split cuts the view into the log above the panel and the panel, the last panelHeight rows.
+func (h *harness) split() (log, panel []string) {
+	h.mu.Lock()
+	lines, height := strings.Split(h.latest, "\n"), h.height
+	h.mu.Unlock()
+	at := max(0, len(lines)-panelHeight(height))
+	return lines[:at], lines[at:]
+}
+
+// panel is the rows of the panel without the spaces at their ends.
+func (h *harness) panel() []string {
+	_, lines := h.split()
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	return lines
+}
+
+func (h *harness) panelText() string {
+	_, lines := h.split()
+	return strings.Join(lines, "\n")
+}
+
+// logText is the rows of the log the view shows, without the spaces at their ends.
+func (h *harness) logText() string {
+	lines, _ := h.split()
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (h *harness) lines() int { return strings.Count(h.view(), "\n") + 1 }
+
+// panelRows is how many rows the panel takes at the bottom of the view: from the blank row over its title down.
+func (h *harness) panelRows() int { return titleFromBottom(h.view()) }
+
+// titleFromBottom is the number of rows from the row over the title down to the end of view, or 0 without a title.
+func titleFromBottom(view string) int {
+	lines := strings.Split(view, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(lines[i], "quack · ") || strings.TrimRight(lines[i], " ") == "quack" {
+			return len(lines) - i + 1
+		}
+	}
+	return 0
+}
+
+func (h *harness) resetHeights() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.seen = map[int]bool{}
+}
+
+// heights are the numbers of rows the panel took in the views since the last resetHeights, lowest first.
+func (h *harness) heights() []int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var heights []int
+	for height := range h.seen {
+		heights = append(heights, height)
+	}
+	slices.Sort(heights)
+	return heights
+}
+
+// press sends keys by their names, as tea.Key.String writes them.
+func (h *harness) press(keys ...string) {
+	for _, name := range keys {
+		var k tea.Key
+		mod, base, ok := strings.Cut(name, "+")
+		if !ok {
+			base = name
+		}
+		switch mod {
+		case "ctrl":
+			k.Mod = tea.ModCtrl
+		case "alt":
+			k.Mod = tea.ModAlt
+		case "shift":
+			k.Mod = tea.ModShift
+		}
+		switch base {
+		case "enter":
+			k.Code = tea.KeyEnter
+		case "tab":
+			k.Code = tea.KeyTab
+		case "esc":
+			k.Code = tea.KeyEscape
+		case "up":
+			k.Code = tea.KeyUp
+		case "down":
+			k.Code = tea.KeyDown
+		case "left":
+			k.Code = tea.KeyLeft
+		case "right":
+			k.Code = tea.KeyRight
+		case "pgup":
+			k.Code = tea.KeyPgUp
+		case "pgdown":
+			k.Code = tea.KeyPgDown
+		case "end":
+			k.Code = tea.KeyEnd
+		case "backspace":
+			k.Code = tea.KeyBackspace
+		default:
+			k.Code = []rune(base)[0]
+		}
+		h.program.Send(tea.KeyPressMsg(k))
+	}
+	h.settle()
+}
+
+func (h *harness) typing(text string) {
+	for _, r := range text {
+		h.program.Send(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	h.settle()
+}
+
+// settle waits until the TUI has handled every key sent so far, so that what a test reads next comes after them. It
+// returns at once when the program has ended, as a key that quits ends it.
+func (h *harness) settle() {
+	h.t.Helper()
+	done := make(settled)
+	go h.program.Send(done)
+	select {
+	case <-done:
+	case <-h.exited:
+	case <-time.After(timeout):
+		h.t.Fatalf("the TUI did not handle the keys:\n%s", h.view())
+	}
+}
+
+// waitFor waits until the panel holds each text, in order.
+func (h *harness) waitFor(texts ...string) {
+	h.t.Helper()
+	h.wait(h.panelText, func(panel string) bool { return holds(panel, texts) }, "want "+strings.Join(texts, " then "))
+}
+
+func (h *harness) waitForNo(text string) {
+	h.t.Helper()
+	h.wait(h.panelText, func(panel string) bool { return !strings.Contains(panel, text) }, "want no "+text)
+}
+
+// waitForLines waits until the view is count lines high.
+func (h *harness) waitForLines(count int) {
+	h.t.Helper()
+	h.wait(h.view, func(view string) bool { return strings.Count(view, "\n")+1 == count }, strconv.Itoa(count)+" lines")
+}
+
+// waitForPanelRows waits until the panel takes the last count rows of the view.
+func (h *harness) waitForPanelRows(count int) {
+	h.t.Helper()
+	h.wait(h.view, func(view string) bool { return titleFromBottom(view) == count }, "a panel of "+strconv.Itoa(count)+" rows")
+}
+
+// waitForLog waits until the log the view shows holds each text, in order.
+func (h *harness) waitForLog(texts ...string) {
+	h.t.Helper()
+	h.wait(h.logText, func(log string) bool { return holds(log, texts) }, "want in the log "+strings.Join(texts, " then "))
+}
+
+func (h *harness) waitForExit() {
+	h.t.Helper()
+	select {
+	case <-h.exited:
+	case <-time.After(timeout):
+		h.t.Fatalf("the TUI did not quit:\n%s", h.view())
+	}
+}
+
+// waitForRunning fails if the program ends within a moment.
+func (h *harness) waitForRunning() {
+	h.t.Helper()
+	select {
+	case <-h.exited:
+		h.t.Fatal("the TUI quit")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func (h *harness) wait(read func() string, done func(string) bool, want string) {
+	h.t.Helper()
+	deadline := time.Now().Add(timeout)
+	for !done(read()) {
+		if time.Now().After(deadline) {
+			h.t.Fatalf("%s in:\n%s", want, read())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// holds is whether s holds each text, in order.
+func holds(s string, texts []string) bool {
+	for _, text := range texts {
+		i := strings.Index(s, text)
+		if i < 0 {
+			return false
+		}
+		s = s[i+len(text):]
+	}
+	return true
+}
+
+// fakeApp answers like the sample app. account.watch prints the account each time account.create signs in, until
+// it is canceled.
+type fakeApp struct {
+	status io.Writer
+	pkg    string
+
+	mu            sync.Mutex
+	described     []wire.Action
+	calls         []wire.Call
+	watchers      []func(string)
+	watchCanceled []chan struct{}
+	// stopsHeld, while not nil, keeps canceled watches from ending until it closes.
+	stopsHeld chan struct{}
+}
+
+func newFakeApp() *fakeApp {
+	return &fakeApp{
+		pkg: "io.mehow.quack.sample",
+		described: []wire.Action{
+			{ID: "app.greet", Description: "Say hello", Params: []wire.Param{
+				{Name: "name", Type: wire.ParamTypeString, Presence: wire.Required{}, Description: "Who to greet"},
+				{Name: "times", Type: wire.ParamTypeInt, Presence: wire.Default{Values: []string{"1"}}},
+			}},
+			{ID: "app.params", Description: "Show the parsed value of each param type", Params: []wire.Param{
+				{Name: "text", Type: wire.ParamTypeString, Presence: wire.Optional{}},
+				{Name: "count", Type: wire.ParamTypeInt, Presence: wire.Optional{}},
+				{Name: "size", Type: wire.ParamTypeLong, Presence: wire.Optional{}},
+				{Name: "ratio", Type: wire.ParamTypeDouble, Presence: wire.Optional{}},
+				{Name: "flag", Type: wire.ParamTypeBoolean, Presence: wire.Optional{}},
+				{Name: "theme", Type: wire.ParamTypeEnum, Choices: []string{"light", "dark"}, Presence: wire.Optional{}},
+				{Name: "tag", Type: wire.ParamTypeStringList, Presence: wire.Default{Values: []string{"a", "b"}}, Description: "Labels to add"},
+			}},
+			{ID: "account.create", Description: "Create the account", Params: []wire.Param{
+				{Name: "username", Type: wire.ParamTypeString, Presence: wire.Required{}},
+			}},
+			{ID: "account.delete", Description: "Delete the account"},
+			{ID: "account.watch", Description: "Print the account each time it changes, until stopped"},
+			{ID: "app.count", Description: "Count to 50"},
+		},
+	}
+}
+
+func (a *fakeApp) Describe(context.Context) (wire.Hello, []wire.Action, error) {
+	actions := a.actions()
+	if actions == nil {
+		return wire.Hello{}, nil, &client.AppError{Message: "the app is gone"}
+	}
+	return wire.Hello{Protocol: 1, Package: a.pkg, Version: "1.0"}, actions, nil
+}
+
+func (a *fakeApp) Call(ctx context.Context, call wire.Call, onEvent client.EventFunc) (wire.MessageResult, error) {
+	if call.Action == "account.show" {
+		return wire.MessageResult{Message: "Signed in as alice", Data: json.RawMessage(`{"username":"alice","tags":["a"]}`)}, nil
+	}
+	message, err := a.reply(ctx, call, onEvent)
+	return wire.MessageResult{Message: message}, err
+}
+
+// reply runs call and returns its message.
+func (a *fakeApp) reply(ctx context.Context, call wire.Call, event client.EventFunc) (string, error) {
+	a.mu.Lock()
+	a.calls = append(a.calls, call)
+	a.mu.Unlock()
+	switch call.Action {
+	case "app.greet":
+		return "Hello, " + call.Args["name"][0] + "!", nil
+	case "app.params":
+		return strings.Join(call.Args["text"], ""), nil
+	case "account.create":
+		event("Started")
+		event("Creating account")
+		a.mu.Lock()
+		for _, watch := range a.watchers {
+			if watch == nil {
+				continue
+			}
+			watch("Signed in as " + call.Args["username"][0])
+		}
+		a.mu.Unlock()
+		return "Created", nil
+	case "app.count":
+		for i := 1; i <= 50; i++ {
+			event(strconv.Itoa(i))
+		}
+		return "Counted", nil
+	case "account.delete":
+		return "", wire.Error{Code: wire.ErrorCodeRejected, Message: "there is no account"}
+	case "account.watch":
+		done := make(chan struct{})
+		a.mu.Lock()
+		watcher := len(a.watchers)
+		a.watchers = append(a.watchers, event)
+		a.watchCanceled = append(a.watchCanceled, done)
+		held := a.stopsHeld
+		a.mu.Unlock()
+		event("Signed out")
+		<-ctx.Done()
+		a.mu.Lock()
+		a.watchers[watcher] = nil
+		a.mu.Unlock()
+		close(done)
+		if held != nil {
+			<-held
+		}
+		return "", &client.CallError{Message: "canceled"}
+	}
+	return "", wire.Error{Code: wire.ErrorCodeUnknownAction, Message: "no action '" + call.Action + "'"}
+}
+
+func (a *fakeApp) Start(mode client.StartMode) error {
+	if mode != client.Open {
+		return errors.New("unexpected mode " + string(mode))
+	}
+	io.WriteString(a.status, "starting "+a.pkg+"…\n")
+	return nil
+}
+
+// holdStops keeps watches from ending when they are canceled, until release.
+func (a *fakeApp) holdStops() (release func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	held := make(chan struct{})
+	a.stopsHeld = held
+	return sync.OnceFunc(func() { close(held) })
+}
+
+// signIn tells the watches that username signed in.
+func (a *fakeApp) signIn(username string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, watch := range a.watchers {
+		if watch != nil {
+			watch("Signed in as " + username)
+		}
+	}
+}
+
+func (a *fakeApp) received() []wire.Call {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]wire.Call(nil), a.calls...)
+}
+
+// canceled is closed once the watch call number i is canceled.
+func (a *fakeApp) canceled(i int) <-chan struct{} {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.watchCanceled[i]
+}
+
+func (a *fakeApp) actions() []wire.Action {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.described
+}
+
+func (a *fakeApp) setActions(actions []wire.Action) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.described = actions
+}
+
+const timeout = 5 * time.Second
+
+// fakeSource is adb with devices on which fake apps run. Each app is the default one unless apps has one for its
+// target. It records each app it starts.
+type fakeSource struct {
+	app *fakeApp
+
+	mu      sync.Mutex
+	devices []client.Device
+	apps    map[client.Target]*fakeApp
+	// send is Track's, once it tracks.
+	send func([]adb.Listing)
+	// started is each app the source started, as its device, its package and the mode.
+	started []string
+	// failTracks is how many times Track fails before it tracks.
+	failTracks int
+	// held keeps Connect of a target from returning until its channel closes.
+	held map[client.Target]chan struct{}
+}
+
+// newFakeSource is a Pixel 8, emulator-5554, on which app is the only quack-enabled app.
+func newFakeSource(app *fakeApp, devices ...client.Device) *fakeSource {
+	if len(devices) == 0 {
+		devices = []client.Device{device("emulator-5554", "Pixel 8", "device", app.pkg)}
+	}
+	return &fakeSource{app: app, devices: devices, apps: map[client.Target]*fakeApp{}, held: map[client.Target]chan struct{}{}}
+}
+
+// device is a device in state, with model and pkgs once it is ready.
+func device(serial, model, state string, pkgs ...string) client.Device {
+	return client.Device{Listing: adb.Listing{Device: adb.Device(serial), State: state}, Model: model, Packages: pkgs}
+}
+
+func (s *fakeSource) Track(ctx context.Context, send func([]adb.Listing)) error {
+	s.mu.Lock()
+	if s.failTracks > 0 {
+		s.failTracks--
+		s.mu.Unlock()
+		return &adb.Error{Message: "lost track of the devices: EOF"}
+	}
+	s.send = send
+	listings := s.listings()
+	s.mu.Unlock()
+	send(listings)
+	<-ctx.Done()
+	return nil
+}
+
+func (s *fakeSource) Inspect(listing adb.Listing) (client.Device, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.devices {
+		if d.Device == listing.Device {
+			d.Listing = listing
+			return d, nil
+		}
+	}
+	return client.Device{}, errors.New(string(listing.Device) + " is not connected")
+}
+
+func (s *fakeSource) Connect(target client.Target, mode client.StartMode, status io.Writer) (App, error) {
+	s.mu.Lock()
+	held := s.held[target]
+	s.started = append(s.started, string(target.Device)+" "+target.Package+" "+string(mode))
+	s.mu.Unlock()
+	if held != nil {
+		<-held
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	app, ok := s.apps[target]
+	if !ok {
+		app = s.app
+	}
+	app.status = status
+	return app, nil
+}
+
+// hold keeps the start of pkg on serial from answering until release.
+func (s *fakeSource) hold(serial, pkg string) (release func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := make(chan struct{})
+	s.held[client.Target{Device: adb.Device(serial), Package: pkg}] = held
+	return sync.OnceFunc(func() { close(held) })
+}
+
+func (s *fakeSource) starts() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.started)
+}
+
+// set connects devices instead of the ones there are, and tells Track.
+func (s *fakeSource) set(devices ...client.Device) {
+	s.mu.Lock()
+	s.devices = devices
+	send, listings := s.send, s.listings()
+	s.mu.Unlock()
+	if send != nil {
+		send(listings)
+	}
+}
+
+// install changes the apps on a device without adb listing anything new, as installing an app does.
+func (s *fakeSource) install(serial string, pkgs ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, d := range s.devices {
+		if d.Device == adb.Device(serial) {
+			s.devices[i].Packages = pkgs
+		}
+	}
+}
+
+// appFor runs a fake app of its own for pkg on serial.
+func (s *fakeSource) appFor(serial, pkg string) *fakeApp {
+	app := newFakeApp()
+	app.pkg = pkg
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.apps[client.Target{Device: adb.Device(serial), Package: pkg}] = app
+	return app
+}
+
+func (s *fakeSource) listings() []adb.Listing {
+	var listings []adb.Listing
+	for _, d := range s.devices {
+		listings = append(listings, d.Listing)
+	}
+	return listings
+}
+
+func TestShellReadsAQuotedValueBackAsTyped(t *testing.T) {
+	for _, value := range []string{"", "plain", "Bob Smith", "$HOME", "`id`", `a"b`, "it's", `back\slash`, "line\nbreak", "zażółć"} {
+		out, err := exec.Command("sh", "-c", "printf %s "+quote(value)).Output()
+		if err != nil || string(out) != value {
+			t.Errorf("sh read %s back as %q (%v), want %q", quote(value), out, err, value)
+		}
+	}
+}
