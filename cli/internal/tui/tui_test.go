@@ -166,6 +166,25 @@ func TestViewTakesTheAlternateScreenAndTheMouse(t *testing.T) {
 	}
 }
 
+func TestDuckIsTheFirstThingInTheLog(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.typing("account.delete")
+	h.press("enter")
+	h.waitForLog("there is no account")
+
+	rows := strings.Split(strings.TrimLeft(h.logText(), "\n"), "\n")
+	for i, row := range rows[:9] {
+		if !strings.ContainsAny(row, "▀▄") {
+			t.Errorf("log row %d is %q, want the duck", i, row)
+		}
+	}
+	want := []string{"switched to io.mehow.quack.sample on Pixel 8 · emulator-5554", "", "› account.delete"}
+	if got := rows[9:12]; !reflect.DeepEqual(got, want) {
+		t.Errorf("the rows after the duck are %q, want the pick and the run", got)
+	}
+}
+
 func TestWheelAndPageUpScrollBackAndEndReturnsToTheNewest(t *testing.T) {
 	h := start(t, newFakeApp())
 	h.typing("app.count")

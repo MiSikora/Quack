@@ -166,6 +166,7 @@ func newModel(source Source, activity activity, want client.Target, mode client.
 		runs:     newRuns(),
 	}
 	m.picker.auto, m.picker.skipPackage = true, true
+	m.log.add(duckView())
 	return m
 }
 
