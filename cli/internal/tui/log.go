@@ -18,6 +18,8 @@ type sessionLog struct {
 	rows  []logRow
 	// scrolled is how many rows the view sits above the newest row. At 0 the view follows new output.
 	scrolled int
+	// marked is the selection, highlighted in the view, or nil without one.
+	marked *span
 }
 
 // logRow is one row of the log as it is drawn. Each row carries its own styles, so that it draws alike wherever the
@@ -45,6 +47,7 @@ func (l *sessionLog) resize(width, height int) {
 	if width != l.width {
 		l.width = width
 		l.rows = cutRows(l.lines, width)
+		l.marked = nil
 	}
 	l.scroll(0, height)
 }
@@ -65,13 +68,13 @@ func (l *sessionLog) top(height int) int {
 }
 
 // view is height rows of the log, the newest at the bottom unless scrolled back, with blank rows on top while the log
-// is shorter than the view.
+// is shorter than the view, and the selection highlighted.
 func (l *sessionLog) view(height int) []string {
 	view := make([]string, max(0, height))
 	top := l.top(height)
 	for y := range view {
 		if i := top + y; i >= 0 {
-			view[y] = l.rows[i].text
+			view[y] = l.highlight(i)
 		}
 	}
 	return view

@@ -16,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
 	"quack/internal/adb"
@@ -242,6 +243,83 @@ func TestResizeCutsTheLogAgainAtTheNewWidth(t *testing.T) {
 
 	h.resize(100, 30)
 	h.waitForLog(greeting + " · ")
+}
+
+func TestDragOverTwoRowsCopiesTheirTextAndHighlightsExactlyThem(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.typing("account.create")
+	h.press("enter")
+	h.typing("alice")
+	h.press("enter")
+	h.waitForLog("  Started\n  Creating account\nCreated · ")
+	started, creating := h.logRow("  Started"), h.logRow("  Creating account")
+
+	h.mouse(tea.MouseClickMsg{X: 2, Y: started, Button: tea.MouseLeft})
+	h.mouse(tea.MouseMotionMsg{X: 5, Y: started, Button: tea.MouseLeft})
+	h.mouse(tea.MouseMotionMsg{X: 9, Y: creating, Button: tea.MouseLeft})
+	h.mouse(tea.MouseReleaseMsg{X: 9, Y: creating, Button: tea.MouseLeft})
+
+	h.waitForCopied("Started\n  Creating")
+	h.waitFor(" copied 18 characters")
+	want := map[[2]int]bool{}
+	for x := 2; x <= 8; x++ {
+		want[[2]int{x, started}] = true
+	}
+	for x := 0; x <= 9; x++ {
+		want[[2]int{x, creating}] = true
+	}
+	if got := h.reversed(); !reflect.DeepEqual(got, want) {
+		t.Errorf("the reversed cells are %v, want %v", got, want)
+	}
+
+	h.typing("x")
+	h.waitFor("> x")
+	if got := h.reversed(); len(got) != 0 {
+		t.Errorf("a key left the cells %v reversed, want none", got)
+	}
+	h.waitFor(" enter run")
+}
+
+func TestSelectionJoinsARowCutAtTheWidthWithoutALineBreak(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.resize(50, 30)
+	greeting := "Hello, " + strings.Repeat("a", 70) + "!"
+	h.typing("app.greet")
+	h.press("tab")
+	h.typing(strings.Repeat("a", 70))
+	h.press("enter", "enter")
+	h.waitForLog("Hello, " + strings.Repeat("a", 43) + "\n" + strings.Repeat("a", 27) + "! · ")
+	hello := h.logRow("Hello, ")
+
+	h.mouse(tea.MouseClickMsg{X: 0, Y: hello, Button: tea.MouseLeft})
+	h.mouse(tea.MouseMotionMsg{X: 27, Y: hello + 1, Button: tea.MouseLeft})
+	h.mouse(tea.MouseReleaseMsg{X: 27, Y: hello + 1, Button: tea.MouseLeft})
+
+	h.waitForCopied(greeting)
+}
+
+func TestDoubleClickCopiesTheWordAndAClickClearsTheSelection(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.typing("account.create")
+	h.press("enter")
+	h.typing("alice")
+	h.press("enter")
+	h.waitForLog("  Creating account\nCreated · ")
+	creating := h.logRow("  Creating account")
+
+	for range 2 {
+		h.mouse(tea.MouseClickMsg{X: 13, Y: creating, Button: tea.MouseLeft})
+		h.mouse(tea.MouseReleaseMsg{X: 13, Y: creating, Button: tea.MouseLeft})
+	}
+
+	h.waitForCopied("account")
+	h.wait(func() string { return strconv.Itoa(len(h.reversed())) }, func(n string) bool { return n == "7" }, "the word highlighted")
+	h.mouse(tea.MouseClickMsg{X: 3, Y: creating, Button: tea.MouseLeft})
+	h.mouse(tea.MouseReleaseMsg{X: 3, Y: creating, Button: tea.MouseLeft})
+	h.wait(func() string { return strconv.Itoa(len(h.reversed())) }, func(n string) bool { return n == "0" }, "no highlight after a click")
+	if got := h.clipboard(); len(got) != 1 {
+		t.Errorf("copied %q, want only the word", got)
+	}
 }
 
 func TestEmptyQueryListsEveryActionInTheAppsOrder(t *testing.T) {
@@ -699,6 +777,8 @@ type harness struct {
 	height int
 	// seen are the numbers of rows the panel took at the bottom of the views since the last resetHeights.
 	seen map[int]bool
+	// copied is what the TUI wrote to the system's clipboard.
+	copied []string
 }
 
 // settled is a message the probe closes instead of handing it to the model. The program handles messages in order, so
@@ -726,6 +806,12 @@ func startPicking(t *testing.T, source *fakeSource, want client.Target, mode cli
 	activity := newActivity(ctx)
 	h := &harness{t: t, exited: make(chan struct{}), height: 30, seen: map[int]bool{}}
 	m := newModel(source, activity, want, mode)
+	m.clipboard = func(text string) error {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.copied = append(h.copied, text)
+		return nil
+	}
 	for _, option := range options {
 		option(m)
 	}
@@ -782,6 +868,57 @@ func (p probe) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (p probe) View() tea.View { return p.model.View() }
+
+// mouse sends a mouse message, at a cell of the view.
+func (h *harness) mouse(msg tea.Msg) { h.program.Send(msg) }
+
+// logRow is the row of the view of the first row of the log that starts with text, or -1 without one.
+func (h *harness) logRow(text string) int {
+	lines, _ := h.split()
+	for y, line := range lines {
+		if strings.HasPrefix(line, text) {
+			return y
+		}
+	}
+	return -1
+}
+
+// reversed are the cells of the log, as x and y in the view, drawn in reverse video.
+func (h *harness) reversed() map[[2]int]bool {
+	h.mu.Lock()
+	raw, height := h.latestRaw, h.height
+	h.mu.Unlock()
+	screen := uv.NewScreenBuffer(200, height)
+	uv.NewStyledString(raw).Draw(screen, screen.Bounds())
+	cells := map[[2]int]bool{}
+	for y := range height - panelHeight(height) {
+		for x := range 200 {
+			if cell := screen.CellAt(x, y); cell != nil && cell.Style.Attrs&uv.AttrReverse != 0 {
+				cells[[2]int{x, y}] = true
+			}
+		}
+	}
+	return cells
+}
+
+func (h *harness) clipboard() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.copied)
+}
+
+// waitForCopied waits until the TUI wrote text to the system's clipboard last.
+func (h *harness) waitForCopied(text string) {
+	h.t.Helper()
+	last := func() string {
+		copied := h.clipboard()
+		if len(copied) == 0 {
+			return ""
+		}
+		return copied[len(copied)-1]
+	}
+	h.wait(last, func(got string) bool { return got == text }, "want copied "+strconv.Quote(text))
+}
 
 // resize gives the TUI a window of width and height.
 func (h *harness) resize(width, height int) {

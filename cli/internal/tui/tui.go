@@ -1,7 +1,9 @@
 // Package tui is quack's interactive mode. It takes the whole terminal, on the alternate screen, and leaves it as it was
 // on quit. A panel of constant height sits on the last rows: the title, an input over the list of the actions it
 // matches, or of the devices or apps to pick from, or else the box of one action's params, and a footer of key hints or
-// the run going on. The rows above it show the session's log, which quack draws and scrolls itself.
+// the run going on. The rows above it
+// show the session's log, which quack draws and scrolls itself, and where a drag of the mouse selects text and copies
+// it.
 package tui
 
 import (
@@ -14,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
 	"quack/internal/adb"
@@ -76,12 +79,16 @@ type model struct {
 	// box is the open param box, or nil while the picker shows. The picker keeps its text and selection under it.
 	box  *paramBox
 	runs runs
-	// quit asks for a second ctrl+c to quit, and refused why a command did nothing.
+	// quit asks for a second ctrl+c to quit, copied says what the mouse copied, and refused why a command did nothing.
 	quit    notice
+	copied  notice
 	refused notice
 	log     sessionLog
-	width   int
-	height  int
+	mouse   mouse
+	// clipboard writes text to the system's clipboard. Tests swap it to read what the model copies.
+	clipboard func(text string) error
+	width     int
+	height    int
 }
 
 // notice is a message in the footer for two seconds. shown counts the times it showed, so that the end of an earlier
@@ -156,14 +163,15 @@ type clientSource struct {
 
 func newModel(source Source, activity activity, want client.Target, mode client.StartMode) *model {
 	m := &model{
-		source:   source,
-		activity: activity,
-		pending:  map[adb.Device]int{},
-		mode:     mode,
-		picker:   newPicker(want, 0),
-		pollTime: pollTime,
-		prompt:   newPrompt(nil),
-		runs:     newRuns(),
+		source:    source,
+		activity:  activity,
+		pending:   map[adb.Device]int{},
+		mode:      mode,
+		picker:    newPicker(want, 0),
+		pollTime:  pollTime,
+		prompt:    newPrompt(nil),
+		runs:      newRuns(),
+		clipboard: clipboard.WriteAll,
 	}
 	m.picker.auto, m.picker.skipPackage = true, true
 	m.log.add(duckView())
@@ -178,8 +186,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, m.update(msg)
 }
 
-// View is the log over the panel, on the whole of the alternate screen. The mouse reports its wheel, so that the TUI
-// scrolls the log itself.
+// View is the log over the panel, on the whole of the alternate screen. The mouse reports its clicks, drags and wheel,
+// so that the TUI scrolls the log itself.
 func (m *model) View() tea.View {
 	view := tea.NewView(strings.Join(append(m.log.view(m.logHeight()), m.panel()), "\n"))
 	view.AltScreen = true
@@ -199,6 +207,7 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 			m.box.resize(m.width)
 		}
 		m.log.resize(m.width, m.logHeight())
+		m.mouse.dragging = false
 		return nil
 	case tea.MouseWheelMsg:
 		switch msg.Button {
@@ -208,7 +217,15 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 			m.log.scroll(-wheelRows, m.logHeight())
 		}
 		return nil
+	case tea.MouseClickMsg:
+		return m.click(msg)
+	case tea.MouseMotionMsg:
+		m.drag(msg)
+		return nil
+	case tea.MouseReleaseMsg:
+		return m.release()
 	case tea.KeyPressMsg:
+		m.log.marked = nil
 		return m.press(msg)
 	case runEvent:
 		m.log.add(m.runs.event(msg))
@@ -713,12 +730,14 @@ func (m *model) panel() string {
 	return strings.Join(fit(lines, m.width, height), "\n")
 }
 
-// footer is the quit prompt, or else why a command did nothing, or else the picker's keys, or else the run, or else
-// the keys that work now.
+// footer is the quit prompt, or else what the mouse copied, or else why a command did nothing, or else the picker's
+// keys, or else the run, or else the keys that work now.
 func (m *model) footer() string {
 	switch {
 	case m.quit.showing:
 		return m.quit.text
+	case m.copied.showing:
+		return m.copied.text
 	case m.refused.showing:
 		return m.refused.text
 	case m.picker != nil:
