@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
 plugins {
   alias(libs.plugins.android.library)
   alias(libs.plugins.kotlin.serialization)
+  alias(libs.plugins.sort.dependencies)
   alias(libs.plugins.spotless)
 }
 

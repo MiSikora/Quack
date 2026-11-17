@@ -4,6 +4,7 @@ import com.diffplug.spotless.LineEnding
 plugins {
   alias(libs.plugins.android.library) apply false
   alias(libs.plugins.kotlin.serialization) apply false
+  alias(libs.plugins.sort.dependencies)
   alias(libs.plugins.spotless)
 }
 
@@ -24,6 +25,12 @@ allprojects {
         endWithNewline()
         ktfmt(ktfmtVersion).googleStyle().configure { it.setMaxWidth(140) }
       }
+    }
+    pluginManager.withPlugin(rootProject.libs.plugins.sort.dependencies.get().pluginId) {
+      tasks.named("spotlessCheck") { dependsOn("checkSortDependencies") }
+      tasks.named("spotlessApply") { dependsOn("sortDependencies") }
+      // ktfmt formats the build scripts that sortDependencies rewrites.
+      tasks.named("spotlessKotlinGradle") { mustRunAfter("sortDependencies") }
     }
   }
 }
