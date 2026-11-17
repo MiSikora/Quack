@@ -1,0 +1,6 @@
+$ quack --json=maybe app.greet name=Bob
+--- exit 2
+--- stdout
+--- stderr
+quack: invalid argument "maybe" for "--json" flag: must be true or false. See quack --help.
+--- device

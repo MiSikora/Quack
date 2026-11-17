@@ -1,0 +1,9 @@
+$ quack app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: app speaks protocol 2, this quack speaks 1. Upgrade quack.
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample

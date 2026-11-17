@@ -1,0 +1,6 @@
+$ quack --list-devices app.greet
+--- exit 2
+--- stdout
+--- stderr
+quack: --list-devices takes no action, --list-actions or --interactive
+--- device

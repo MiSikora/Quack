@@ -1,0 +1,11 @@
+$ quack account.sync
+--- exit 0
+--- stdout
+Synced
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"account.sync"}
+shell emulator-5554: start-foreground-service io.mehow.quack.sample/io.mehow.quack.android.QuackService

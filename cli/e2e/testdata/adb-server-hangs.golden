@@ -1,0 +1,6 @@
+$ quack app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: the adb server did not answer within 10s. Run adb kill-server, and quack starts it again.
+--- device

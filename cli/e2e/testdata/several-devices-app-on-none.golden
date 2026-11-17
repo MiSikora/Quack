@@ -1,0 +1,8 @@
+$ quack --app io.mehow.nope app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: no device has io.mehow.nope
+--- device
+shell emulator-5554: query-receivers
+shell 3A251FDH2000XY: query-receivers

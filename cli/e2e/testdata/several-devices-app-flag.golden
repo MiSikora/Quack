@@ -1,0 +1,57 @@
+$ quack --app com.duckduckgo.mobile --list-actions
+--- exit 0
+--- stdout
+com.duckduckgo.mobile 1.0
+
+app.greet
+    Say hello.
+
+    name=<string>
+        Required. Who to greet.
+
+    times=<int>
+        Default: 1. How many times to say hello.
+
+app.params
+    Show the parsed value of each param type.
+
+    text=<string>
+    count=<int>
+    size=<long>
+    ratio=<double>
+    flag=<boolean>
+    theme=<light|dark>
+    tag=<string>...
+        Default: a, b. Labels to add, which this description explains at enough
+        length that help has to wrap it onto a second line.
+
+account.create
+    Create the account.
+
+    username=<string>
+        Required.
+
+account.delete
+    Delete the account.
+
+account.sync
+    Sync the account, which takes about 4 seconds.
+
+app.hangup
+    Close the connection without a reply.
+
+app.dropout
+    Close the connection after an event.
+
+app.garbled
+    Reply with a line that is not JSON.
+
+app.teapot
+    Fail with an error code the CLI does not know.
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell 3A251FDH2000XY: query-receivers
+shell 3A251FDH2000XY: get-current-user
+shell 3A251FDH2000XY: wake com.duckduckgo.mobile
+request: {"method":"describe"}

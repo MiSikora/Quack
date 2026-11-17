@@ -1,0 +1,5 @@
+$ quack --list-devices
+--- exit 0
+--- stdout
+--- stderr
+--- device

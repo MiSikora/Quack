@@ -1,0 +1,6 @@
+$ quack --nope app.greet
+--- exit 2
+--- stdout
+--- stderr
+quack: unknown flag: --nope. See quack --help.
+--- device

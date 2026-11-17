@@ -1,0 +1,10 @@
+$ quack nope
+--- exit 2
+--- stdout
+--- stderr
+quack: [unknown_action] no action 'nope'
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"nope"}

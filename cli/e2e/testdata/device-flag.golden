@@ -1,0 +1,9 @@
+$ quack --device 3A251FDH2000XY --app io.mehow.quack.sample app.greet name=Bob
+--- exit 0
+--- stdout
+Hello, Bob!
+--- stderr
+--- device
+shell 3A251FDH2000XY: get-current-user
+shell 3A251FDH2000XY: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.greet","args":{"name":"Bob"}}

@@ -1,0 +1,6 @@
+$ quack --json app.greet
+--- exit 3
+--- stdout
+{"code":"device","message":"no device is connected"}
+--- stderr
+--- device

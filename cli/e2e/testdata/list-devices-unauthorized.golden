@@ -1,0 +1,10 @@
+$ quack --list-devices
+--- exit 0
+--- stdout
+emulator-5554    Pixel 8   device
+  io.mehow.quack.sample
+3A251FDH2000XY             unauthorized
+--- stderr
+--- device
+shell emulator-5554: getprop ro.product.model
+shell emulator-5554: query-receivers

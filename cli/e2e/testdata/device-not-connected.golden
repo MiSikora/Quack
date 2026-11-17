@@ -1,0 +1,6 @@
+$ quack --device emulator-5599 app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: emulator-5599 is not connected
+--- device

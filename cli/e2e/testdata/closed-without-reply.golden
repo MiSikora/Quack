@@ -1,0 +1,10 @@
+$ quack app.hangup
+--- exit 1
+--- stdout
+--- stderr
+quack: the app closed the connection without a reply
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.hangup"}

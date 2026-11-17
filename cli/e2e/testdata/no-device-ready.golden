@@ -1,0 +1,6 @@
+$ quack app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: no device is ready: emulator-5554 is offline, 3A251FDH2000XY is unauthorized
+--- device

@@ -1,0 +1,6 @@
+$ quack --app nope app.greet
+--- exit 2
+--- stdout
+--- stderr
+quack: "nope" is not a package name
+--- device

@@ -1,0 +1,10 @@
+$ quack --list-devices --device 3A251FDH2000XY
+--- exit 0
+--- stdout
+3A251FDH2000XY   Pixel 7   device
+  io.mehow.quack.sample
+  com.duckduckgo.mobile
+--- stderr
+--- device
+shell 3A251FDH2000XY: getprop ro.product.model
+shell 3A251FDH2000XY: query-receivers

@@ -1,0 +1,8 @@
+$ quack app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: no quack-enabled app on any of the 2 devices
+--- device
+shell emulator-5554: query-receivers
+shell 3A251FDH2000XY: query-receivers

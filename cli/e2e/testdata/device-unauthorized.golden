@@ -1,0 +1,6 @@
+$ quack --device emulator-5554 app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: emulator-5554 does not trust this computer yet. Allow USB debugging on the device.
+--- device

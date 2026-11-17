@@ -1,0 +1,10 @@
+$ quack --json --list-actions account
+--- exit 0
+--- stdout
+[{"id":"account.create","description":"Create the account","params":[{"name":"username","type":"string","description":"","required":true}]},{"id":"account.delete","description":"Delete the account","params":[]},{"id":"account.sync","description":"Sync the account, which takes about 4 seconds","params":[]}]
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}

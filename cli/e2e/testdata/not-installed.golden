@@ -1,0 +1,8 @@
+$ quack --app io.mehow.nope app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: io.mehow.nope is not installed
+--- device
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.nope

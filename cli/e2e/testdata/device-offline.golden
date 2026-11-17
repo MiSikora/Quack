@@ -1,0 +1,6 @@
+$ quack --device emulator-5554 app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: emulator-5554 is offline. Wait for adb to see it again, or reconnect it.
+--- device

@@ -1,0 +1,9 @@
+$ quack --start-timeout 300ms app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: io.mehow.quack.sample did not answer within 300ms. Is it a quack-enabled app?
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample

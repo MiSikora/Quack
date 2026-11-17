@@ -1,0 +1,20 @@
+$ quack --list-actions account
+--- exit 0
+--- stdout
+account.create
+    Create the account.
+
+    username=<string>
+        Required.
+
+account.delete
+    Delete the account.
+
+account.sync
+    Sync the account, which takes about 4 seconds.
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}

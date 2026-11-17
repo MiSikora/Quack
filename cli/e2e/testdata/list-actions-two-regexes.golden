@@ -1,0 +1,6 @@
+$ quack --list-actions a b
+--- exit 2
+--- stdout
+--- stderr
+quack: --list-actions takes at most one regex
+--- device

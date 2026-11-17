@@ -1,0 +1,9 @@
+$ quack --open-app app.greet name=Bob
+--- exit 3
+--- stdout
+--- stderr
+quack: io.mehow.quack.sample has no launcher activity
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: open io.mehow.quack.sample

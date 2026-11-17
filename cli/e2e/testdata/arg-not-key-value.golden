@@ -1,0 +1,6 @@
+$ quack app.greet Bob
+--- exit 2
+--- stdout
+--- stderr
+quack: argument "Bob" is not key=value
+--- device

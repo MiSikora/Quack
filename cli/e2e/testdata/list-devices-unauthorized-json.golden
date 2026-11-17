@@ -1,0 +1,9 @@
+$ quack --list-devices --json
+--- exit 0
+--- stdout
+{"serial":"emulator-5554","model":"Pixel 8","state":"device","apps":[{"package":"io.mehow.quack.sample"}]}
+{"serial":"3A251FDH2000XY","model":"","state":"unauthorized","apps":[]}
+--- stderr
+--- device
+shell emulator-5554: getprop ro.product.model
+shell emulator-5554: query-receivers

@@ -1,0 +1,6 @@
+$ quack app.greet
+--- exit 3
+--- stdout
+--- stderr
+quack: no device is connected
+--- device
