@@ -1,0 +1,20 @@
+$ quack -h
+--- exit 0
+--- stdout
+usage: quack [options] <action> [key=value]...
+       quack [options] --list-actions [regex]
+       quack [options] --interactive
+       quack [options] --list-devices
+
+options:
+  -a, --app package              the app, by its package (default: the only quack-enabled app on the device)
+  -d, --device serial            the device, by its serial as adb devices lists it (default: $ANDROID_SERIAL)
+  -h, --help                     show this help
+  -i, --interactive              pick and run actions in a terminal UI
+  -j, --json                     print JSON lines: each event, then the outcome with its code
+  -l, --list-actions             list the app's actions, or only those whose id matches regex
+      --list-devices             list the devices and the quack-enabled apps on each
+      --open-app                 show the app's main screen first, instead of starting it in the background
+      --start-timeout duration   how long to wait for the app to answer (default 15s)
+--- stderr
+--- device

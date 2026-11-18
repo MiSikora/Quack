@@ -62,15 +62,15 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	fs := pflag.NewFlagSet("quack", pflag.ContinueOnError)
 	// Parse errors print once, through Run.
 	fs.SetOutput(io.Discard)
-	fs.StringVar(&opts.pkg, "app", "", "the app, by its `package` (default: the only quack-enabled app on the device)")
-	fs.StringVar(&opts.device, "device", "", "the device, by its `serial` as adb devices lists it (default: $ANDROID_SERIAL)")
-	boolFlag(fs, &opts.interactive, "interactive", "pick and run actions in a terminal UI")
-	boolFlag(fs, &opts.json, "json", "print JSON lines: each event, then the outcome with its code")
-	boolFlag(fs, &opts.listActions, "list-actions", "list the app's actions, or only those whose id matches regex")
-	boolFlag(fs, &opts.listDevices, "list-devices", "list the devices and the quack-enabled apps on each")
-	boolFlag(fs, &opts.openApp, "open-app", "show the app's main screen first, instead of starting it in the background")
+	fs.StringVarP(&opts.pkg, "app", "a", "", "the app, by its `package` (default: the only quack-enabled app on the device)")
+	fs.StringVarP(&opts.device, "device", "d", "", "the device, by its `serial` as adb devices lists it (default: $ANDROID_SERIAL)")
+	boolFlag(fs, &opts.interactive, "interactive", "i", "pick and run actions in a terminal UI")
+	boolFlag(fs, &opts.json, "json", "j", "print JSON lines: each event, then the outcome with its code")
+	boolFlag(fs, &opts.listActions, "list-actions", "l", "list the app's actions, or only those whose id matches regex")
+	boolFlag(fs, &opts.listDevices, "list-devices", "", "list the devices and the quack-enabled apps on each")
+	boolFlag(fs, &opts.openApp, "open-app", "", "show the app's main screen first, instead of starting it in the background")
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
-	boolFlag(fs, &opts.help, "help", "show this help")
+	boolFlag(fs, &opts.help, "help", "h", "show this help")
 	opts.usage = "usage: quack [options] <action> [key=value]...\n" +
 		"       quack [options] --list-actions [regex]\n" +
 		"       quack [options] --interactive\n" +
@@ -188,8 +188,8 @@ func run(opts options, terminal Terminal) error {
 
 // boolFlag declares an on/off flag that sets *p. pflag prints [=true|false] after every bool flag in help, and
 // nothing after a BoolFunc flag, which parses the same.
-func boolFlag(fs *pflag.FlagSet, p *bool, name, usage string) {
-	fs.BoolFunc(name, usage, func(value string) error {
+func boolFlag(fs *pflag.FlagSet, p *bool, name, shorthand, usage string) {
+	fs.BoolFuncP(name, shorthand, usage, func(value string) error {
 		on, err := strconv.ParseBool(value)
 		if err != nil {
 			return errors.New("must be true or false")

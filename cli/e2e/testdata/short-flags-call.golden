@@ -1,0 +1,9 @@
+$ quack -j -a io.mehow.quack.sample app.greet name=Bob
+--- exit 0
+--- stdout
+{"code":"ok","message":"Hello, Bob!"}
+--- stderr
+--- device
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.greet","args":{"name":"Bob"}}
