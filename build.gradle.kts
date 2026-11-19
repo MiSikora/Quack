@@ -6,6 +6,7 @@ plugins {
   alias(libs.plugins.kotlin.serialization) apply false
   alias(libs.plugins.sort.dependencies)
   alias(libs.plugins.spotless)
+  alias(libs.plugins.tapmoc) apply false
 }
 
 allprojects {

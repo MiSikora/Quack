@@ -5,6 +5,7 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.sort.dependencies)
   alias(libs.plugins.spotless)
+  alias(libs.plugins.tapmoc)
 }
 
 android {
@@ -22,6 +23,12 @@ android {
     it.systemProperty("quack.protocol", protocol.path)
     it.inputs.dir(protocol).withPropertyName("protocol").withPathSensitivity(PathSensitivity.RELATIVE)
   }
+}
+
+tapmoc {
+  java(11)
+  kotlin(libs.versions.kotlin.get())
+  checkDependencies()
 }
 
 kotlin {
