@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+  <!-- A newer release of a dependency is not a defect, and would fail the build as soon as one comes out. -->
+  <issue id="AndroidGradlePluginVersion" severity="informational" />
+  <issue id="GradleDependency" severity="informational" />
+  <issue id="NewerVersionAvailable" severity="informational" />
+</lint>

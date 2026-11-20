@@ -18,6 +18,11 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  lint {
+    warningsAsErrors = true
+    checkTestSources = false
+  }
+
   val protocol = rootProject.file("protocol")
   testOptions.unitTests.all {
     it.systemProperty("quack.protocol", protocol.path)
