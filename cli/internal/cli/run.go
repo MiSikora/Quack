@@ -60,6 +60,8 @@ type options struct {
 func parseOptions(argv []string, terminal Terminal) (options, error) {
 	var opts options
 	fs := pflag.NewFlagSet("quack", pflag.ContinueOnError)
+	// Help lists the flags as declared here: alphabetically, with help last.
+	fs.SortFlags = false
 	// Parse errors print once, through Run.
 	fs.SetOutput(io.Discard)
 	fs.StringVarP(&opts.pkg, "app", "a", "", "the app, by its `package` (default: the only quack-enabled app on the device)")
