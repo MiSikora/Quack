@@ -3,7 +3,7 @@ agp = "9.5.2"
 androidx-test-runner = "1.7.0"
 coroutines = "1.11.0"
 junit = "4.13.2"
-kotest = "6.2.6"
+kotest = "6.2.7"
 # The compiler for AGP's built-in Kotlin. The root build fails when the resolved compiler differs from it.
 kotlin = "2.2.10"
 ktfmt = "0.65"
