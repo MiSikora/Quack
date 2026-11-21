@@ -127,7 +127,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	if opts.device == "" {
 		opts.device = os.Getenv("ANDROID_SERIAL")
 	}
-	if opts.pkg != "" && !packagePattern.MatchString(opts.pkg) {
+	if opts.pkg != "" && !client.IsPackageName(opts.pkg) {
 		return opts, usageErrorf("%q is not a package name", opts.pkg)
 	}
 	rest := fs.Args()
@@ -329,6 +329,3 @@ var errorExits = map[wire.ErrorCode]int{
 
 // version is quack's version. Release builds set it with -ldflags "-X quack/internal/cli.version=<version>".
 var version = "dev"
-
-// packagePattern matches Android package names. Packages go into shell commands, so nothing else may pass.
-var packagePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)
