@@ -49,9 +49,10 @@ type options struct {
 	openApp      bool
 	startTimeout time.Duration
 	// help asks for usage, which holds quack's own help.
-	help   bool
-	usage  string
-	action string
+	help    bool
+	version bool
+	usage   string
+	action  string
 	// filter keeps the actions whose id it matches when listActions has a pattern, and is nil otherwise.
 	filter *regexp.Regexp
 	args   map[string]wire.RawArg
@@ -72,6 +73,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	boolFlag(fs, &opts.listDevices, "list-devices", "", "list the devices and the quack-enabled apps on each")
 	boolFlag(fs, &opts.openApp, "open-app", "", "show the app's main screen first, instead of starting it in the background")
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
+	boolFlag(fs, &opts.version, "version", "", "show quack's version")
 	boolFlag(fs, &opts.help, "help", "h", "show this help")
 	opts.usage = "usage: quack [options] <action> [key=value]...\n" +
 		"       quack [options] --list-actions [regex]\n" +
@@ -81,7 +83,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	if err := fs.Parse(argv); err != nil {
 		return opts, usageErrorf("%v. See quack --help.", err)
 	}
-	if opts.help {
+	if opts.help || opts.version {
 		return opts, nil
 	}
 	if opts.device == "" {
@@ -133,6 +135,10 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 func run(opts options, terminal Terminal) error {
 	if opts.help {
 		fmt.Fprint(terminal.Out, opts.usage)
+		return nil
+	}
+	if opts.version {
+		fmt.Fprintln(terminal.Out, "quack", version)
 		return nil
 	}
 	if opts.listDevices {
@@ -251,6 +257,9 @@ var errorExits = map[wire.ErrorCode]int{
 	wire.ErrorCodeRejected:      exitAction, // the action refused the request
 	wire.ErrorCodeFailed:        exitAction, // the action crashed
 }
+
+// version is quack's version. Release builds set it with -ldflags "-X quack/internal/cli.version=<version>".
+var version = "dev"
 
 // packagePattern matches Android package names. Packages go into shell commands, so nothing else may pass.
 var packagePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)

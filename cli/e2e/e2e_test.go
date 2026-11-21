@@ -51,6 +51,7 @@ var scenarios = []scenario{
 	{name: "unknown-flag", args: []string{"--nope", "app.greet"}},
 	{name: "short-flag", args: []string{"-d", "emulator-5554", "app.greet"}},
 	{name: "short-help", args: []string{"-h"}},
+	{name: "version", args: []string{"--version"}},
 	{name: "short-flags-call", args: []string{"-j", "-a", "io.mehow.quack.sample", "app.greet", "name=Bob"}},
 	{name: "short-flags-list-actions", args: []string{"-l", "account"}},
 	{name: "short-flags-interactive", args: []string{"-i"}},
