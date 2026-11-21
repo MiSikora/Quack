@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -128,6 +129,10 @@ func Find(device adb.Device, pkg string) (Target, error) {
 		return Target{}, &AppError{fmt.Sprintf("no quack-enabled app on any of the %d devices", len(devices))}
 	}
 }
+
+// IsPackageName says whether pkg is an Android package name. Packages go into shell commands, so nothing else may
+// pass.
+func IsPackageName(pkg string) bool { return packagePattern.MatchString(pkg) }
 
 // Packages lists the quack-enabled apps on device: those that receive wakeAction.
 func Packages(device adb.Device) ([]string, error) {
@@ -309,6 +314,8 @@ func ambiguity(targets []Target) string {
 	}
 	return fmt.Sprintf("several quack packages on %s, pick one:\n  %s", where, strings.Join(flags, "\n  "))
 }
+
+var packagePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)
 
 // wakeAction is the broadcast that starts a quack-enabled app. Its receiver also identifies those apps.
 const wakeAction = "io.mehow.quack.WAKE"
