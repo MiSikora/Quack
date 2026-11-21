@@ -15,6 +15,7 @@ options:
       --list-devices             list the devices and the quack-enabled apps on each
       --open-app                 show the app's main screen first, instead of starting it in the background
       --start-timeout duration   how long to wait for the app to answer (default 15s)
+      --version                  show quack's version
   -h, --help                     show this help
 --- stderr
 --- device

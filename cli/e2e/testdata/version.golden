@@ -1,0 +1,6 @@
+$ quack --version
+--- exit 0
+--- stdout
+quack dev
+--- stderr
+--- device
