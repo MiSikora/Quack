@@ -41,9 +41,9 @@ type (
 	canceled  struct{}
 )
 
-// runEvent is an event of a run, and runEnded its end. Only Update touches the run.
+// runNotification is a notification of a run, and runEnded its end. Only Update touches the run.
 type (
-	runEvent struct {
+	runNotification struct {
 		message string
 	}
 	runEnded struct {
@@ -68,8 +68,8 @@ func newRuns() runs {
 	return runs{spinner: spinner.New(spinner.WithSpinner(spinner.Dot)), now: time.Now}
 }
 
-// start runs action with args in a goroutine of its own, which sends its events and its end to activity. It returns
-// the run's first lines: a blank one, and the command that runs it outside the TUI.
+// start runs action with args in a goroutine of its own, which sends its notifications and its end to activity. It
+// returns the run's first lines: a blank one, and the command that runs it outside the TUI.
 func (r *runs) start(app App, activity activity, action wire.Action, args map[string]wire.RawArg) (string, tea.Cmd) {
 	ctx, cancel := context.WithCancel(activity.ctx)
 	started := &run{id: action.ID, command: commandLine(action, args), started: r.now(), cancel: cancel}
@@ -77,7 +77,7 @@ func (r *runs) start(app App, activity activity, action wire.Action, args map[st
 	call := wire.Call{Action: action.ID, Args: args}
 	work := func() tea.Msg {
 		defer cancel()
-		result, err := app.Call(ctx, call, func(message string) { activity.send(runEvent{message}) })
+		result, err := app.Call(ctx, call, func(message string) { activity.send(runNotification{message}) })
 		var end runEnd
 		switch {
 		case err == nil:
@@ -94,8 +94,8 @@ func (r *runs) start(app App, activity activity, action wire.Action, args map[st
 	return header, tea.Batch(work, r.spinner.Tick)
 }
 
-// event is the lines of an event.
-func (r *runs) event(e runEvent) string {
+// notification is the lines of a notification.
+func (r *runs) notification(e runNotification) string {
 	return prefixed("  ", "  ", e.message)
 }
 

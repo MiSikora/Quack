@@ -65,11 +65,11 @@ class DirectExecutionTest {
           Outcome.Ok("Hello ${args[name]} x${args[times]}")
         },
       )
-    val events = mutableListOf<String>()
+    val notifications = mutableListOf<String>()
 
-    val outcome = greeting.execute(greeting.args().with(name, "Bob"), Terminal { events += it })
+    val outcome = greeting.execute(greeting.args().with(name, "Bob"), Terminal { notifications += it })
 
     outcome shouldBe Outcome.Ok("Hello Bob x2")
-    events shouldContainExactly listOf("Greeting Bob")
+    notifications shouldContainExactly listOf("Greeting Bob")
   }
 }

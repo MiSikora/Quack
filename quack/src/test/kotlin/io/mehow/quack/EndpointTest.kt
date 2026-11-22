@@ -301,7 +301,7 @@ class EndpointTest {
   }
 
   @Test
-  fun `send events before the result`() = runTest {
+  fun `send notifications before the result`() = runTest {
     val action =
       FakeAction(
         execute = { _, terminal ->
@@ -311,11 +311,11 @@ class EndpointTest {
         },
       )
 
-    endpoint(action).call("test.action") shouldReply listOf(event("Started"), event("Working"), result("Done"))
+    endpoint(action).call("test.action") shouldReply listOf(notification("Started"), notification("Working"), result("Done"))
   }
 
   @Test
-  fun `stream events that an action sends from another dispatcher`() = runTest {
+  fun `stream notifications that an action sends from another dispatcher`() = runTest {
     val action =
       FakeAction(
         execute = { _, terminal ->
@@ -324,7 +324,7 @@ class EndpointTest {
         },
       )
 
-    endpoint(action).call("test.action") shouldReply listOf(event("Working"), result("Done"))
+    endpoint(action).call("test.action") shouldReply listOf(notification("Working"), result("Done"))
   }
 
   @Test
@@ -606,7 +606,7 @@ private infix fun List<String>.shouldReply(replies: List<String>) {
 
 private fun result(message: String) = reply("result") { put("message", message) }
 
-private fun event(message: String) = reply("event") { put("message", message) }
+private fun notification(message: String) = reply("notification") { put("message", message) }
 
 private fun badFrame(message: String) = errorReply("bad_frame", message)
 

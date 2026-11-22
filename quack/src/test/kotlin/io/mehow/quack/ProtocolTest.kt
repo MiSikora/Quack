@@ -21,8 +21,8 @@ class ProtocolTest {
   }
 
   @Test
-  fun `encode an event`() {
-    codec.encode(Frame.Event("Started")) shouldEqualJson golden("frames/event.json")
+  fun `encode a notification`() {
+    codec.encode(Frame.Notification("Started")) shouldEqualJson golden("frames/notification.json")
   }
 
   @Test

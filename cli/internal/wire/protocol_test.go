@@ -18,7 +18,7 @@ func TestDecodeGoldenFrames(t *testing.T) {
 	}{
 		{"hello.json", Hello{Protocol: 1, Package: "io.mehow.quack.sample", Version: "1.0"}},
 		{"hello-without-version.json", Hello{Protocol: 1, Package: "io.mehow.quack.sample"}},
-		{"event.json", Event{"Started"}},
+		{"notification.json", Notification{"Started"}},
 		{"message-result.json", MessageResult{Message: "Hello, Bob!"}},
 		{"message-result-with-data.json", MessageResult{
 			Message: "Signed in as alice",

@@ -77,9 +77,9 @@ func connect(device adb.Device, socketName string) (*connection, error) {
 	return &connection{conn, reader, hello}, nil
 }
 
-// exchange sends one encoded request, hands the message of each event of the reply to onEvent as it arrives, and
-// returns the last frame.
-func (c *connection) exchange(request []byte, onEvent EventFunc) (wire.Frame, error) {
+// exchange sends one encoded request, hands the message of each notification of the reply to notify as it arrives,
+// and returns the last frame.
+func (c *connection) exchange(request []byte, notify NotificationFunc) (wire.Frame, error) {
 	// Never half-close the connection: adb drops the app's reply when the host side shuts down writes.
 	if _, err := c.conn.Write(append(request, '\n')); err != nil {
 		return nil, &AppError{fmt.Sprintf("send: %v", err)}
@@ -89,8 +89,8 @@ func (c *connection) exchange(request []byte, onEvent EventFunc) (wire.Frame, er
 		line, err := c.reader.ReadBytes('\n')
 		if len(line) > 0 {
 			last = wire.DecodeFrame(bytes.TrimSuffix(line, []byte("\n")))
-			if event, ok := last.(wire.Event); ok {
-				onEvent(event.Message)
+			if notification, ok := last.(wire.Notification); ok {
+				notify(notification.Message)
 			}
 		}
 		if err != nil {

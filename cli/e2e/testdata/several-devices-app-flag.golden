@@ -41,7 +41,7 @@ app.hangup
     Close the connection without a reply.
 
 app.dropout
-    Close the connection after an event.
+    Close the connection after a notification.
 
 app.garbled
     Reply with a line that is not JSON.

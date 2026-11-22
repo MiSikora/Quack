@@ -10,8 +10,8 @@ import (
 // ProtocolVersion is the protocol this CLI speaks. It cannot talk to an app whose hello names another.
 const ProtocolVersion = 1
 
-// Frame is one line from the app. The app says Hello, then sends any number of Event, then one result or Error: a
-// MessageResult for a call, an ActionsResult for describe. Malformed stands for a line that is none of them.
+// Frame is one line from the app. The app says Hello, then sends any number of Notification, then one result or Error:
+// a MessageResult for a call, an ActionsResult for describe. Malformed stands for a line that is none of them.
 type Frame interface{ frame() }
 
 type Hello struct {
@@ -20,7 +20,7 @@ type Hello struct {
 	Version  string
 }
 
-type Event struct {
+type Notification struct {
 	Message string
 }
 
@@ -45,7 +45,7 @@ type Malformed struct {
 }
 
 func (Hello) frame()         {}
-func (Event) frame()         {}
+func (Notification) frame()  {}
 func (MessageResult) frame() {}
 func (ActionsResult) frame() {}
 func (Error) frame()         {}

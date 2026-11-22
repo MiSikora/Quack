@@ -22,7 +22,7 @@ internal class Endpoint(
 
   val hello = codec.encode(hello)
 
-  // channelFlow, not flow, so that actions can send events from any context. The rendezvous buffer
+  // channelFlow, not flow, so that actions can send notifications from any context. The rendezvous buffer
   // hands each line over before the action continues.
   fun serve(request: String): Flow<String> = channelFlow {
     val reply =
@@ -84,7 +84,7 @@ internal class Endpoint(
   }
 
   private suspend fun execute(action: QuackAction, args: QuackAction.Args, send: suspend (Frame) -> Unit): Frame =
-    when (val outcome = withContext(actionDispatcher) { action.execute(args) { message -> send(Frame.Event(message)) } }) {
+    when (val outcome = withContext(actionDispatcher) { action.execute(args) { message -> send(Frame.Notification(message)) } }) {
       is QuackAction.Outcome.Ok -> result(action, outcome)
       is QuackAction.Outcome.Error -> Frame.Error(ErrorCode.Rejected, outcome.message)
     }
