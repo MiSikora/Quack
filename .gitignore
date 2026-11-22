@@ -16,6 +16,8 @@ build/
 
 # Go CLI
 /cli/quack
+/cli/quack-mcp
 /cli/cmd/quack/quack
+/cli/cmd/quack-mcp/quack-mcp
 /cli/**/*.test
 /cli/**/*.out
