@@ -65,7 +65,26 @@ You can also run an action directly, which is handy in scripts:
 quack app.greet name=Duck
 ```
 
-Run `quack --help` to see everything else, such as recipes that run several steps in a row.
+Run `quack --help` to see everything else.
+
+## Save steps as recipes
+
+A recipe runs several steps in a row, so you can repeat a setup with one command. Recipes are kept on your computer, one file per app, in `~/.config/quack/recipes/<app package>.toml`:
+
+```toml
+[greet-and-go-back]
+description = "Open the app, say hello, then press back"
+steps = [
+  { open-app = true },
+  { wait = "1s" },
+  { action = "app.greet", args = { name = "Duck" } },
+  { shell = "input keyevent KEYCODE_BACK" },
+]
+```
+
+A step can run an action, open the app, wait, or run a command on the phone (`shell`) or on your computer (`run`). Quack stops at the first step that fails.
+
+Run it with `quack --recipe greet-and-go-back`, or type `$greet-and-go-back` in `quack`.
 
 ## Use it with AI agents
 
