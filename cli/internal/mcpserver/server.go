@@ -67,7 +67,8 @@ func New(source Source, version string) *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "run_action",
 		Description: "Run an action of a quack-enabled app and return its notifications, its message and its data. " +
-			"Get the action ids and their params from list_actions. " + targetHelp,
+			"Get the action ids and their params from list_actions. The args reach the app as given: ${NAME} stays as " +
+			"it is, since only the steps of a recipe take environment variables. " + targetHelp,
 		InputSchema:  runActionSchema,
 		OutputSchema: schemaFor[runActionOutput](),
 	}, s.runAction)
