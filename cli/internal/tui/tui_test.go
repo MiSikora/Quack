@@ -539,7 +539,7 @@ func TestDataOfARunPrintsIndentedUnderItsMessage(t *testing.T) {
 		"  }")
 }
 
-func TestEventsOfARunPrintUnderItsCommand(t *testing.T) {
+func TestNotificationsOfARunPrintUnderItsCommand(t *testing.T) {
 	h := start(t, newFakeApp())
 
 	h.typing("account.create")
@@ -1196,16 +1196,16 @@ func (a *fakeApp) Describe(context.Context) (wire.Hello, []wire.Action, error) {
 	return wire.Hello{Protocol: 1, Package: a.pkg, Version: "1.0"}, actions, nil
 }
 
-func (a *fakeApp) Call(ctx context.Context, call wire.Call, onEvent client.EventFunc) (wire.MessageResult, error) {
+func (a *fakeApp) Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
 	if call.Action == "account.show" {
 		return wire.MessageResult{Message: "Signed in as alice", Data: json.RawMessage(`{"username":"alice","tags":["a"]}`)}, nil
 	}
-	message, err := a.reply(ctx, call, onEvent)
+	message, err := a.reply(ctx, call, notify)
 	return wire.MessageResult{Message: message}, err
 }
 
 // reply runs call and returns its message.
-func (a *fakeApp) reply(ctx context.Context, call wire.Call, event client.EventFunc) (string, error) {
+func (a *fakeApp) reply(ctx context.Context, call wire.Call, notify client.NotificationFunc) (string, error) {
 	a.mu.Lock()
 	a.calls = append(a.calls, call)
 	a.mu.Unlock()
@@ -1215,8 +1215,8 @@ func (a *fakeApp) reply(ctx context.Context, call wire.Call, event client.EventF
 	case "app.params":
 		return strings.Join(call.Args["text"], ""), nil
 	case "account.create":
-		event("Started")
-		event("Creating account")
+		notify("Started")
+		notify("Creating account")
 		a.mu.Lock()
 		for _, watch := range a.watchers {
 			if watch == nil {
@@ -1228,7 +1228,7 @@ func (a *fakeApp) reply(ctx context.Context, call wire.Call, event client.EventF
 		return "Created", nil
 	case "app.count":
 		for i := 1; i <= 50; i++ {
-			event(strconv.Itoa(i))
+			notify(strconv.Itoa(i))
 		}
 		return "Counted", nil
 	case "account.delete":
@@ -1237,11 +1237,11 @@ func (a *fakeApp) reply(ctx context.Context, call wire.Call, event client.EventF
 		done := make(chan struct{})
 		a.mu.Lock()
 		watcher := len(a.watchers)
-		a.watchers = append(a.watchers, event)
+		a.watchers = append(a.watchers, notify)
 		a.watchCanceled = append(a.watchCanceled, done)
 		held := a.stopsHeld
 		a.mu.Unlock()
-		event("Signed out")
+		notify("Signed out")
 		<-ctx.Done()
 		a.mu.Lock()
 		a.watchers[watcher] = nil

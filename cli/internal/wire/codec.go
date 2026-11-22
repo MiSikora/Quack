@@ -27,8 +27,8 @@ func DecodeFrame(line []byte) Frame {
 	switch {
 	case body.Hello != nil:
 		return Hello{Protocol: body.Hello.Protocol, Package: body.Hello.App.Package, Version: body.Hello.App.Version}
-	case body.Event != nil:
-		return Event{body.Event.Message}
+	case body.Notification != nil:
+		return Notification{body.Notification.Message}
 	case body.Result != nil && body.Result.Actions != nil:
 		return actionsResult(*body.Result.Actions)
 	case body.Result != nil && body.Result.Message != nil:
@@ -38,7 +38,7 @@ func DecodeFrame(line []byte) Frame {
 	case body.Error != nil:
 		return Error{Code: ErrorCode(body.Error.Code), Message: body.Error.Message}
 	default:
-		return Malformed{"not a hello, event, result or error"}
+		return Malformed{"not a hello, notification, result or error"}
 	}
 }
 
@@ -93,10 +93,10 @@ type requestBody struct {
 }
 
 type frameBody struct {
-	Hello  *helloBody   `json:"hello"`
-	Event  *messageBody `json:"event"`
-	Result *resultBody  `json:"result"`
-	Error  *errorBody   `json:"error"`
+	Hello        *helloBody   `json:"hello"`
+	Notification *messageBody `json:"notification"`
+	Result       *resultBody  `json:"result"`
+	Error        *errorBody   `json:"error"`
 }
 
 type helloBody struct {

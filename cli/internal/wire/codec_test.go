@@ -17,9 +17,9 @@ func TestDecodeFrame(t *testing.T) {
 			want: Hello{Protocol: 1, Package: "io.mehow.quack.sample", Version: "1.0"},
 		},
 		{
-			name: "event",
-			line: `{"event":{"message":"Started"}}`,
-			want: Event{"Started"},
+			name: "notification",
+			line: `{"notification":{"message":"Started"}}`,
+			want: Notification{"Started"},
 		},
 		{
 			name: "call result",
@@ -63,7 +63,7 @@ func TestDecodeFrame(t *testing.T) {
 		{
 			name: "no known frame",
 			line: `{}`,
-			want: Malformed{"not a hello, event, result or error"},
+			want: Malformed{"not a hello, notification, result or error"},
 		},
 		{
 			name: "result without a body",

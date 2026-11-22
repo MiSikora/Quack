@@ -68,7 +68,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	fs.StringVarP(&opts.pkg, "app", "a", "", "the app, by its `package` (default: the only quack-enabled app on the device)")
 	fs.StringVarP(&opts.device, "device", "d", "", "the device, by its `serial` as adb devices lists it (default: $ANDROID_SERIAL)")
 	boolFlag(fs, &opts.interactive, "interactive", "i", "pick and run actions in a terminal UI")
-	boolFlag(fs, &opts.json, "json", "j", "print JSON lines: each event, then the outcome with its code")
+	boolFlag(fs, &opts.json, "json", "j", "print JSON lines: each notification, then the outcome with its code")
 	boolFlag(fs, &opts.listActions, "list-actions", "l", "list the app's actions, or only those whose id matches regex")
 	boolFlag(fs, &opts.listDevices, "list-devices", "", "list the devices and the quack-enabled apps on each")
 	boolFlag(fs, &opts.openApp, "open-app", "", "show the app's main screen first, instead of starting it in the background")
@@ -179,7 +179,8 @@ func run(opts options, terminal Terminal) error {
 		}
 		return nil
 	}
-	result, err := app.Call(context.Background(), wire.Call{Action: opts.action, Args: opts.args}, printEvents(terminal, opts.json))
+	call := wire.Call{Action: opts.action, Args: opts.args}
+	result, err := app.Call(context.Background(), call, printNotifications(terminal, opts.json))
 	if err != nil {
 		return err
 	}
@@ -220,8 +221,8 @@ func parseArgs(words []string) (map[string]wire.RawArg, error) {
 	return args, nil
 }
 
-// printEvents prints the message of each event, or with json each event as an eventJSON.
-func printEvents(terminal Terminal, json bool) client.EventFunc {
+// printNotifications prints the message of each notification, or with json each notification as an eventJSON.
+func printNotifications(terminal Terminal, json bool) client.NotificationFunc {
 	return func(message string) {
 		if json {
 			printJSON(terminal.Out, eventJSON{message})

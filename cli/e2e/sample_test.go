@@ -15,7 +15,7 @@ const sampleDescribe = `{"result":{"actions":[` +
 	`{"id":"account.delete","description":"Delete the account","params":[]},` +
 	`{"id":"account.sync","description":"Sync the account, which takes about 4 seconds","params":[]},` +
 	`{"id":"app.hangup","description":"Close the connection without a reply","params":[]},` +
-	`{"id":"app.dropout","description":"Close the connection after an event","params":[]},` +
+	`{"id":"app.dropout","description":"Close the connection after a notification","params":[]},` +
 	`{"id":"app.garbled","description":"Reply with a line that is not JSON","params":[]},` +
 	`{"id":"app.teapot","description":"Fail with an error code the CLI does not know","params":[]}` +
 	`]}}`
@@ -50,8 +50,8 @@ func sampleReply(request map[string]any, write func(string)) {
 	case "app.params":
 		write(fmt.Sprintf(`{"result":{"message":"tag=%v"}}`, args["tag"]))
 	case "account.create":
-		write(`{"event":{"message":"Started"}}`)
-		write(`{"event":{"message":"Creating account"}}`)
+		write(`{"notification":{"message":"Started"}}`)
+		write(`{"notification":{"message":"Creating account"}}`)
 		write(`{"result":{"message":"Created"}}`)
 	case "account.show":
 		write(`{"result":{"message":"Signed in as alice","data":{"username":"alice","tags":["a","b"]}}}`)
@@ -62,7 +62,7 @@ func sampleReply(request map[string]any, write func(string)) {
 		write(`{"result":{"message":"Synced"}}`)
 	case "app.hangup":
 	case "app.dropout":
-		write(`{"event":{"message":"Working"}}`)
+		write(`{"notification":{"message":"Working"}}`)
 	case "app.garbled":
 		write(`not json`)
 	case "app.teapot":

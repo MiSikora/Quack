@@ -66,7 +66,7 @@ var scenarios = []scenario{
 	// Calls.
 	{name: "call", args: []string{"app.greet", "name=Bob"}},
 	{name: "call-repeated-key", args: []string{"app.params", "tag=a", "tag=b c"}},
-	{name: "call-streams-events", args: []string{"account.create", "username=alice"}},
+	{name: "call-streams-notifications", args: []string{"account.create", "username=alice"}},
 	{name: "call-json", args: []string{"--json", "account.create", "username=alice"}},
 	{name: "call-data", args: []string{"account.show"}},
 	{name: "call-data-json", args: []string{"--json", "account.show"}},

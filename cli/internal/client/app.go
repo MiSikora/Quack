@@ -38,8 +38,8 @@ type CallError struct {
 
 func (e *CallError) Error() string { return e.Message }
 
-// EventFunc receives the message of each event of a call as it arrives.
-type EventFunc func(message string)
+// NotificationFunc receives the message of each notification of a call as it arrives.
+type NotificationFunc func(message string)
 
 // Target is a quack-enabled app on a device: the device and the app's package. The package goes into shell commands,
 // so it must be a valid package name.
@@ -178,8 +178,8 @@ func (a App) Describe(ctx context.Context) (wire.Hello, []wire.Action, error) {
 
 // Call runs an action and returns its message and data. Canceling ctx closes the connection, which cancels the action
 // in the app.
-func (a App) Call(ctx context.Context, call wire.Call, onEvent EventFunc) (wire.MessageResult, error) {
-	_, result, err := a.send(ctx, wire.EncodeCall(call), onEvent)
+func (a App) Call(ctx context.Context, call wire.Call, notify NotificationFunc) (wire.MessageResult, error) {
+	_, result, err := a.send(ctx, wire.EncodeCall(call), notify)
 	if err != nil {
 		return wire.MessageResult{}, err
 	}
@@ -218,7 +218,7 @@ func (a App) Start(mode StartMode) error {
 
 // send gets the app running, sends request on a new connection and returns the app's hello and the result frame,
 // a MessageResult or an ActionsResult. The keep alive watchdog starts once the request outlasts keepAliveAfter.
-func (a App) send(ctx context.Context, request []byte, onEvent EventFunc) (wire.Hello, wire.Frame, error) {
+func (a App) send(ctx context.Context, request []byte, notify NotificationFunc) (wire.Hello, wire.Frame, error) {
 	if err := a.Start(a.mode); err != nil {
 		return wire.Hello{}, nil, err
 	}
@@ -231,7 +231,7 @@ func (a App) send(ctx context.Context, request []byte, onEvent EventFunc) (wire.
 	defer stop()
 	watchdog := time.AfterFunc(keepAliveAfter, a.keepAlive)
 	defer watchdog.Stop()
-	last, err := c.exchange(request, onEvent)
+	last, err := c.exchange(request, notify)
 	if ctx.Err() != nil {
 		return wire.Hello{}, nil, &CallError{"canceled"}
 	}

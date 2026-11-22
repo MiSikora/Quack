@@ -27,7 +27,7 @@ import (
 // App is what the TUI needs from a quack app. client.App satisfies it.
 type App interface {
 	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
-	Call(ctx context.Context, call wire.Call, onEvent client.EventFunc) (wire.MessageResult, error)
+	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
 	Start(mode client.StartMode) error
 }
 
@@ -227,8 +227,8 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 	case tea.KeyPressMsg:
 		m.log.marked = nil
 		return m.press(msg)
-	case runEvent:
-		m.log.add(m.runs.event(msg))
+	case runNotification:
+		m.log.add(m.runs.notification(msg))
 		return m.activity.listen()
 	case runEnded:
 		m.log.add(m.runs.end(msg))

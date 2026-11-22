@@ -11,7 +11,7 @@ options:
   -a, --app package              the app, by its package (default: the only quack-enabled app on the device)
   -d, --device serial            the device, by its serial as adb devices lists it (default: $ANDROID_SERIAL)
   -i, --interactive              pick and run actions in a terminal UI
-  -j, --json                     print JSON lines: each event, then the outcome with its code
+  -j, --json                     print JSON lines: each notification, then the outcome with its code
   -l, --list-actions             list the app's actions, or only those whose id matches regex
       --list-devices             list the devices and the quack-enabled apps on each
       --open-app                 show the app's main screen first, instead of starting it in the background
