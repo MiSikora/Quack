@@ -9,15 +9,15 @@ import (
 )
 
 // The files in the repository's protocol directory are the protocol both the CLI and the Kotlin library speak. The
-// library's ProtocolTest reads the same files.
+// library's ProtocolTest reads the same files, so the hello frames also hold the two sides to one ProtocolVersion.
 
 func TestDecodeGoldenFrames(t *testing.T) {
 	cases := []struct {
 		file string
 		want Frame
 	}{
-		{"hello.json", Hello{Protocol: 1, Package: "io.mehow.quack.sample", Version: "1.0"}},
-		{"hello-without-version.json", Hello{Protocol: 1, Package: "io.mehow.quack.sample"}},
+		{"hello.json", Hello{Protocol: ProtocolVersion, Package: "io.mehow.quack.sample", Version: "1.0"}},
+		{"hello-without-version.json", Hello{Protocol: ProtocolVersion, Package: "io.mehow.quack.sample"}},
 		{"notification.json", Notification{"Started"}},
 		{"message-result.json", MessageResult{Message: "Hello, Bob!"}},
 		{"message-result-with-data.json", MessageResult{
