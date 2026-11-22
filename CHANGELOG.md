@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-22
+
 ### Added
 - CLI: use environment variables as `${NAME}` in recipes, in action args and in the terminal UI.
 - CLI: write `$${NAME}` to pass `${NAME}` unchanged, for example to a shell command that should expand it on the device.
@@ -24,5 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release.
 
-[Unreleased]: https://github.com/MiSikora/Quack/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/MiSikora/Quack/compare/0.1.1...HEAD
+[0.1.1]: https://github.com/MiSikora/Quack/releases/tag/0.1.1
 [0.1.0]: https://github.com/MiSikora/Quack/releases/tag/0.1.0
