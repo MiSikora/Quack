@@ -74,11 +74,10 @@ type model struct {
 	asked   int
 	pending map[adb.Device]int
 	// picker is the open device or app picker, or nil while the actions show. polling is whether a poll is due.
-	picker   *picker
-	polling  bool
-	pollTime time.Duration
-	hello    wire.Hello
-	prompt   prompt
+	picker  *picker
+	polling bool
+	hello   wire.Hello
+	prompt  prompt
 	// box is the open param box, or nil while the picker shows. The picker keeps its text and selection under it.
 	box  *paramBox
 	runs runs
@@ -94,8 +93,10 @@ type model struct {
 	mouse  mouse
 	// clipboard writes text to the system's clipboard. Tests swap it to read what the model copies.
 	clipboard func(text string) error
-	width     int
-	height    int
+	// clock times the notices, the polls and double clicks. Tests swap it to move time by hand.
+	clock  clock
+	width  int
+	height int
 }
 
 // notice is a message in the footer for two seconds. shown counts the times it showed, so that the end of an earlier
@@ -183,7 +184,7 @@ func newModel(source Source, activity activity, want client.Target, mode client.
 		pending:   map[adb.Device]int{},
 		mode:      mode,
 		picker:    newPicker(want, 0),
-		pollTime:  pollTime,
+		clock:     wallClock{},
 		prompt:    newPrompt(nil),
 		runs:      newRuns(),
 		clipboard: clipboard.WriteAll,
@@ -400,7 +401,7 @@ func (m *model) pressBox(msg tea.KeyPressMsg) tea.Cmd {
 	case !run:
 		return cmd
 	case m.runs.active != nil:
-		return tea.Batch(cmd, m.refused.show(refusedDuringRun))
+		return tea.Batch(cmd, m.refused.show(m.clock, refusedDuringRun))
 	}
 	action, args := m.box.action, m.box.args()
 	m.box = nil
@@ -420,7 +421,7 @@ func (m *model) interrupt() tea.Cmd {
 	case m.runs.active == nil && m.clearInput():
 		return nil
 	}
-	return m.quit.show("press ctrl+c again to quit")
+	return m.quit.show(m.clock, "press ctrl+c again to quit")
 }
 
 // clearInput empties the text of the open picker, and says whether there was text.
@@ -444,7 +445,7 @@ func (m *model) choose() tea.Cmd {
 	case hasRequired(c.action):
 		return m.openBox(c.action)
 	case m.runs.active != nil:
-		return m.refused.show(refusedDuringRun)
+		return m.refused.show(m.clock, refusedDuringRun)
 	default:
 		m.prompt.clear()
 		return m.start(c.action, nil)
@@ -578,7 +579,7 @@ func (m *model) exit() tea.Cmd {
 // while a run is active.
 func (m *model) pickDevice() tea.Cmd {
 	if m.runs.active != nil {
-		return m.refused.show(refusedDuringRun)
+		return m.refused.show(m.clock, refusedDuringRun)
 	}
 	return m.openPicker(func(p *picker) { p.skipPackage = true })
 }
@@ -586,7 +587,7 @@ func (m *model) pickDevice() tea.Cmd {
 // pickApp opens the app picker for the device of the app. It does nothing while a run is active.
 func (m *model) pickApp() tea.Cmd {
 	if m.runs.active != nil {
-		return m.refused.show(refusedDuringRun)
+		return m.refused.show(m.clock, refusedDuringRun)
 	}
 	return m.openPicker(func(p *picker) {
 		p.device = m.target.Device
@@ -680,7 +681,7 @@ func (m *model) connected(msg connected) tea.Cmd {
 // track follows the devices adb knows for the whole session, and follows them again after pollTime when adb fails. It
 // says only the first failure of a run of them.
 func (m *model) track() tea.Cmd {
-	source, activity, wait := m.source, m.activity, m.pollTime
+	source, activity, clock := m.source, m.activity, m.clock
 	return func() tea.Msg {
 		failing := false
 		for activity.ctx.Err() == nil {
@@ -694,7 +695,7 @@ func (m *model) track() tea.Cmd {
 			}
 			select {
 			case <-activity.ctx.Done():
-			case <-time.After(wait):
+			case <-clock.After(pollTime):
 			}
 		}
 		return nil
@@ -782,7 +783,7 @@ func (m *model) poll() tea.Cmd {
 		return nil
 	}
 	m.polling = true
-	return tea.Tick(m.pollTime, func(time.Time) tea.Msg { return polled{} })
+	return after(m.clock, pollTime, polled{})
 }
 
 func (m *model) deviceIndex(device adb.Device) int {
@@ -890,12 +891,32 @@ func fit(lines []string, width, height int) []string {
 	return lines
 }
 
-// show shows text for two seconds.
-func (n *notice) show(text string) tea.Cmd {
+// show shows text for two seconds of c.
+func (n *notice) show(c clock, text string) tea.Cmd {
 	n.text, n.showing = text, true
 	n.shown++
-	shown := n.shown
-	return tea.Tick(noticeTime, func(time.Time) tea.Msg { return noticeEnded{n, shown} })
+	return after(c, noticeTime, noticeEnded{n, n.shown})
+}
+
+// clock is the time the TUI reads and waits on, so that tests can move it by hand.
+type clock interface {
+	Now() time.Time
+	After(d time.Duration) <-chan time.Time
+}
+
+// wallClock is the system's time.
+type wallClock struct{}
+
+func (wallClock) Now() time.Time                         { return time.Now() }
+func (wallClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+
+// after is msg once d of c has gone by, counted from now rather than from when the command runs.
+func after(c clock, d time.Duration, msg tea.Msg) tea.Cmd {
+	ends := c.After(d)
+	return func() tea.Msg {
+		<-ends
+		return msg
+	}
 }
 
 // commands are the TUI's own commands, sorted by name. ctrl+c and ctrl+d do more than their command, so the picker handles them itself.

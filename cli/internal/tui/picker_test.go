@@ -162,10 +162,11 @@ func TestWaitingPickerFillsInWhenADeviceConnects(t *testing.T) {
 
 func TestWaitingPickerFillsInWhenAnAppInstalls(t *testing.T) {
 	source := newFakeSource(newFakeApp(), device("emulator-5554", "Pixel 8", "device"))
-	h := startPicking(t, source, client.Target{}, client.Wake, withPollTime(20*time.Millisecond))
+	h := startPicking(t, source, client.Target{}, client.Wake)
 	h.waitFor("Pixel 8 · emulator-5554   no quack-enabled app", "> pick a device")
+	h.keepPolling()
 	// Several polls go by first, so that the picker keeps polling rather than polling once.
-	time.Sleep(150 * time.Millisecond)
+	h.waitForInspects(source, source.inspects()+3)
 
 	source.install("emulator-5554", "io.mehow.quack.sample")
 
@@ -189,11 +190,12 @@ func TestFailedDescribeStaysOnThePackageStepWithTheErrorInTheLog(t *testing.T) {
 func TestFailedStartOfTheOnlyAppIsNotRetriedByItself(t *testing.T) {
 	source := newFakeSource(newFakeApp())
 	source.app.setActions(nil)
-	h := startPicking(t, source, client.Target{}, client.Wake, withPollTime(20*time.Millisecond))
+	h := startPicking(t, source, client.Target{}, client.Wake)
 
 	h.waitForLog("io.mehow.quack.sample: the app is gone")
 	h.waitFor("▸ io.mehow.quack.sample", "> pick an app", "enter pick")
-	time.Sleep(100 * time.Millisecond)
+	h.keepPolling()
+	h.waitForInspects(source, source.inspects()+3)
 	if got := source.starts(); len(got) != 1 {
 		t.Errorf("started %q, want one start", got)
 	}
@@ -382,6 +384,7 @@ func TestPanelKeepsItsHeightInEveryPickerState(t *testing.T) {
 	h.press("ctrl+c")
 	h.waitFor("press ctrl+c again to quit")
 	check("quit prompt")
+	h.advance(noticeTime)
 	h.press("down", "enter")
 	h.waitFor("type or ↑ to find an action")
 	check("actions")
@@ -405,10 +408,11 @@ func TestPackageFlagHidesTheDevicesWithoutIt(t *testing.T) {
 
 func TestPackageStepSaysWhenTheDeviceHasNoAppLeft(t *testing.T) {
 	source := newFakeSource(newFakeApp(), device("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
-	h := startPicking(t, source, client.Target{}, client.Wake, withPollTime(20*time.Millisecond))
+	h := startPicking(t, source, client.Target{}, client.Wake)
 	h.waitFor("> pick an app", "2/2")
 
 	source.install("emulator-5554")
+	h.keepPolling()
 
 	h.waitFor("  no quack-enabled app on emulator-5554 · waiting for one", "> pick an app", "0/0")
 }
@@ -450,7 +454,8 @@ func TestLostTrackOfTheDevicesSaysSoOnceAndTracksAgain(t *testing.T) {
 	source := newFakeSource(newFakeApp())
 	source.failTracks = 3
 
-	h := startPicking(t, source, client.Target{}, client.Wake, withPollTime(20*time.Millisecond))
+	h := startPicking(t, source, client.Target{}, client.Wake)
+	h.keepPolling()
 
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")
 	if log := h.logText(); strings.Count(log, "lost track of the devices: EOF") != 1 {

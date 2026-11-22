@@ -376,6 +376,7 @@ func TestDragOverTwoRowsCopiesTheirTextAndHighlightsExactlyThem(t *testing.T) {
 	if got := h.reversed(); len(got) != 0 {
 		t.Errorf("a key left the cells %v reversed, want none", got)
 	}
+	h.advance(noticeTime)
 	h.waitFor(" enter run")
 }
 
@@ -815,6 +816,7 @@ func TestActionsDoNotRunWhileARunRunsButTheBoxOpens(t *testing.T) {
 	// ctrl+c stops the watch and keeps the box, and then the same Enter runs the action.
 	h.press("ctrl+c")
 	h.waitForLog("\ncanceled · ")
+	h.advance(noticeTime)
 	h.waitFor("▸ username", "› account.create username=alic", "enter next")
 	h.press("enter")
 	h.waitForLog("\n› account.create username=alic\n  Started\n  Creating account\nCreated · ")
@@ -890,12 +892,11 @@ func TestQuitPromptEndsAfterTwoSeconds(t *testing.T) {
 
 	h.press("ctrl+c")
 	h.waitFor("press ctrl+c again to quit")
-	shown := time.Now()
 
+	h.advance(noticeTime - time.Millisecond)
+	h.waitFor("press ctrl+c again to quit")
+	h.advance(time.Millisecond)
 	h.waitFor("type or ↑ to find an action")
-	if waited := time.Since(shown); waited < noticeTime-200*time.Millisecond {
-		t.Errorf("the prompt went after %v, want %v", waited, noticeTime)
-	}
 	h.press("ctrl+c")
 	h.waitFor("press ctrl+c again to quit")
 	h.waitForRunning()
@@ -1295,6 +1296,10 @@ type harness struct {
 	seen map[int]bool
 	// copied is what the TUI wrote to the system's clipboard.
 	copied []string
+	// clock is the TUI's, which moves only when advance moves it. Each wait moves it on by step as it looks, while step
+	// is not 0.
+	clock *fakeClock
+	step  time.Duration
 }
 
 // settled is a message the probe closes instead of handing it to the model. The program handles messages in order, so
@@ -1322,8 +1327,9 @@ func startPicking(t *testing.T, source *fakeSource, want client.Target, mode cli
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	activity := newActivity(ctx)
-	h := &harness{t: t, exited: make(chan struct{}), height: 30, seen: map[int]bool{}}
+	h := &harness{t: t, exited: make(chan struct{}), height: 30, seen: map[int]bool{}, clock: &fakeClock{now: time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)}}
 	m := newModel(source, activity, want, mode, "dev")
+	m.clock = h.clock
 	m.clipboard = func(text string) error {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -1367,11 +1373,6 @@ func writeRecipes(t *testing.T, file string) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-// withPollTime has an open picker ask the devices for their apps every d.
-func withPollTime(d time.Duration) func(*model) {
-	return func(m *model) { m.pollTime = d }
 }
 
 // withClock has the runs tell the time from a clock that moves on by the next of steps each time it is read.
@@ -1629,6 +1630,21 @@ func (h *harness) press(keys ...string) {
 	h.settle()
 }
 
+// advance moves the TUI's clock on by d, which ends the waits that d finishes.
+func (h *harness) advance(d time.Duration) { h.clock.advance(d) }
+
+// keepPolling has the waits that follow move the clock on by pollTime each time they look, so that polls and the
+// tracker's retries go on until what the test waits for shows. A poll skips a device whose last answer the TUI has
+// not had yet, so a single poll does not always ask it.
+func (h *harness) keepPolling() { h.step = pollTime }
+
+// waitForInspects waits until the source has inspected devices count times.
+func (h *harness) waitForInspects(source *fakeSource, count int) {
+	h.t.Helper()
+	inspects := func() string { return strconv.Itoa(source.inspects()) }
+	h.wait(inspects, func(n string) bool { got, _ := strconv.Atoi(n); return got >= count }, strconv.Itoa(count)+" inspects")
+}
+
 // startWatch runs account.watch and waits for what it says first. It says nothing more until an account signs in, so
 // that what the test does next has the log to itself.
 func (h *harness) startWatch() {
@@ -1721,6 +1737,7 @@ func (h *harness) wait(read func() string, done func(string) bool, want string) 
 		if time.Now().After(deadline) {
 			h.t.Fatalf("%s in:\n%s", want, read())
 		}
+		h.advance(h.step)
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -1745,6 +1762,47 @@ func holds(s string, texts []string) bool {
 		s = s[i+len(text):]
 	}
 	return true
+}
+
+// fakeClock is a clock that stands still until advance moves it.
+type fakeClock struct {
+	mu     sync.Mutex
+	now    time.Time
+	timers []fakeTimer
+}
+
+// fakeTimer is a wait of After, which ends at at.
+type fakeTimer struct {
+	at   time.Time
+	ends chan time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ends := make(chan time.Time, 1)
+	c.timers = append(c.timers, fakeTimer{c.now.Add(d), ends})
+	return ends
+}
+
+// advance moves the clock on by d and ends the waits that are due by then.
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+	c.timers = slices.DeleteFunc(c.timers, func(timer fakeTimer) bool {
+		if timer.at.After(c.now) {
+			return false
+		}
+		timer.ends <- c.now
+		return true
+	})
 }
 
 // fakeApp answers like the sample app. account.watch prints the account each time account.create signs in, until
@@ -1942,6 +2000,8 @@ type fakeSource struct {
 	failTracks int
 	// held keeps Connect of a target from returning until its channel closes.
 	held map[client.Target]chan struct{}
+	// inspected counts the calls of Inspect.
+	inspected int
 }
 
 // newFakeSource is a Pixel 8, emulator-5554, on which app is the only quack-enabled app.
@@ -1975,6 +2035,7 @@ func (s *fakeSource) Track(ctx context.Context, send func([]adb.Listing)) error 
 func (s *fakeSource) Inspect(listing adb.Listing) (client.Device, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.inspected++
 	for _, d := range s.devices {
 		if d.Device == listing.Device {
 			d.Listing = listing
@@ -2009,6 +2070,12 @@ func (s *fakeSource) hold(serial, pkg string) (release func()) {
 	held := make(chan struct{})
 	s.held[client.Target{Device: adb.Device(serial), Package: pkg}] = held
 	return sync.OnceFunc(func() { close(held) })
+}
+
+func (s *fakeSource) inspects() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inspected
 }
 
 func (s *fakeSource) starts() []string {

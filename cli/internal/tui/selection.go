@@ -41,8 +41,9 @@ func (m *model) click(msg tea.MouseClickMsg) tea.Cmd {
 		return nil
 	}
 	at := m.log.at(msg.X, msg.Y, m.logHeight())
-	double := at == m.mouse.pressed && time.Since(m.mouse.pressedAt) < doubleClickTime
-	m.mouse.pressed, m.mouse.pressedAt = at, time.Now()
+	now := m.clock.Now()
+	double := at == m.mouse.pressed && now.Sub(m.mouse.pressedAt) < doubleClickTime
+	m.mouse.pressed, m.mouse.pressedAt = at, now
 	if double {
 		// A third click starts over rather than counting as another double click.
 		m.mouse.pressedAt = time.Time{}
@@ -102,7 +103,7 @@ func (m *model) copy(text string) tea.Cmd {
 			_ = write(text)
 			return nil
 		},
-		m.copied.show(fmt.Sprintf("copied %d characters", utf8.RuneCountInString(text))),
+		m.copied.show(m.clock, fmt.Sprintf("copied %d characters", utf8.RuneCountInString(text))),
 	)
 }
 
