@@ -52,8 +52,9 @@ func New(source Source, version string) *mcp.Server {
 		Description: "List the devices adb knows, each with its state and the quack-enabled apps on it.",
 	}, s.listDevices)
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_actions",
-		Description: "List the actions of a quack-enabled app with their params. " + targetHelp,
+		Name: "list_actions",
+		Description: "List the actions of a quack-enabled app with their params. A string param may give hints: values " +
+			"the app suggests, such as known names, though others work too. " + targetHelp,
 	}, s.listActions)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "run_action",
@@ -107,7 +108,9 @@ type paramOutput struct {
 	Type        string   `json:"type"`
 	Description string   `json:"description"`
 	Choices     []string `json:"choices,omitempty"`
-	Required    bool     `json:"required"`
+	// Hints are values the app offers for a string param, in its order. Other values work too.
+	Hints    []string `json:"hints,omitempty"`
+	Required bool     `json:"required"`
 	// Default is a string, or an array of strings for a list param, or absent without a default.
 	Default any `json:"default,omitempty"`
 }
@@ -214,7 +217,7 @@ func (s tools) connect(device, pkg string) (client.Target, App, error) {
 func action(a wire.Action) actionOutput {
 	params := []paramOutput{}
 	for _, p := range a.Params {
-		param := paramOutput{Name: p.Name, Type: string(p.Type), Description: p.Description, Choices: p.Choices}
+		param := paramOutput{Name: p.Name, Type: string(p.Type), Description: p.Description, Choices: p.Choices, Hints: p.Hints}
 		switch presence := p.Presence.(type) {
 		case wire.Required:
 			param.Required = true
