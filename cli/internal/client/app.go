@@ -3,11 +3,13 @@ package client
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -168,7 +170,8 @@ func Inspect(listing adb.Listing) (Device, error) {
 	return device, nil
 }
 
-// Describe lists the app's actions.
+// Describe lists the app's actions, sorted by id, so that every list of them reads the same whatever order the app
+// declares them in.
 func (a App) Describe(ctx context.Context) (wire.Hello, []wire.Action, error) {
 	hello, result, err := a.send(ctx, wire.EncodeDescribe(), func(string) {})
 	if err != nil {
@@ -178,6 +181,7 @@ func (a App) Describe(ctx context.Context) (wire.Hello, []wire.Action, error) {
 	if !ok {
 		return wire.Hello{}, nil, &CallError{"malformed reply: describe answered without actions"}
 	}
+	slices.SortFunc(actions.Actions, func(a, b wire.Action) int { return cmp.Compare(a.ID, b.ID) })
 	return hello, actions.Actions, nil
 }
 

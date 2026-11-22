@@ -3,6 +3,24 @@ $ quack --list-actions
 --- stdout
 io.mehow.quack.sample 1.0
 
+account.create
+    Create the account.
+
+    username=<string>
+        Required.
+
+account.delete
+    Delete the account.
+
+account.sync
+    Sync the account, which takes about 4 seconds.
+
+app.dropout
+    Close the connection after a notification.
+
+app.garbled
+    Reply with a line that is not JSON.
+
 app.greet
     Say hello.
 
@@ -11,6 +29,9 @@ app.greet
 
     times=<int>
         Default: 1. How many times to say hello.
+
+app.hangup
+    Close the connection without a reply.
 
 app.params
     Show the parsed value of each param type.
@@ -24,27 +45,6 @@ app.params
     tag=<string>...
         Default: a, b. Labels to add, which this description explains at enough
         length that help has to wrap it onto a second line.
-
-account.create
-    Create the account.
-
-    username=<string>
-        Required.
-
-account.delete
-    Delete the account.
-
-account.sync
-    Sync the account, which takes about 4 seconds.
-
-app.hangup
-    Close the connection without a reply.
-
-app.dropout
-    Close the connection after a notification.
-
-app.garbled
-    Reply with a line that is not JSON.
 
 app.teapot
     Fail with an error code the CLI does not know.

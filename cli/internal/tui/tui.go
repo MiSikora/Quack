@@ -865,16 +865,16 @@ func (n *notice) show(text string) tea.Cmd {
 	return tea.Tick(noticeTime, func(time.Time) tea.Msg { return noticeEnded{n, shown} })
 }
 
-// commands are the TUI's own commands. ctrl+c and ctrl+d do more than their command, so the picker handles them itself.
+// commands are the TUI's own commands, sorted by name. ctrl+c and ctrl+d do more than their command, so the picker handles them itself.
 func commands() []command {
 	return []command{
-		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", (*model).reload},
 		{"/cancel", "ctrl+c", "Cancel the running action", (*model).cancel},
 		{"/clear", "ctrl+l", "Clear the log", (*model).clear},
 		{"/exit", "ctrl+d", "Cancel the run and exit", (*model).exit},
 		{"/open-app", "ctrl+o", "Show the app's main screen", (*model).openApp},
 		{"/pick-app", "", "Pick another app on this device", (*model).pickApp},
 		{"/pick-device", "", "Pick another device", (*model).pickDevice},
+		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", (*model).reload},
 	}
 }
 

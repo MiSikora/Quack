@@ -54,8 +54,7 @@ func newPrompt(actions []wire.Action) prompt {
 }
 
 // choices are what the words of the text match, fuzzily and ignoring case, best first, and how many there are to
-// match. Blank text matches every action in the app's order, a lone '$' every recipe by name, and a lone '/' every
-// command in the table's order.
+// match. Blank text matches every action, a lone '$' every recipe, and a lone '/' every command, each sorted by name.
 func (p *prompt) choices() ([]choice, int) {
 	text := strings.TrimSpace(p.input.Value())
 	var all []choice

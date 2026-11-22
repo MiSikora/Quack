@@ -218,7 +218,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	check("no match")
 	h.press("esc")
 	h.typing("/")
-	h.waitFor("▸ /reload")
+	h.waitFor("▸ /cancel")
 	check("commands")
 	h.press("esc")
 	h.typing("account.create")
@@ -459,7 +459,7 @@ func TestSlashListsTheCommands(t *testing.T) {
 
 	h.typing("/")
 
-	h.waitFor("/pick-device", "/pick-app", "/open-app", "/exit", "/clear", "/cancel", "▸ /reload", "7/7")
+	h.waitFor("/reload", "/pick-device", "/pick-app", "/open-app", "/exit", "/clear", "▸ /cancel", "7/7")
 	h.waitForNo("app.greet")
 	h.typing("x")
 	h.waitFor("▸ /exit")
