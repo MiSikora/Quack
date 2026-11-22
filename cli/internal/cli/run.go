@@ -117,9 +117,9 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		"      { shell = \"pm grant ${QUACK_PACKAGE} android.permission.POST_NOTIFICATIONS\" },\n" +
 		"      { run = \"./seed-backend.sh ${QUACK_USER}\" },\n" +
 		"    ]\n\n" +
-		"  An arg or a command takes the environment variable NAME as ${NAME}, and $$ writes a $. QUACK_PACKAGE and\n" +
-		"  ANDROID_SERIAL are the app and the device the recipe runs against, and run commands get them in their\n" +
-		"  environment too.\n\n" +
+		"  An arg or a command takes the environment variable NAME as ${NAME}, and $${NAME} writes ${NAME}.\n" +
+		"  QUACK_PACKAGE and ANDROID_SERIAL are the app and the device the recipe runs against, and run commands get\n" +
+		"  them in their environment too.\n\n" +
 		"exit codes:\n" +
 		"  0  done\n" +
 		"  1  the action rejected the call, failed, or ended without an answer, or a command of a recipe failed\n" +

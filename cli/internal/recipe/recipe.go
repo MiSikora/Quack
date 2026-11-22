@@ -1,6 +1,6 @@
 // Package recipe reads the recipes of an app and runs their steps. A recipe is a named list of steps with fixed args,
 // kept for each app in a TOML file of the user's config dir. An arg or a command may hold ${NAME}, which takes the value
-// of the environment variable NAME when the step runs, and $$, which stands for $. ${QUACK_PACKAGE} and
+// of the environment variable NAME when the step runs, and $${NAME}, which stands for ${NAME}. ${QUACK_PACKAGE} and
 // ${ANDROID_SERIAL} are the app and the device the recipe runs against, whatever the environment holds.
 package recipe
 
@@ -455,8 +455,8 @@ func expandArgs(args map[string]wire.RawArg, lookup func(string) (string, bool))
 	return expanded, nil
 }
 
-// expand replaces each ${NAME} in text with the value lookup gives for NAME, and each $$ with $. Any other $ stays as
-// it is, so text that mentions $ needs no escaping unless a { or another $ follows.
+// expand replaces each ${NAME} in text with the value lookup gives for NAME, and each $${ with ${. Any other $ stays as
+// it is, so only text that mentions ${ needs escaping.
 func expand(text string, lookup func(string) (string, bool)) (string, error) {
 	var out strings.Builder
 	rest := text
@@ -469,8 +469,13 @@ func expand(text string, lookup func(string) (string, bool)) (string, error) {
 		out.WriteString(rest[:at])
 		switch rest[at+1] {
 		case '$':
-			out.WriteByte('$')
-			rest = rest[at+2:]
+			if strings.HasPrefix(rest[at+2:], "{") {
+				out.WriteString("${")
+				rest = rest[at+3:]
+			} else {
+				out.WriteByte('$')
+				rest = rest[at+1:]
+			}
 		case '{':
 			end := strings.IndexByte(rest[at:], '}')
 			if end < 0 {

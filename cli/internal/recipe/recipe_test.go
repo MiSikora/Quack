@@ -201,9 +201,9 @@ func TestDoReplacesVariablesInArgs(t *testing.T) {
 	t.Setenv("QUACK_NAME", "Bob")
 	app := &fakeApp{}
 
-	result, err := Do(context.Background(), app, call("app.greet", "name", "${QUACK_NAME} $$5 $HOME"), func(string) {})
+	result, err := Do(context.Background(), app, call("app.greet", "name", "${QUACK_NAME} $$5 $$${QUACK_NAME} $HOME"), func(string) {})
 
-	if want := "Hello, Bob $5 $HOME!"; err != nil || result.Message != want {
+	if want := "Hello, Bob $$5 $${QUACK_NAME} $HOME!"; err != nil || result.Message != want {
 		t.Errorf("got %v, %v, want %s", result, err, want)
 	}
 }

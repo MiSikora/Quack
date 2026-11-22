@@ -50,9 +50,9 @@ recipes:
       { run = "./seed-backend.sh ${QUACK_USER}" },
     ]
 
-  An arg or a command takes the environment variable NAME as ${NAME}, and $$ writes a $. QUACK_PACKAGE and
-  ANDROID_SERIAL are the app and the device the recipe runs against, and run commands get them in their
-  environment too.
+  An arg or a command takes the environment variable NAME as ${NAME}, and $${NAME} writes ${NAME}.
+  QUACK_PACKAGE and ANDROID_SERIAL are the app and the device the recipe runs against, and run commands get
+  them in their environment too.
 
 exit codes:
   0  done
