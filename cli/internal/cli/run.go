@@ -221,11 +221,11 @@ func parseArgs(words []string) (map[string]wire.RawArg, error) {
 	return args, nil
 }
 
-// printNotifications prints the message of each notification, or with json each notification as an eventJSON.
+// printNotifications prints the message of each notification, or with json each notification as a notificationJSON.
 func printNotifications(terminal Terminal, json bool) client.NotificationFunc {
 	return func(message string) {
 		if json {
-			printJSON(terminal.Out, eventJSON{message})
+			printJSON(terminal.Out, notificationJSON{codeNotification, message})
 		} else {
 			fmt.Fprintln(terminal.Out, message)
 		}
