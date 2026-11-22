@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
 plugins {
   alias(libs.plugins.android.library)
   alias(libs.plugins.kotlin.serialization)
+  alias(libs.plugins.maven.publish)
   alias(libs.plugins.sort.dependencies)
   alias(libs.plugins.spotless)
   alias(libs.plugins.tapmoc)
@@ -34,6 +35,11 @@ tapmoc {
   java(11)
   kotlin(libs.versions.kotlin.get())
   checkDependencies()
+}
+
+mavenPublishing {
+  publishToMavenCentral()
+  signAllPublications()
 }
 
 kotlin {

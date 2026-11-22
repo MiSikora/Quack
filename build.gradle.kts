@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.gradle.plugin.getKotlinPluginVersion
 plugins {
   alias(libs.plugins.android.library) apply false
   alias(libs.plugins.kotlin.serialization) apply false
+  alias(libs.plugins.maven.publish) apply false
   alias(libs.plugins.sort.dependencies)
   alias(libs.plugins.spotless)
   alias(libs.plugins.tapmoc) apply false
