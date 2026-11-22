@@ -1,8 +1,8 @@
 $ quack --json account.create username=alice
 --- exit 0
 --- stdout
-{"event":"Started"}
-{"event":"Creating account"}
+{"code":"notification","message":"Started"}
+{"code":"notification","message":"Creating account"}
 {"code":"ok","message":"Created"}
 --- stderr
 --- device

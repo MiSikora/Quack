@@ -11,9 +11,11 @@ import (
 	"quack/internal/wire"
 )
 
-// eventJSON is an event as --json prints it, on a line before the outcome.
-type eventJSON struct {
-	Event string `json:"event"`
+// notificationJSON is a notification as --json prints it, on a line before the outcome: codeNotification and the
+// notification's message.
+type notificationJSON struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // outcomeJSON is how a command ended, as --json prints it on its last line: codeOK with the action's message and data,
@@ -98,5 +100,8 @@ func printJSON(w io.Writer, value any) {
 	fmt.Fprintln(w, string(line))
 }
 
-// codeOK is the --json code of a command that succeeded.
-const codeOK = "ok"
+// codeOK is the --json code of a command that succeeded, and codeNotification of a notification before its outcome.
+const (
+	codeOK           = "ok"
+	codeNotification = "notification"
+)
