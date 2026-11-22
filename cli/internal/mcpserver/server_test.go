@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -110,15 +112,8 @@ func TestRunActionGivesTheNotificationsTheMessageAndTheData(t *testing.T) {
 }
 
 func TestRunActionSendsNotificationsAsProgressWhenAskedTo(t *testing.T) {
-	var mu sync.Mutex
-	var progress []string
-	session := connectWith(t, newFakeSource(), &mcp.ClientOptions{
-		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
-			mu.Lock()
-			defer mu.Unlock()
-			progress = append(progress, req.Params.Message)
-		},
-	})
+	progress := &progressLog{}
+	session := connectWith(t, newFakeSource(), &mcp.ClientOptions{ProgressNotificationHandler: progress.handle})
 	params := &mcp.CallToolParams{Name: "run_action", Arguments: map[string]any{"action": "account.create", "args": map[string]any{"username": "alice"}}}
 	params.SetProgressToken("run-1")
 
@@ -126,11 +121,7 @@ func TestRunActionSendsNotificationsAsProgressWhenAskedTo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-	if want := []string{"Creating alice"}; !reflect.DeepEqual(progress, want) {
-		t.Errorf("progress is %q, want %q", progress, want)
-	}
+	progress.waitFor(t, []string{"Creating alice"})
 }
 
 func TestRunActionReportsTheAppsErrorAfterTheNotifications(t *testing.T) {
@@ -249,15 +240,8 @@ export const fresh = quack.recipe({
     console.log("done")
   },
 })`)
-	var mu sync.Mutex
-	var progress []string
-	session := connectWith(t, source, &mcp.ClientOptions{
-		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
-			mu.Lock()
-			defer mu.Unlock()
-			progress = append(progress, req.Params.Message)
-		},
-	})
+	progress := &progressLog{}
+	session := connectWith(t, source, &mcp.ClientOptions{ProgressNotificationHandler: progress.handle})
 	params := &mcp.CallToolParams{Name: "run_recipe", Arguments: map[string]any{"recipe": "fresh"}}
 	params.SetProgressToken("run-1")
 
@@ -265,11 +249,7 @@ export const fresh = quack.recipe({
 		t.Fatal(err)
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-	if want := []string{"› /open-app", "› account.create username=alice", "Creating alice", "done"}; !reflect.DeepEqual(progress, want) {
-		t.Errorf("progress is %q, want %q", progress, want)
-	}
+	progress.waitFor(t, []string{"› /open-app", "› account.create username=alice", "Creating alice", "done"})
 }
 
 func TestRunRecipeEndsAtAStepThatFailsSayingWhere(t *testing.T) {
@@ -356,6 +336,36 @@ func writeRecipes(t *testing.T, file string) string {
 func quoted(text string) string {
 	out, _ := json.Marshal(text)
 	return string(out)
+}
+
+// progressLog keeps the messages of the progress notifications a client gets. The client handles notifications on a
+// goroutine of their own, so a call can return before the handler has seen the notifications sent ahead of its result.
+type progressLog struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (l *progressLog) handle(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.messages = append(l.messages, req.Params.Message)
+}
+
+// waitFor fails unless the messages come to want within a few seconds.
+func (l *progressLog) waitFor(t *testing.T, want []string) {
+	t.Helper()
+	var got []string
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		l.mu.Lock()
+		got = slices.Clone(l.messages)
+		l.mu.Unlock()
+		if len(got) >= len(want) {
+			break
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("progress is %q, want %q", got, want)
+	}
 }
 
 // connect runs a server for source and connects a client to it in memory.
