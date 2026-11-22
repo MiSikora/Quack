@@ -1,7 +1,7 @@
 $ quack --json --list-recipes
 --- exit 0
 --- stdout
-[{"name":"broken","description":"","steps":["app.greet name=Bob","app.params count=many"]},{"name":"clean","description":"Delete the account, then greet","steps":["account.delete","app.greet name=Bob"]},{"name":"greet","description":"","steps":["app.greet name=Bob"]},{"name":"setup","description":"Create the account and greet","steps":["/open-app","wait 10ms","account.create username=alice","app.params count=3 flag=true tag=a tag='b c'"]}]
+[{"name":"broken","description":"","steps":["app.greet name=Bob","app.params count=many"]},{"name":"clean","description":"Delete the account, then greet","steps":["account.delete","app.greet name=Bob"]},{"name":"greet","description":"","steps":["app.greet name=Bob"]},{"name":"greet-env","description":"","steps":["app.greet name='${QUACK_NAME}'"]},{"name":"setup","description":"Create the account and greet","steps":["/open-app","wait 10ms","account.create username=alice","app.params count=3 flag=true tag=a tag='b c'"]}]
 --- stderr
 --- device
 shell emulator-5554: query-receivers

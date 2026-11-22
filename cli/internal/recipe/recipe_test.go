@@ -110,6 +110,10 @@ steps = [{ open-app = true }]`, ": recipe 'a b': its name must not be empty, con
 		{`[""]
 steps = [{ open-app = true }]`, ": recipe '': its name must not be empty, contain whitespace, or start with '-', '/' or '$'"},
 		{`[a]
+steps = [{ action = "x", args = { t = "${USER" } }]`, ": recipe 'a' step 1: arg 't': '${USER' has a ${ without a closing }"},
+		{`[a]
+steps = [{ action = "x", args = { t = ["a", "${1USER}"] } }]`, ": recipe 'a' step 1: arg 't': '${1USER}' does not name an environment variable"},
+		{`[a]
 steps = [{ open-app = true, nope = 1 }]`, ":2:29: unknown key 'nope'"},
 		{`[a]
 steps = [{ open-app = true }]
@@ -167,6 +171,31 @@ func TestCheckFailsOnACallTheAppWouldRefuse(t *testing.T) {
 	}
 }
 
+func TestCheckFailsOnAVariableThatIsNotSetOrGivesAValueTheAppWouldRefuse(t *testing.T) {
+	t.Setenv("QUACK_COUNT", "many")
+	os.Unsetenv("QUACK_MISSING")
+
+	err := Check(recipeOf(OpenApp{}, call("app.greet", "name", "${QUACK_MISSING}")), actions)
+	if err == nil || err.Error() != "recipe 'r' step 2: arg 'name': environment variable 'QUACK_MISSING' is not set" {
+		t.Errorf("unset: got %v", err)
+	}
+	err = Check(recipeOf(OpenApp{}, call("app.params", "count", "${QUACK_COUNT}")), actions)
+	if want := invalid("'count' expects int, got 'many'"); !reflect.DeepEqual(err, want) {
+		t.Errorf("value: got %v, want %v", err, want)
+	}
+}
+
+func TestDoReplacesVariablesInArgs(t *testing.T) {
+	t.Setenv("QUACK_NAME", "Bob")
+	app := &fakeApp{}
+
+	result, err := Do(context.Background(), app, call("app.greet", "name", "${QUACK_NAME} $$5 $HOME"), func(string) {})
+
+	if want := "Hello, Bob $5 $HOME!"; err != nil || result.Message != want {
+		t.Errorf("got %v, %v, want %s", result, err, want)
+	}
+}
+
 func TestDoRunsEachKindOfStep(t *testing.T) {
 	app := &fakeApp{}
 	var notified []string
@@ -208,6 +237,7 @@ func TestLineWritesAStepAsTheUserTypesIt(t *testing.T) {
 		{call("other", "z", "1", "a", "2"), "other a=2 z=1"},
 		{OpenApp{}, "/open-app"},
 		{Wait{1500 * time.Millisecond}, "wait 1.5s"},
+		{call("app.greet", "name", "${QUACK_NAME}"), "app.greet name='${QUACK_NAME}'"},
 	} {
 		if got := Line(c.step, actions); got != c.want {
 			t.Errorf("got %s, want %s", got, c.want)

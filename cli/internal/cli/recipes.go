@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 
 	"quack/internal/client"
 	"quack/internal/recipe"
+	"quack/internal/wire"
 )
 
 // stepError is the error that ended step of a recipe, numbered from 1.
@@ -32,6 +34,11 @@ func runRecipe(app client.App, r recipe.Recipe, terminal Terminal, json bool) er
 		return err
 	}
 	if err := recipe.Check(r, actions); err != nil {
+		// An environment variable that is not set is the user's to fix, like an arg the app would refuse.
+		var refused wire.Error
+		if !errors.As(err, &refused) {
+			return usageErrorf("%v", err)
+		}
 		return err
 	}
 	for i, step := range r.Steps {

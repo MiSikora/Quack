@@ -164,6 +164,8 @@ var scenarios = []scenario{
 	{name: "recipe-failing-step-json", args: []string{"--json", "--recipe", "clean"}, recipes: sampleRecipes},
 	{name: "recipe-check-fails", args: []string{"--recipe", "broken"}, recipes: sampleRecipes},
 	{name: "recipe-check-fails-json", args: []string{"--json", "--recipe", "broken"}, recipes: sampleRecipes},
+	{name: "recipe-variable", args: []string{"--recipe", "greet-env"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Bob"}},
+	{name: "recipe-variable-unset", args: []string{"--recipe", "greet-env"}, recipes: sampleRecipes},
 	{name: "recipe-unknown", args: []string{"--recipe", "nope"}, recipes: sampleRecipes},
 	{name: "recipe-without-file", args: []string{"--recipe", "setup"}},
 	{name: "recipe-broken-file", args: []string{"--recipe", "setup"}, recipes: "[setup]\nsteps = [{ wait = \"soon\" }]\n"},
@@ -192,6 +194,9 @@ steps = [
 
 [greet]
 steps = [{ action = "app.greet", args = { name = "Bob" } }]
+
+[greet-env]
+steps = [{ action = "app.greet", args = { name = "${QUACK_NAME}" } }]
 
 [clean]
 description = "Delete the account, then greet"

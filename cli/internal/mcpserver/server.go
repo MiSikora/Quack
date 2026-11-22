@@ -73,7 +73,7 @@ func New(source Source, version string) *mcp.Server {
 		Name: "list_recipes",
 		Description: "List the recipes of a quack-enabled app: named lists of steps with fixed args that the user keeps " +
 			"in a file on this computer. Each step is a call of an action as the command line writes it, /open-app, which " +
-			"shows the app's main screen, or a wait. " + targetHelp,
+			"shows the app's main screen, or a wait. An arg written ${NAME} takes the environment variable NAME of quack-mcp. " + targetHelp,
 	}, s.listRecipes)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "run_recipe",

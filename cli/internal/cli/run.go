@@ -113,6 +113,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		"      { wait = \"2s\" },\n" +
 		"      { action = \"account.login\", args = { user = \"foo\", remember = true, count = 3, tag = [\"a\", \"b\"] } },\n" +
 		"    ]\n\n" +
+		"  An arg takes the environment variable NAME as ${NAME}, and $$ writes a $.\n\n" +
 		"exit codes:\n" +
 		"  0  done\n" +
 		"  1  the action rejected the call, failed, or ended without an answer\n" +

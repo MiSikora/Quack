@@ -1,5 +1,6 @@
 // Package recipe reads the recipes of an app and runs their steps. A recipe is a named list of steps with fixed args,
-// kept for each app in a TOML file of the user's config dir.
+// kept for each app in a TOML file of the user's config dir. An arg may hold ${NAME}, which takes the value of the
+// environment variable NAME when the step runs, and $$, which stands for $.
 package recipe
 
 import (
@@ -93,9 +94,14 @@ func Load(pkg string) ([]Recipe, error) {
 }
 
 // Check says whether each call of r would pass the app's checks of its args, so that a recipe that cannot finish
-// fails before its first step. Its errors carry the codes the app would answer with.
+// fails before its first step. Its errors carry the codes the app would answer with, except for an environment
+// variable that is not set.
 func Check(r Recipe, actions []wire.Action) error {
 	for i, step := range r.Steps {
+		step, err := expandStep(step, os.LookupEnv)
+		if err != nil {
+			return fmt.Errorf("recipe '%s' step %d: %w", r.Name, i+1, err)
+		}
 		call, ok := step.(Call)
 		if !ok {
 			continue
@@ -135,10 +141,14 @@ func Check(r Recipe, actions []wire.Action) error {
 	return nil
 }
 
-// Do runs step. A Call returns the action's message and data, and the other steps an empty message. Canceling ctx
+// Do runs step with its variables replaced. A Call returns the action's message and data, and the other steps an empty message. Canceling ctx
 // cancels the step, and a step that starts after ctx ended does not get far: the app cancels a call, and the app does
 // not open.
 func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc) (wire.MessageResult, error) {
+	step, err := expandStep(step, os.LookupEnv)
+	if err != nil {
+		return wire.MessageResult{}, err
+	}
 	switch step := step.(type) {
 	case Call:
 		return app.Call(ctx, wire.Call(step), notify)
@@ -257,6 +267,11 @@ func (s rawStep) parse() (Step, error) {
 		if !ok {
 			return nil, fmt.Errorf("arg '%s' must be a string, a number, a boolean, or an array of those", key)
 		}
+		for _, v := range values {
+			if _, err := expand(v, anyValue); err != nil {
+				return nil, fmt.Errorf("arg '%s': %w", key, err)
+			}
+		}
 		if args == nil {
 			args = map[string]wire.RawArg{}
 		}
@@ -290,6 +305,78 @@ func rawValues(value any) (wire.RawArg, bool) {
 		values = append(values, text)
 	}
 	return values, true
+}
+
+// expandStep returns step with the variables in the args of a call replaced by the values lookup gives.
+func expandStep(step Step, lookup func(string) (string, bool)) (Step, error) {
+	call, ok := step.(Call)
+	if !ok || call.Args == nil {
+		return step, nil
+	}
+	args := make(map[string]wire.RawArg, len(call.Args))
+	for _, key := range slices.Sorted(maps.Keys(call.Args)) {
+		values := make(wire.RawArg, len(call.Args[key]))
+		for i, value := range call.Args[key] {
+			expanded, err := expand(value, lookup)
+			if err != nil {
+				return nil, fmt.Errorf("arg '%s': %w", key, err)
+			}
+			values[i] = expanded
+		}
+		args[key] = values
+	}
+	return Call{Action: call.Action, Args: args}, nil
+}
+
+// expand replaces each ${NAME} in text with the value lookup gives for NAME, and each $$ with $. Any other $ stays as
+// it is, so text that mentions $ needs no escaping unless a { or another $ follows.
+func expand(text string, lookup func(string) (string, bool)) (string, error) {
+	var out strings.Builder
+	rest := text
+	for {
+		at := strings.IndexByte(rest, '$')
+		if at < 0 || at == len(rest)-1 {
+			out.WriteString(rest)
+			return out.String(), nil
+		}
+		out.WriteString(rest[:at])
+		switch rest[at+1] {
+		case '$':
+			out.WriteByte('$')
+			rest = rest[at+2:]
+		case '{':
+			end := strings.IndexByte(rest[at:], '}')
+			if end < 0 {
+				return "", fmt.Errorf("'%s' has a ${ without a closing }", text)
+			}
+			name := rest[at+2 : at+end]
+			if !isVariable(name) {
+				return "", fmt.Errorf("'${%s}' does not name an environment variable", name)
+			}
+			value, ok := lookup(name)
+			if !ok {
+				return "", fmt.Errorf("environment variable '%s' is not set", name)
+			}
+			out.WriteString(value)
+			rest = rest[at+end+1:]
+		default:
+			out.WriteByte('$')
+			rest = rest[at+1:]
+		}
+	}
+}
+
+// anyValue is a lookup for checking the form of variables alone, which has a value for every name.
+func anyValue(string) (string, bool) { return "", true }
+
+// isVariable is whether name is an environment variable name: letters, digits and _, not starting with a digit.
+func isVariable(name string) bool {
+	for i, r := range name {
+		if r != '_' && !(r < unicode.MaxASCII && (unicode.IsLetter(r) || i > 0 && unicode.IsDigit(r))) {
+			return false
+		}
+	}
+	return name != ""
 }
 
 // decodeError names the file and the place in it where the decoder failed. The decoder knows the recipe there but not
