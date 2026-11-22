@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 
+	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
@@ -224,7 +225,7 @@ func (b *paramBox) view(rows int) []string {
 	for len(lines) < rows-1 {
 		lines = append(lines, "")
 	}
-	return append(lines, "› "+commandLine(b.action, b.args()))
+	return append(lines, "› "+recipe.CommandLine(b.action, b.args()))
 }
 
 // hintsView is rows lines: the action's id and description, the focused param with how many hints match out of how
@@ -258,7 +259,7 @@ func (b *paramBox) hintsView(text *textField, rows int) []string {
 	for len(lines) < rows-1 {
 		lines = append(lines, "")
 	}
-	return append(lines, "› "+commandLine(b.action, b.args()))
+	return append(lines, "› "+recipe.CommandLine(b.action, b.args()))
 }
 
 func (b *paramBox) header() string {

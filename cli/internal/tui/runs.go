@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
@@ -72,7 +72,7 @@ func newRuns() runs {
 // returns the run's first lines: a blank one, and the command that runs it outside the TUI.
 func (r *runs) start(app App, activity activity, action wire.Action, args map[string]wire.RawArg) (string, tea.Cmd) {
 	ctx, cancel := context.WithCancel(activity.ctx)
-	started := &run{id: action.ID, command: commandLine(action, args), started: r.now(), cancel: cancel}
+	started := &run{id: action.ID, command: recipe.CommandLine(action, args), started: r.now(), cancel: cancel}
 	r.active = started
 	call := wire.Call{Action: action.ID, Args: args}
 	work := func() tea.Msg {
@@ -187,29 +187,6 @@ func (a activity) Write(p []byte) (int, error) {
 		a.send(statusLine{line})
 	}
 	return len(p), nil
-}
-
-// commandLine writes a call the way it would be typed on the command line, with args in the action's param order.
-func commandLine(action wire.Action, args map[string]wire.RawArg) string {
-	words := []string{action.ID}
-	for _, p := range action.Params {
-		for _, value := range args[p.Name] {
-			words = append(words, p.Name+"="+quote(value))
-		}
-	}
-	return strings.Join(words, " ")
-}
-
-// quote single-quotes a value that a shell would split or change. Double quotes would leave $ and ` to the shell.
-func quote(value string) string {
-	if value != "" && strings.IndexFunc(value, unsafeInShell) < 0 {
-		return value
-	}
-	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
-}
-
-func unsafeInShell(r rune) bool {
-	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("-_./:=,@%+", r)
 }
 
 // duration is how long a run took: to a hundredth of a second under a minute, as in 1.23s, and in whole seconds from a

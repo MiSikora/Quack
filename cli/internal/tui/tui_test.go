@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os/exec"
 	"reflect"
 	"slices"
 	"strconv"
@@ -1556,13 +1555,4 @@ func (s *fakeSource) listings() []adb.Listing {
 		listings = append(listings, d.Listing)
 	}
 	return listings
-}
-
-func TestShellReadsAQuotedValueBackAsTyped(t *testing.T) {
-	for _, value := range []string{"", "plain", "Bob Smith", "$HOME", "`id`", `a"b`, "it's", `back\slash`, "line\nbreak", "zażółć"} {
-		out, err := exec.Command("sh", "-c", "printf %s "+quote(value)).Output()
-		if err != nil || string(out) != value {
-			t.Errorf("sh read %s back as %q (%v), want %q", quote(value), out, err, value)
-		}
-	}
 }
