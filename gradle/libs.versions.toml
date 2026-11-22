@@ -1,6 +1,5 @@
 [versions]
 agp = "9.5.2"
-androidx-test-runner = "1.7.0"
 coroutines = "1.11.0"
 junit = "4.13.2"
 kotest = "6.2.7"
@@ -15,7 +14,6 @@ spotless = "8.12.0"
 tapmoc = "0.5.0"
 
 [libraries]
-androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidx-test-runner" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 kotest-assertions = { group = "io.kotest", name = "kotest-assertions-core", version.ref = "kotest" }
 kotest-assertions-json = { group = "io.kotest", name = "kotest-assertions-json", version.ref = "kotest" }
