@@ -183,7 +183,7 @@ func run(opts options, terminal Terminal) error {
 		mode = client.Open
 	}
 	if opts.interactive {
-		return tui.Run(client.Target{Device: adb.Device(opts.device), Package: opts.pkg}, mode, opts.startTimeout)
+		return tui.Run(client.Target{Device: adb.Device(opts.device), Package: opts.pkg}, mode, opts.startTimeout, version)
 	}
 	target, err := client.Find(adb.Device(opts.device), opts.pkg)
 	if err != nil {

@@ -163,7 +163,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 
 func TestViewTakesTheAlternateScreenAndTheMouse(t *testing.T) {
 	app := newFakeApp()
-	m := newModel(newFakeSource(app), newActivity(t.Context()), client.Target{}, client.Wake)
+	m := newModel(newFakeSource(app), newActivity(t.Context()), client.Target{}, client.Wake, "dev")
 
 	view := m.View()
 
@@ -172,22 +172,28 @@ func TestViewTakesTheAlternateScreenAndTheMouse(t *testing.T) {
 	}
 }
 
-func TestDuckIsTheFirstThingInTheLog(t *testing.T) {
+func TestLogStartsAtTheTopWithTheDuckAndTheVersionByIt(t *testing.T) {
 	h := start(t, newFakeApp())
 
 	h.typing("account.delete")
 	h.press("enter")
 	h.waitForLog("there is no account")
 
-	rows := strings.Split(strings.TrimLeft(h.logText(), "\n"), "\n")
+	rows := strings.Split(h.logText(), "\n")
 	for i, row := range rows[:9] {
 		if !strings.ContainsAny(row, "▀▄") {
 			t.Errorf("log row %d is %q, want the duck", i, row)
 		}
 	}
+	if !strings.HasSuffix(rows[0], "  quack dev") || !strings.HasSuffix(rows[1], "  type to find an action · $ recipes · / commands") {
+		t.Errorf("the first rows are %q and %q, want quack's version and what to type by the duck", rows[0], rows[1])
+	}
 	want := []string{"switched to io.mehow.quack.sample on Pixel 8 · emulator-5554", "", "› account.delete"}
 	if got := rows[9:12]; !reflect.DeepEqual(got, want) {
 		t.Errorf("the rows after the duck are %q, want the pick and the run", got)
+	}
+	if got := rows[len(rows)-1]; got != "" {
+		t.Errorf("the last row of the log is %q, want blank rows under the output while it is short", got)
 	}
 }
 
@@ -1083,7 +1089,7 @@ func startPicking(t *testing.T, source *fakeSource, want client.Target, mode cli
 	ctx, cancel := context.WithCancel(context.Background())
 	activity := newActivity(ctx)
 	h := &harness{t: t, exited: make(chan struct{}), height: 30, seen: map[int]bool{}}
-	m := newModel(source, activity, want, mode)
+	m := newModel(source, activity, want, mode, "dev")
 	m.clipboard = func(text string) error {
 		h.mu.Lock()
 		defer h.mu.Unlock()

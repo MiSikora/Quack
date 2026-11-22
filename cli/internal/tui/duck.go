@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // duck is quack's mascot in a bowtie, with a raised wing that waves, or not quite. It is one letter per pixel: W
@@ -59,6 +60,19 @@ func duckView() string {
 			}
 		}
 		lines = append(lines, strings.TrimRight(b.String(), " "))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// header is what the log starts with: the duck, with quack and its version by its top row and what to type under them.
+func header(version string) string {
+	lines := strings.Split(duckView(), "\n")
+	text := []string{
+		selectedStyle.Render("quack") + statusStyle.Render(" "+version),
+		statusStyle.Render("type to find an action · $ recipes · / commands"),
+	}
+	for i, t := range text {
+		lines[i] += strings.Repeat(" ", len(duck[0])-ansi.StringWidth(lines[i])+2) + t
 	}
 	return strings.Join(lines, "\n")
 }

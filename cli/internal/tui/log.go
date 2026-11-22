@@ -9,8 +9,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// sessionLog is everything the session wrote, newest last, cut into the rows of the window's width. It shows from the
-// bottom up, so that new output appears right above the panel, and scrolls back through older output.
+// sessionLog is everything the session wrote, newest last, cut into the rows of the window's width. It fills the view
+// from the top down, as a terminal does, and once the view is full it shows the newest row at the bottom and scrolls
+// back through older output.
 type sessionLog struct {
 	// lines are the lines as they were written, for cutting them again at another width.
 	lines []string
@@ -61,19 +62,19 @@ func (l *sessionLog) scroll(rows, height int) {
 // follow brings the view back to the newest output.
 func (l *sessionLog) follow() { l.scrolled = 0 }
 
-// top is the index of the row that shows on the view's first row of height. It is negative while the log is shorter
-// than the view, and blank rows fill the top.
+// top is the index of the row that shows on the view's first row of height. It is the first row while the log is
+// shorter than the view.
 func (l *sessionLog) top(height int) int {
-	return len(l.rows) - l.scrolled - height
+	return max(0, len(l.rows)-l.scrolled-height)
 }
 
-// view is height rows of the log, the newest at the bottom unless scrolled back, with blank rows on top while the log
+// view is height rows of the log, the newest at the bottom unless scrolled back, with blank rows under the log while it
 // is shorter than the view, and the selection highlighted.
 func (l *sessionLog) view(height int) []string {
 	view := make([]string, max(0, height))
 	top := l.top(height)
 	for y := range view {
-		if i := top + y; i >= 0 {
+		if i := top + y; i < len(l.rows) {
 			view[y] = l.highlight(i)
 		}
 	}

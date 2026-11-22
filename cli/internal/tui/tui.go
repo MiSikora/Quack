@@ -34,12 +34,12 @@ type App interface {
 
 // Run shows the TUI until the user quits. It has the user pick a device and an app first, among those that want leaves,
 // and starts the first app picked the way mode asks. The app's status lines go into the log with the rest of the
-// output, since anything printed around the TUI would break the screen.
-func Run(want client.Target, mode client.StartMode, startTimeout time.Duration) error {
+// output, since anything printed around the TUI would break the screen. The log starts with quack's version.
+func Run(want client.Target, mode client.StartMode, startTimeout time.Duration, version string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	activity := newActivity(ctx)
-	_, err := tea.NewProgram(newModel(clientSource{startTimeout}, activity, want, mode)).Run()
+	_, err := tea.NewProgram(newModel(clientSource{startTimeout}, activity, want, mode, version)).Run()
 	return err
 }
 
@@ -171,7 +171,7 @@ type clientSource struct {
 	startTimeout time.Duration
 }
 
-func newModel(source Source, activity activity, want client.Target, mode client.StartMode) *model {
+func newModel(source Source, activity activity, want client.Target, mode client.StartMode, version string) *model {
 	m := &model{
 		source:    source,
 		activity:  activity,
@@ -184,7 +184,7 @@ func newModel(source Source, activity activity, want client.Target, mode client.
 		clipboard: clipboard.WriteAll,
 	}
 	m.picker.auto, m.picker.skipPackage = true, true
-	m.log.add(duckView())
+	m.log.add(header(version))
 	return m
 }
 
