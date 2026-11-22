@@ -8,8 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// duck is quack's mascot in a bowtie, with a raised wing that waves, or not quite. It is one letter per pixel: W
-// white, O orange, T teal, K black, and . none.
+// One letter per pixel: W white, O orange, T teal, K black, and . none.
 var duck = []string{
 	"......W.........",
 	".....WWW........",
@@ -37,8 +36,8 @@ var duckColors = map[byte]color.Color{
 	'K': lipgloss.Color("236"),
 }
 
-// duckView draws the duck with half blocks, two pixels to a character: the upper one in the foreground of ▀, or the
-// lower one in the foreground of ▄ when only it is set.
+// Two pixels to a character: the upper one as the foreground of ▀, or the lower one as the foreground of ▄ when only
+// it is set.
 func duckView() string {
 	var lines []string
 	for y := 0; y < len(duck); y += 2 {
@@ -64,7 +63,6 @@ func duckView() string {
 	return strings.Join(lines, "\n")
 }
 
-// header is what the log starts with: the duck, with quack and its version by its top row and what to type under them.
 func header(version string) string {
 	lines := strings.Split(duckView(), "\n")
 	text := []string{

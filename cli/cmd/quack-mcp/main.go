@@ -1,4 +1,3 @@
-// Command quack-mcp serves quack-enabled Android apps to MCP clients, such as Claude, over stdin and stdout.
 package main
 
 import (
@@ -15,12 +14,12 @@ import (
 	"quack/internal/mcpserver"
 )
 
-// version is quack-mcp's version. Release builds set it with -ldflags "-X main.version=<version>".
+// Release builds set this with -ldflags "-X main.version=<version>".
 var version = "dev"
 
 func main() {
 	fs := pflag.NewFlagSet("quack-mcp", pflag.ContinueOnError)
-	// Help lists the flags as declared here, as quack's does: alphabetically, with help last.
+	// Keeps declaration order, as quack does: alphabetical, with help last.
 	fs.SortFlags = false
 	fs.SetOutput(io.Discard)
 	startTimeout := fs.Duration("start-timeout", 15*time.Second, "how long to wait for an app to answer")
@@ -44,7 +43,7 @@ func main() {
 	case showVersion:
 		fmt.Println("quack-mcp", version)
 	default:
-		// stdout carries the protocol, so everything else goes to stderr, which MCP clients log.
+		// stdout carries the protocol. MCP clients log stderr.
 		if err := mcpserver.Serve(context.Background(), version, *startTimeout, os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, "quack-mcp:", err)
 			os.Exit(1)
@@ -52,8 +51,7 @@ func main() {
 	}
 }
 
-// boolFlag declares an on/off flag that sets *p, as quack's flags do. pflag prints [=true|false] after every bool flag
-// in help, and nothing after a BoolFunc flag, which parses the same.
+// pflag prints [=true|false] after every bool flag in help, and nothing after a BoolFunc flag, which parses the same.
 func boolFlag(fs *pflag.FlagSet, p *bool, name, shorthand, usage string) {
 	fs.BoolFuncP(name, shorthand, usage, func(value string) error {
 		on, err := strconv.ParseBool(value)

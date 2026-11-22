@@ -6,19 +6,19 @@ import (
 	"fmt"
 )
 
-// EncodeDescribe returns the request that lists the app's actions, as one line without its newline.
+// Without the trailing newline.
 func EncodeDescribe() []byte {
 	line, _ := json.Marshal(requestBody{Method: "describe"})
 	return line
 }
 
-// EncodeCall returns call as one line, without its newline.
+// Without the trailing newline.
 func EncodeCall(call Call) []byte {
 	line, _ := json.Marshal(requestBody{Method: "call", Action: call.Action, Args: call.Args})
 	return line
 }
 
-// DecodeFrame reads one line from the app, without its newline.
+// line comes without its newline.
 func DecodeFrame(line []byte) Frame {
 	var body frameBody
 	if err := json.Unmarshal(line, &body); err != nil {

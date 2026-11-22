@@ -1,4 +1,3 @@
-// Command quack talks to a quack-enabled Android app over adb.
 package main
 
 import (

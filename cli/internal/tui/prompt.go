@@ -14,31 +14,21 @@ import (
 	"quack/internal/wire"
 )
 
-// prompt is the action picker: the input, and over it, while the input has text or the user browses, the list of the
-// actions whose id the text matches, best last, one of them selected. Browsing lists every action, text that starts
-// with '$' matches the app's recipes instead, and text that starts with '/' the TUI's commands.
 type prompt struct {
-	input   textinput.Model
-	actions []wire.Action
-	// recipes are the app's recipes, sorted by name, and recipePath the file they come from or would.
+	input      textinput.Model
+	actions    []wire.Action
 	recipes    []recipe.Recipe
 	recipePath string
-	// browsing is whether ↑ opened the list on empty text. It ends when the text changes.
-	browsing bool
-	// selected indexes choices().
-	selected int
-	width    int
+	browsing   bool
+	selected   int
+	width      int
 }
 
-// choice is an action, a recipe or a command that the text matches, with the byte offsets of the matched characters of
-// its id.
 type choice struct {
 	id          string
 	description string
-	// action is the chosen action, or the chosen recipe as an action whose id is the recipe's name after '$', with the
-	// recipe's params, so that a recipe opens the box as an action does.
-	action wire.Action
-	// command is the chosen command, or nil for an action or a recipe.
+	// A recipe comes as an action whose id is its name after '$', so that it opens the box as an action does.
+	action  wire.Action
 	command *command
 	matched []int
 }
@@ -54,8 +44,6 @@ func newPrompt(actions []wire.Action) prompt {
 	return prompt{input: input, actions: actions}
 }
 
-// choices are what the words of the text match, fuzzily and ignoring case, best first, and how many there are to
-// match. Blank text matches every action, a lone '$' every recipe, and a lone '/' every command, each sorted by name.
 func (p *prompt) choices() ([]choice, int) {
 	text := strings.TrimSpace(p.input.Value())
 	var all []choice
@@ -90,10 +78,9 @@ func (p *prompt) choices() ([]choice, int) {
 	return matches, len(all)
 }
 
-// open is whether the list shows: while the input has text, or while the user browses.
 func (p *prompt) open() bool { return p.input.Value() != "" || p.browsing }
 
-// selection is the selected choice while the list shows, so that nothing the user cannot see runs.
+// Only while the list shows, so that nothing the user cannot see runs.
 func (p *prompt) selection() (choice, bool) {
 	choices, _ := p.choices()
 	if !p.open() || len(choices) == 0 {
@@ -104,8 +91,6 @@ func (p *prompt) selection() (choice, bool) {
 
 func (p *prompt) value() string { return p.input.Value() }
 
-// update moves the selection or edits the text. Up moves to the next match, away from the input, and down back toward
-// the best one. Up on a closed list opens it to browse. A new text selects its best match and ends browsing.
 func (p *prompt) update(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "up", "ctrl+p":
@@ -129,14 +114,12 @@ func (p *prompt) update(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
-// forward hands the input a message it may be waiting for, such as a cursor blink.
 func (p *prompt) forward(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	p.input, cmd = p.input.Update(msg)
 	return cmd
 }
 
-// clear empties the text, which closes the list, and says whether the list showed.
 func (p *prompt) clear() bool {
 	had := p.open()
 	p.input.SetValue("")
@@ -144,18 +127,14 @@ func (p *prompt) clear() bool {
 	return had
 }
 
-// setActions replaces the actions, keeping the selected action selected while the text still matches it.
 func (p *prompt) setActions(actions []wire.Action) {
 	p.keepSelection(func() { p.actions = actions })
 }
 
-// setRecipes replaces the recipes and the file they come from, keeping the selected recipe selected while the text
-// still matches it.
 func (p *prompt) setRecipes(recipes []recipe.Recipe, path string) {
 	p.keepSelection(func() { p.recipes, p.recipePath = recipes, path })
 }
 
-// keepSelection makes change, and selects again what was selected while the text still matches it.
 func (p *prompt) keepSelection(change func()) {
 	selected, ok := p.selection()
 	change()
@@ -176,14 +155,12 @@ func (p *prompt) focus() tea.Cmd { return p.input.Focus() }
 
 func (p *prompt) blur() { p.input.Blur() }
 
-// resize leaves room on the input's line for the counter at its widest.
 func (p *prompt) resize(width int) {
 	p.width = width
 	widest := len(strconv.Itoa(max(len(p.actions), len(p.recipes), len(commands()))))
 	p.input.SetWidth(max(1, width-ansi.StringWidth(p.input.Prompt)-2*widest-3))
 }
 
-// view is the input's line, with how many choices match out of how many there are at its right end.
 func (p *prompt) view() string {
 	choices, total := p.choices()
 	counter := statusStyle.Render(strconv.Itoa(len(choices)) + "/" + strconv.Itoa(total))
@@ -191,9 +168,6 @@ func (p *prompt) view() string {
 	return line + strings.Repeat(" ", max(1, p.width-ansi.StringWidth(line)-ansi.StringWidth(counter))) + counter
 }
 
-// list is a line for each choice the text matches, up to rows of them, the best last, next to the input, or nil while
-// the list does not show. The choices scroll to keep the selection in sight. Without any recipes, '$' says how to start
-// them.
 func (p *prompt) list(rows int) []string {
 	if !p.open() {
 		return nil
@@ -211,7 +185,6 @@ func (p *prompt) list(rows int) []string {
 	return lines
 }
 
-// keys are the keys that work while the list shows, or else how to show it.
 func (p *prompt) keys() string {
 	if p.open() {
 		return "enter run · tab params · ↑↓ select · esc close · ctrl+c cancel/quit"
@@ -219,8 +192,6 @@ func (p *prompt) keys() string {
 	return "type or ↑ to find an action · ctrl+o open app · ctrl+c cancel/quit"
 }
 
-// rows are count of choices, one per line, the best first, with the selection among them. The selected row is
-// highlighted across the whole width.
 func (p *prompt) rows(choices []choice, count int) []string {
 	first := max(0, p.selected-count+1)
 	idWidth := 0
@@ -240,7 +211,6 @@ func (p *prompt) rows(choices []choice, count int) []string {
 	return rows
 }
 
-// highlight renders id in style, and the characters at the byte offsets in matched in matchStyle too.
 func highlight(id string, matched []int, style lipgloss.Style) string {
 	var b strings.Builder
 	for i, r := range id {

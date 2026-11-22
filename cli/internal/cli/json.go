@@ -12,17 +12,15 @@ import (
 	"quack/internal/wire"
 )
 
-// notificationJSON is a notification as --json prints it, on a line before the outcome: codeNotification and the
-// notification's message. Step numbers the recipe's step from 1, and is absent outside a recipe.
+// Step numbers the recipe's step from 1, and is absent outside a recipe.
 type notificationJSON struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Step    int    `json:"step,omitempty"`
 }
 
-// outcomeJSON is how a command ended, as --json prints it on its last line: codeOK with the action's message and data,
-// or the code of a failure and what went wrong. A recipe prints one for each step, which Step numbers from 1. The one
-// of a failed step is its last, unless the recipe caught the failure and went on.
+// Step numbers the recipe's step from 1. A failed step's outcome is its last, unless the recipe caught the
+// failure and went on.
 type outcomeJSON struct {
 	Code    string          `json:"code"`
 	Message string          `json:"message"`
@@ -30,14 +28,12 @@ type outcomeJSON struct {
 	Step    int             `json:"step,omitempty"`
 }
 
-// recipeJSON is a recipe as quack --list-recipes --json prints it.
 type recipeJSON struct {
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
 	Params      []paramJSON `json:"params"`
 }
 
-// actionJSON is an action as quack --list-actions --json prints it.
 type actionJSON struct {
 	ID          string      `json:"id"`
 	Description string      `json:"description"`
@@ -54,10 +50,6 @@ type paramJSON struct {
 	Default any `json:"default,omitempty"`
 }
 
-// failure says how err ends quack: its code for --json, its message without the code, and the exit code. The app's
-// error codes keep their names. Failures the CLI finds itself are usage for what the user typed, device and app for
-// what cannot be reached, no_reply for a call that ended without the app's answer, and command for a command of a
-// recipe that failed.
 func failure(err error) (code, message string, exit int) {
 	var refused wire.Error
 	var usage *usageError
@@ -125,8 +117,6 @@ func printJSON(w io.Writer, value any) {
 	fmt.Fprintln(w, string(line))
 }
 
-// codeOK is the --json code of a command that succeeded, codeNotification of a notification before its outcome, and
-// codeLog of a line that a recipe logged.
 const (
 	codeOK           = "ok"
 	codeNotification = "notification"

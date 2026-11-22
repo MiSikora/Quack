@@ -1,7 +1,3 @@
-// Package recipe reads the recipes of an app and runs them. The recipes of an app are a TypeScript or JavaScript file
-// in the user's config dir that exports them, each made with recipe() of the "quack" module. esbuild bundles the file
-// with the local files it imports, and goja runs it, so recipes need neither node nor npm. A recipe runs the app's
-// actions and commands through the "quack" module, one Step at a time.
 package recipe
 
 import (
@@ -24,41 +20,33 @@ import (
 	"quack/internal/wire"
 )
 
-// Recipe is a recipe as its file exports it: the name of the export, and the params a run gives it.
 type Recipe struct {
 	Name        string
 	Description string
 	Params      []wire.Param
 }
 
-// Step is what a call of the "quack" module does in the app: a Call, OpenApp, Wait, Shell or Run.
 type Step interface{ step() }
 
-// Call calls an action with args.
 type Call wire.Call
 
-// OpenApp shows the app's main screen, as --open-app does.
 type OpenApp struct{}
 
-// Wait waits for Duration, which is more than zero.
 type Wait struct {
 	Duration time.Duration
 }
 
-// Shell runs Command on the app's device, as adb shell does.
 type Shell struct {
 	Command string
 }
 
-// Run runs Command on this computer with sh -c.
 type Run struct {
 	Command string
 }
 
-// CommandError is a command of a Shell or Run step that exited with a status other than 0.
 type CommandError struct {
 	Exit int
-	// Output is what the command printed to stderr, or to stdout when stderr is empty.
+	// stderr, or stdout when stderr is empty.
 	Output string
 }
 
@@ -75,7 +63,6 @@ func (Wait) step()    {}
 func (Shell) step()   {}
 func (Run) step()     {}
 
-// App is what a step needs from a quack app. client.App satisfies it.
 type App interface {
 	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
 	Start(mode client.StartMode) error
@@ -83,9 +70,8 @@ type App interface {
 	Target() client.Target
 }
 
-// Do runs step. A Call returns the action's message and data, a Shell or Run the stdout
-// of its command, and the other steps an empty message. Canceling ctx cancels the step, and a step that starts after
-// ctx ended does not get far: the app cancels a call, the app does not open, and a command ends at once.
+// A step that starts after ctx ended does not get far: the app cancels a call, the app does not open, and a
+// command ends at once.
 func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc) (wire.MessageResult, error) {
 	switch step := step.(type) {
 	case Call:
@@ -118,9 +104,8 @@ func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc)
 	return wire.MessageResult{}, nil
 }
 
-// run runs command on this computer, with QUACK_PACKAGE and ANDROID_SERIAL naming target in its environment, so that adb
-// in command reaches the recipe's device. Ending ctx kills sh, and the commands it started get a second to let go of
-// its output.
+// QUACK_PACKAGE and ANDROID_SERIAL make adb in command reach the recipe's device. Ending ctx kills sh, and the
+// commands it started get a second to let go of its output.
 func run(ctx context.Context, command string, target client.Target) (wire.MessageResult, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Env = append(os.Environ(), "QUACK_PACKAGE="+target.Package, "ANDROID_SERIAL="+string(target.Device))
@@ -140,7 +125,6 @@ func run(ctx context.Context, command string, target client.Target) (wire.Messag
 	return commandResult(adb.Output{Stdout: stdout.String(), Stderr: stderr.String()})
 }
 
-// commandResult is the message of a command that exited with 0, its stdout, and a CommandError for any other status.
 func commandResult(out adb.Output) (wire.MessageResult, error) {
 	if out.Exit != 0 {
 		output := strings.TrimSpace(out.Stderr)
@@ -152,9 +136,6 @@ func commandResult(out adb.Output) (wire.MessageResult, error) {
 	return wire.MessageResult{Message: strings.TrimRight(out.Stdout, "\n")}, nil
 }
 
-// Line writes step the way a user types it: a call as on the command line, /open-app as the TUI's command, wait with
-// its duration, and shell and run with their commands. The args of a call go in the param order of its action in actions, or in key order when actions
-// lack it.
 func Line(step Step, actions []wire.Action) string {
 	switch step := step.(type) {
 	case Call:
@@ -179,7 +160,6 @@ func Line(step Step, actions []wire.Action) string {
 	return ""
 }
 
-// CommandLine writes a call the way it would be typed on the command line, with args in the action's param order.
 func CommandLine(action wire.Action, args map[string]wire.RawArg) string {
 	words := []string{action.ID}
 	for _, p := range action.Params {
@@ -190,9 +170,7 @@ func CommandLine(action wire.Action, args map[string]wire.RawArg) string {
 	return strings.Join(words, " ")
 }
 
-// ExpandArgs returns args with each ${NAME} replaced by the environment variable NAME, except that QUACK_PACKAGE and
-// ANDROID_SERIAL name target, and each $${NAME} by ${NAME}. Only args typed on the command line or in the TUI take
-// variables: a recipe reads the environment through env.
+// Only args typed on the command line or in the TUI take variables. A recipe reads the environment through env.
 func ExpandArgs(args map[string]wire.RawArg, target client.Target) (map[string]wire.RawArg, error) {
 	return expandArgs(args, lookup(target))
 }
@@ -216,8 +194,7 @@ func expandArgs(args map[string]wire.RawArg, lookup func(string) (string, bool))
 	return expanded, nil
 }
 
-// expand replaces each ${NAME} in text with the value lookup gives for NAME, and each $${ with ${. Any other $ stays as
-// it is, so only text that mentions ${ needs escaping.
+// Any other $ stays as it is, so only text that mentions ${ needs escaping.
 func expand(text string, lookup func(string) (string, bool)) (string, error) {
 	var out strings.Builder
 	rest := text
@@ -259,8 +236,6 @@ func expand(text string, lookup func(string) (string, bool)) (string, error) {
 	}
 }
 
-// lookup finds the variables of a recipe that runs against target: QUACK_PACKAGE and ANDROID_SERIAL name target, and
-// any other name is an environment variable.
 func lookup(target client.Target) func(string) (string, bool) {
 	return func(name string) (string, bool) {
 		switch name {
@@ -273,7 +248,6 @@ func lookup(target client.Target) func(string) (string, bool) {
 	}
 }
 
-// isVariable is whether name is an environment variable name: letters, digits and _, not starting with a digit.
 func isVariable(name string) bool {
 	for i, r := range name {
 		if r != '_' && !(r < unicode.MaxASCII && (unicode.IsLetter(r) || i > 0 && unicode.IsDigit(r))) {
@@ -283,8 +257,7 @@ func isVariable(name string) bool {
 	return name != ""
 }
 
-// parses is whether the app would parse value for p, as the Kotlin library's params do. A type this CLI does not know
-// takes any value.
+// Matches the Kotlin library's parsing. A type this CLI does not know takes any value.
 func parses(p wire.Param, value string) bool {
 	switch p.Type {
 	case wire.ParamTypeInt:
@@ -304,7 +277,6 @@ func parses(p wire.Param, value string) bool {
 	return true
 }
 
-// expected is what p takes, as the app says it.
 func expected(p wire.Param) string {
 	if p.Type == wire.ParamTypeEnum {
 		return "one of " + strings.Join(p.Choices, ", ")
@@ -312,12 +284,12 @@ func expected(p wire.Param) string {
 	return string(p.Type)
 }
 
-// isName is whether name can follow '$' in the TUI and --recipe on the command line, under the rules of action ids.
+// Follows the rules of action ids.
 func isName(name string) bool {
 	return name != "" && strings.IndexFunc(name, unicode.IsSpace) < 0 && !strings.ContainsRune("-/$", rune(name[0]))
 }
 
-// quote single-quotes a value that a shell would split or change. Double quotes would leave $ and ` to the shell.
+// Double quotes would leave $ and ` to the shell.
 func quote(value string) string {
 	if value != "" && strings.IndexFunc(value, unsafeInShell) < 0 {
 		return value

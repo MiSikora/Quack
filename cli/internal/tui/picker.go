@@ -14,24 +14,18 @@ import (
 	"quack/internal/client"
 )
 
-// picker picks a device and then a quack-enabled app on it, in two steps that take the place of the action picker. Its
-// rows come from the devices the model follows, so they change as devices connect and apps install.
 type picker struct {
-	step step
-	// device is the device of the package step.
+	step   step
 	device adb.Device
-	// want narrows the choices to a device, a package or both, as --device and --app do. "" is any.
-	want client.Target
-	// auto takes the only device by itself, and skipPackage the only package, so that a step with one choice does not
-	// show. back is whether esc on the package step goes back to the device step, which showed.
+	want   client.Target
+	// auto and skipPackage take a lone choice, so that its step does not show. back lets esc return to a device step that
+	// showed.
 	auto        bool
 	skipPackage bool
 	back        bool
-	// connecting is the pick being started and described, or nil.
-	connecting *client.Target
-	input      textinput.Model
-	// selected is the key of the row the user moved to, or "" for the first row that can be picked. Rows come and go as
-	// devices do, so the selection follows its row rather than its place.
+	connecting  *client.Target
+	input       textinput.Model
+	// Rows come and go as devices do, so the selection follows its row's key rather than its place.
 	selected string
 	width    int
 }
@@ -43,14 +37,11 @@ const (
 	packageStep
 )
 
-// seenDevice is a device adb lists, and what quack found on it once inspected says so.
 type seenDevice struct {
 	client.Device
 	inspected bool
 }
 
-// pickRow is a device or a package the picker lists. A row that is not ok shows dimmed and cannot be picked, and note
-// says why.
 type pickRow struct {
 	key     string
 	label   string
@@ -74,7 +65,6 @@ func newPicker(want client.Target, width int) *picker {
 	return p
 }
 
-// toStep shows step with no text, and the package step for device.
 func (p *picker) toStep(s step) {
 	p.step = s
 	p.input.SetValue("")
@@ -85,8 +75,6 @@ func (p *picker) toStep(s step) {
 	}
 }
 
-// rows are the choices of the step that the words of the text match, fuzzily and ignoring case, best first, and how
-// many there are to match. Blank text keeps adb's order of devices and the device's order of packages.
 func (p *picker) rows(devices []seenDevice) ([]pickRow, int) {
 	all := p.allRows(devices)
 	text := strings.TrimSpace(p.input.Value())
@@ -106,8 +94,7 @@ func (p *picker) rows(devices []seenDevice) ([]pickRow, int) {
 	return matches, len(all)
 }
 
-// allRows are every choice of the step that want leaves. With a package wanted, a device shows until it is known not
-// to have it.
+// With a package wanted, a device shows until it is known not to have it.
 func (p *picker) allRows(devices []seenDevice) []pickRow {
 	var rows []pickRow
 	if p.step == packageStep {
@@ -150,7 +137,7 @@ func (p *picker) allRows(devices []seenDevice) []pickRow {
 	return rows
 }
 
-// onlyDevice is the only device row that can be picked, while no ready device is still being asked for its apps.
+// There is none while a ready device is still being asked for its apps.
 func (p *picker) onlyDevice(devices []seenDevice) (pickRow, bool) {
 	var only []pickRow
 	for _, d := range devices {
@@ -170,7 +157,6 @@ func (p *picker) onlyDevice(devices []seenDevice) (pickRow, bool) {
 	return only[0], true
 }
 
-// packages are the quack-enabled apps on device that want leaves.
 func (p *picker) packages(devices []seenDevice, device adb.Device) []string {
 	i := slices.IndexFunc(devices, func(d seenDevice) bool { return d.Device.Device == device })
 	if i < 0 {
@@ -185,7 +171,6 @@ func (p *picker) packages(devices []seenDevice, device adb.Device) []string {
 	return pkgs
 }
 
-// selection is the selected row, when it can be picked.
 func (p *picker) selection(devices []seenDevice) (pickRow, bool) {
 	rows, _ := p.rows(devices)
 	i := p.selectedIndex(rows)
@@ -195,8 +180,6 @@ func (p *picker) selection(devices []seenDevice) (pickRow, bool) {
 	return rows[i], true
 }
 
-// selectedIndex is the index of the selected row in rows: the row the user moved to while it can be picked, or else
-// the first one that can be, or else the first row, or -1 without rows.
 func (p *picker) selectedIndex(rows []pickRow) int {
 	if i := slices.IndexFunc(rows, func(r pickRow) bool { return r.key == p.selected && r.ok }); i >= 0 {
 		return i
@@ -207,8 +190,6 @@ func (p *picker) selectedIndex(rows []pickRow) int {
 	return min(0, len(rows)-1)
 }
 
-// update moves the selection over the rows that can be picked, or edits the text. Up moves to the next row, away from
-// the input, and down back toward the first. A new text selects its best match.
 func (p *picker) update(msg tea.KeyPressMsg, devices []seenDevice) tea.Cmd {
 	rows, _ := p.rows(devices)
 	selected := p.selectedIndex(rows)
@@ -247,7 +228,6 @@ func (p *picker) forward(msg tea.Msg) tea.Cmd {
 
 func (p *picker) focus() tea.Cmd { return p.input.Focus() }
 
-// clear empties the text, and says whether there was text.
 func (p *picker) clear() bool {
 	had := p.input.Value() != ""
 	p.input.SetValue("")
@@ -260,7 +240,6 @@ func (p *picker) resize(width int) {
 	p.input.SetWidth(max(1, width-ansi.StringWidth(p.input.Prompt)-9))
 }
 
-// view is the input's line, with how many rows match out of how many there are at its right end.
 func (p *picker) view(devices []seenDevice) string {
 	rows, total := p.rows(devices)
 	counter := statusStyle.Render(strconv.Itoa(len(rows)) + "/" + strconv.Itoa(total))
@@ -268,8 +247,6 @@ func (p *picker) view(devices []seenDevice) string {
 	return line + strings.Repeat(" ", max(1, p.width-ansi.StringWidth(line)-ansi.StringWidth(counter))) + counter
 }
 
-// list is a line for each row the text matches, up to height of them, the first last, next to the input, or else a
-// line that says what the picker waits for. The rows scroll to keep the selection in sight.
 func (p *picker) list(devices []seenDevice, listed bool, height int) []string {
 	rows, total := p.rows(devices)
 	if len(rows) == 0 {
@@ -300,7 +277,6 @@ func (p *picker) list(devices []seenDevice, listed bool, height int) []string {
 	return lines
 }
 
-// waiting says what is missing when no row shows.
 func (p *picker) waiting(listed bool, total int) string {
 	switch {
 	case total > 0:
@@ -322,7 +298,6 @@ func (p *picker) waiting(listed bool, total int) string {
 	}
 }
 
-// keys are the keys that work in the step.
 func (p *picker) keys(canClose bool) string {
 	if p.connecting != nil {
 		return "starting " + p.connecting.Package + " on " + string(p.connecting.Device) + "…"

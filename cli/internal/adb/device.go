@@ -1,5 +1,3 @@
-// Package adb reaches Android devices through the adb server. It talks the server's smart-socket protocol directly,
-// so no adb process starts and no forward is left behind.
 package adb
 
 import (
@@ -16,31 +14,25 @@ import (
 	"time"
 )
 
-// Device is the target of adb services: a serial as adb devices lists it.
 type Device string
 
-// Listing is a device adb knows, and the state adb reports for it: Ready, or another, such as offline or
-// unauthorized.
 type Listing struct {
 	Device Device
 	State  string
 }
 
-// Error is a device that adb cannot reach, or that went away. Its message says what to do about it.
 type Error struct {
 	Message string
 }
 
 func (e *Error) Error() string { return e.Message }
 
-// ServiceFailure is the device refusing a service, such as localabstract: for a socket nobody listens on.
 type ServiceFailure struct {
 	Reason string
 }
 
 func (e *ServiceFailure) Error() string { return e.Reason }
 
-// Open connects to service on the device and returns the stream to it.
 func (d Device) Open(service string) (net.Conn, error) {
 	conn, err := dialServer()
 	if err != nil {
@@ -65,7 +57,7 @@ func (d Device) Open(service string) (net.Conn, error) {
 	return conn, nil
 }
 
-// ShellStream runs cmd on the device and returns its output, stdout and stderr together, as it is produced.
+// Output comes as it is produced, stdout and stderr together.
 func (d Device) ShellStream(cmd string) (io.ReadCloser, error) {
 	conn, err := d.Open("shell:" + cmd)
 	var refused *ServiceFailure
@@ -76,7 +68,6 @@ func (d Device) ShellStream(cmd string) (io.ReadCloser, error) {
 	return conn, err
 }
 
-// Shell runs cmd on the device and returns all of its output.
 func (d Device) Shell(cmd string) (string, error) {
 	conn, err := d.ShellStream(cmd)
 	if err != nil {
@@ -90,22 +81,21 @@ func (d Device) Shell(cmd string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Output is what a command printed on the device, and the status it exited with.
 type Output struct {
 	Stdout string
 	Stderr string
 	Exit   int
 }
 
-// The packet ids of adb's shell protocol, which frames each packet as an id, a little-endian 32-bit length and data.
+// adb's shell protocol frames each packet as an id, a little-endian 32-bit length and data.
 const (
 	shellStdout = 1
 	shellStderr = 2
 	shellExit   = 3
 )
 
-// Command runs cmd on the device through adb's shell protocol, which keeps stdout apart from stderr and tells the
-// status cmd exited with. Ending ctx closes the stream, which ends cmd, and Command returns ctx's error.
+// adb's shell protocol keeps stdout apart from stderr and reports the exit status. Ending ctx closes the stream,
+// which ends cmd, and Command returns ctx's error.
 func (d Device) Command(ctx context.Context, cmd string) (Output, error) {
 	conn, err := d.Open("shell,v2,raw:" + cmd)
 	var refused *ServiceFailure
@@ -142,7 +132,6 @@ func (d Device) Command(ctx context.Context, cmd string) (Output, error) {
 	}
 }
 
-// readPacket reads one packet of adb's shell protocol into header and returns its data.
 func readPacket(conn net.Conn, header []byte) ([]byte, error) {
 	if _, err := io.ReadFull(conn, header); err != nil {
 		return nil, err
@@ -154,7 +143,6 @@ func readPacket(conn net.Conn, header []byte) ([]byte, error) {
 	return data, nil
 }
 
-// Unreachable explains a request the device failed, from the state adb reports for it.
 func (d Device) Unreachable(cause error) error {
 	state, err := d.State()
 	var stuck *Error
@@ -173,13 +161,11 @@ func (d Device) Unreachable(cause error) error {
 	}
 }
 
-// State returns what adb reports for the device, such as device, offline or unauthorized. It fails when adb does
-// not know the device, and with an Error when the server does not answer.
+// Fails when adb does not know the device, and with an Error when the server does not answer.
 func (d Device) State() (string, error) {
 	return query("host-serial:" + string(d) + ":get-state")
 }
 
-// Devices lists the devices adb knows.
 func Devices() ([]Listing, error) {
 	text, err := query("host:devices")
 	var stuck *Error
@@ -192,8 +178,8 @@ func Devices() ([]Listing, error) {
 	return parseListings(text), nil
 }
 
-// Track sends the devices adb knows to send, first as they are and then each time one connects, disconnects or
-// changes state. It returns when ctx ends, or with an Error when the adb server goes away.
+// send gets the devices as they are, then again on each change. Returns when ctx ends, or with an Error when the
+// adb server goes away.
 func Track(ctx context.Context, send func([]Listing)) error {
 	conn, err := dialServer()
 	if err != nil {
@@ -222,7 +208,7 @@ func Track(ctx context.Context, send func([]Listing)) error {
 	}
 }
 
-// query sends a request to the adb server itself, not to a device, and returns its answer.
+// Asks the adb server itself, not a device.
 func query(text string) (string, error) {
 	conn, err := dialServer()
 	if err != nil {
@@ -240,7 +226,6 @@ func query(text string) (string, error) {
 	return answer, err
 }
 
-// parseListings reads the lines of serials and states that host:devices and host:track-devices answer.
 func parseListings(text string) []Listing {
 	var listings []Listing
 	for _, line := range strings.Split(text, "\n") {
@@ -251,8 +236,8 @@ func parseListings(text string) []Listing {
 	return listings
 }
 
-// dialServer connects to the adb server, starting it once if it is not running. Reads and writes on the connection
-// fail after serverTimeout, so that a server that stopped answering cannot hang quack.
+// Starts the server once if it is not running. Reads and writes fail after serverTimeout, so that a server that
+// stopped answering cannot hang quack.
 func dialServer() (net.Conn, error) {
 	conn, err := dialOrStartServer()
 	if err != nil {
@@ -284,7 +269,7 @@ func dialOrStartServer() (net.Conn, error) {
 	return conn, nil
 }
 
-// request sends one request, a 4-hex-digit length and the text, and reads OKAY or FAIL with its reason.
+// A 4-hex-digit length, then the text. The server answers OKAY, or FAIL with its reason.
 func request(conn net.Conn, text string) error {
 	if _, err := fmt.Fprintf(conn, "%04x%s", len(text), text); err != nil {
 		return err
@@ -303,7 +288,6 @@ func request(conn net.Conn, text string) error {
 	return fmt.Errorf("%s", reason)
 }
 
-// asStuck returns the error that explains a server that missed serverTimeout, when err comes from one.
 func asStuck(err error) (*Error, bool) {
 	if !errors.Is(err, os.ErrDeadlineExceeded) {
 		return nil, false
@@ -311,7 +295,6 @@ func asStuck(err error) (*Error, bool) {
 	return &Error{fmt.Sprintf("the adb server did not answer within %v. Run adb kill-server, and quack starts it again.", serverTimeout)}, true
 }
 
-// readLengthPrefixed reads a 4-hex-digit length and that much text, the way the adb server answers.
 func readLengthPrefixed(conn net.Conn) (string, error) {
 	length := make([]byte, 4)
 	if _, err := io.ReadFull(conn, length); err != nil {
@@ -328,9 +311,8 @@ func readLengthPrefixed(conn net.Conn) (string, error) {
 	return string(text), nil
 }
 
-// Ready is the state adb reports for a device that it can reach.
 const Ready = "device"
 
-// serverTimeout bounds how long the adb server may take to answer one request. It answers in milliseconds, but a
-// service such as shell: waits for the device to open it, which takes longer over wireless debugging.
+// The server answers in milliseconds, but shell: waits for the device to open it, which takes longer over wireless
+// debugging.
 const serverTimeout = 10 * time.Second

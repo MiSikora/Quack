@@ -13,18 +13,16 @@ import (
 	"quack/internal/wire"
 )
 
-// connection is a connection on which the app has said hello. Nothing has been sent on it yet, so a connection that
-// fails before exchange can be retried without running anything twice.
+// Nothing has been sent on a connection yet, so one that fails before exchange can be retried without running
+// anything twice.
 type connection struct {
 	conn   net.Conn
 	reader *bufio.Reader
 	hello  wire.Hello
 }
 
-// errNotReady means the app did not say hello: nothing listens on its socket yet, or it refused us.
 var errNotReady = errors.New("app not ready")
 
-// connectRetrying connects to the app, retrying until the start timeout while its server is not up yet.
 func (a App) connectRetrying(ctx context.Context) (*connection, error) {
 	deadline := time.Now().Add(a.startTimeout)
 	for {
@@ -77,8 +75,6 @@ func connect(device adb.Device, socketName string) (*connection, error) {
 	return &connection{conn, reader, hello}, nil
 }
 
-// exchange sends one encoded request, hands the message of each notification of the reply to notify as it arrives,
-// and returns the last frame.
 func (c *connection) exchange(request []byte, notify NotificationFunc) (wire.Frame, error) {
 	// Never half-close the connection: adb drops the app's reply when the host side shuts down writes.
 	if _, err := c.conn.Write(append(request, '\n')); err != nil {

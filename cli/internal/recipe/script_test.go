@@ -518,13 +518,11 @@ var actions = []wire.Action{
 	}},
 }
 
-// write writes file as the recipes of pkg in a config dir of the test's own, and returns its path.
 func write(t *testing.T, file string) string {
 	t.Helper()
 	return writeFile(t, pkg+".ts", strings.TrimPrefix(file, "\n"))
 }
 
-// writeFile writes content to name in the recipes dir, in a config dir of the test's own unless the test has one.
 func writeFile(t *testing.T, name, content string) string {
 	t.Helper()
 	if !strings.HasPrefix(os.Getenv("XDG_CONFIG_HOME"), os.TempDir()) {
@@ -540,7 +538,6 @@ func writeFile(t *testing.T, name, content string) string {
 	return path
 }
 
-// load writes file as the recipes of pkg and loads them.
 func load(t *testing.T, file string) *Script {
 	t.Helper()
 	write(t, file)
@@ -556,7 +553,7 @@ func sameJSON(a, b string) bool {
 	return json.Unmarshal([]byte(a), &x) == nil && json.Unmarshal([]byte(b), &y) == nil && reflect.DeepEqual(x, y)
 }
 
-// call calls action with keys and values in turn. A key without a value gives the key no values.
+// A key without a value gives the key no values.
 func call(action string, keysAndValues ...string) Call {
 	args := map[string]wire.RawArg{}
 	for i := 0; i < len(keysAndValues); i += 2 {
@@ -569,7 +566,6 @@ func call(action string, keysAndValues ...string) Call {
 	return Call{Action: action, Args: args}
 }
 
-// fakeApp greets for app.greet, answers with data for the actions in data, and rejects fail.
 type fakeApp struct {
 	starts   []client.StartMode
 	commands []string

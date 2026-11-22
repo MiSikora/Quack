@@ -5,14 +5,12 @@ import (
 	"strings"
 )
 
-// Call asks the app to run an action.
 type Call struct {
 	Action string
 	Args   map[string]RawArg
 }
 
-// RawArg holds the values of one key in command-line order. It goes on the wire as a string when the key appears
-// once, and as an array when it repeats.
+// Goes on the wire as a string when the key appears once, and as an array when it repeats.
 type RawArg []string
 
 func (a RawArg) MarshalJSON() ([]byte, error) {
@@ -22,8 +20,7 @@ func (a RawArg) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]string(a))
 }
 
-// SplitList splits the text of a string_list on commas into its values, with spaces around them trimmed and empty ones
-// dropped. \, is a comma inside a value.
+// Spaces around values are trimmed and empty ones dropped. \, is a comma inside a value.
 func SplitList(text string) RawArg {
 	var values RawArg
 	var value strings.Builder

@@ -1280,49 +1280,38 @@ func TestTinyWindowsShowOnlyTheMessage(t *testing.T) {
 	h.waitForNo("find an action")
 }
 
-// harness runs the TUI as a program without a terminal and keeps its latest view.
 type harness struct {
 	t       *testing.T
 	program *tea.Program
-	// exited is closed once the program ends.
-	exited chan struct{}
+	exited  chan struct{}
 
 	mu        sync.Mutex
 	latest    string
 	latestRaw string
-	// height is the height of the window the harness gave the TUI last.
-	height int
-	// seen are the numbers of rows the panel took at the bottom of the views since the last resetHeights.
-	seen map[int]bool
-	// copied is what the TUI wrote to the system's clipboard.
-	copied []string
-	// clock is the TUI's, which moves only when advance moves it. Each wait moves it on by step as it looks, while step
-	// is not 0.
+	height    int
+	seen      map[int]bool
+	copied    []string
+	// Moves only when advance moves it. While step is not 0, each wait moves it on by step as it looks.
 	clock *fakeClock
 	step  time.Duration
 }
 
-// settled is a message the probe closes instead of handing it to the model. The program handles messages in order, so
+// The probe closes a settled message instead of handing it to the model. The program handles messages in order, so
 // once it is closed, every message sent before it has been handled.
 type settled chan struct{}
 
-// probe records the view after every update.
 type probe struct {
 	h     *harness
 	model *model
 }
 
-// start runs the TUI for app, the only app on the only device, in a window 100 columns wide and 30 rows high, after
-// options change its model, and waits for the actions.
 func start(t *testing.T, app *fakeApp, options ...func(*model)) *harness {
 	h := startPicking(t, newFakeSource(app), client.Target{}, client.Wake, options...)
 	h.waitFor("quack · ", "type or ↑ to find an action")
 	return h
 }
 
-// startPicking runs the TUI on the devices of source, picking among those that want leaves and starting the first app
-// in mode, in a window 100 columns wide and 30 rows high, after options change its model. The apps read their recipes
-// from a config dir of the test's own, which has none.
+// The apps read their recipes from a config dir of the test's own, which has none.
 func startPicking(t *testing.T, source *fakeSource, want client.Target, mode client.StartMode, options ...func(*model)) *harness {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1357,12 +1346,10 @@ func startPicking(t *testing.T, source *fakeSource, want client.Target, mode cli
 	return h
 }
 
-// withRecipes gives the sample app a recipe file that holds file.
 func withRecipes(t *testing.T, file string) func(*model) {
 	return func(*model) { writeRecipes(t, file) }
 }
 
-// writeRecipes writes file as the recipe file of the sample app, and returns its path.
 func writeRecipes(t *testing.T, file string) string {
 	t.Helper()
 	path := recipe.Path("io.mehow.quack.sample")
@@ -1375,7 +1362,7 @@ func writeRecipes(t *testing.T, file string) string {
 	return path
 }
 
-// withClock has the runs tell the time from a clock that moves on by the next of steps each time it is read.
+// The runs' clock moves on by the next of steps each time it is read.
 func withClock(steps ...time.Duration) func(*model) {
 	return func(m *model) {
 		now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
@@ -1406,10 +1393,8 @@ func (p probe) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (p probe) View() tea.View { return p.model.View() }
 
-// mouse sends a mouse message, at a cell of the view.
 func (h *harness) mouse(msg tea.Msg) { h.program.Send(msg) }
 
-// logRow is the row of the view of the first row of the log that starts with text, or -1 without one.
 func (h *harness) logRow(text string) int {
 	lines, _ := h.split()
 	for y, line := range lines {
@@ -1420,7 +1405,6 @@ func (h *harness) logRow(text string) int {
 	return -1
 }
 
-// reversed are the cells of the log, as x and y in the view, drawn in reverse video.
 func (h *harness) reversed() map[[2]int]bool {
 	h.mu.Lock()
 	raw, height := h.latestRaw, h.height
@@ -1444,7 +1428,6 @@ func (h *harness) clipboard() []string {
 	return slices.Clone(h.copied)
 }
 
-// waitForCopied waits until the TUI wrote text to the system's clipboard last.
 func (h *harness) waitForCopied(text string) {
 	h.t.Helper()
 	last := func() string {
@@ -1457,7 +1440,6 @@ func (h *harness) waitForCopied(text string) {
 	h.wait(last, func(got string) bool { return got == text }, "want copied "+strconv.Quote(text))
 }
 
-// resize gives the TUI a window of width and height.
 func (h *harness) resize(width, height int) {
 	h.mu.Lock()
 	h.height = height
@@ -1471,14 +1453,12 @@ func (h *harness) view() string {
 	return h.latest
 }
 
-// raw is the latest view with its styles.
 func (h *harness) raw() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.latestRaw
 }
 
-// checkPanel checks that the rows of the panel start with those of want, and that the blank ones in want are blank.
 func checkPanel(t *testing.T, h *harness, want []string) {
 	t.Helper()
 	lines := h.panel()
@@ -1492,8 +1472,6 @@ func checkPanel(t *testing.T, h *harness, want []string) {
 	}
 }
 
-// split cuts the view into the log that shows and the panel: the last rows, from the blank row over the title, or from
-// the rule over the list or the box that covers the title.
 func (h *harness) split() (log, panel []string) {
 	h.mu.Lock()
 	lines := strings.Split(h.latest, "\n")
@@ -1513,7 +1491,6 @@ func isTitle(line string) bool {
 	return strings.HasPrefix(line, "quack · ") || strings.TrimRight(line, " ") == "quack"
 }
 
-// panel is the rows of the panel without the spaces at their ends.
 func (h *harness) panel() []string {
 	_, lines := h.split()
 	for i, line := range lines {
@@ -1527,7 +1504,6 @@ func (h *harness) panelText() string {
 	return strings.Join(lines, "\n")
 }
 
-// logText is the rows of the log the view shows, without the spaces at their ends.
 func (h *harness) logText() string {
 	lines, _ := h.split()
 	for i, line := range lines {
@@ -1538,7 +1514,6 @@ func (h *harness) logText() string {
 
 func (h *harness) lines() int { return strings.Count(h.view(), "\n") + 1 }
 
-// overlayRows is how many rows the list or the box takes over the input, or 0 while none shows.
 func (h *harness) overlayRows() int {
 	panel := h.panel()
 	if len(panel) == 0 || !isRule(panel[0]) {
@@ -1547,11 +1522,8 @@ func (h *harness) overlayRows() int {
 	return len(panel) - 5
 }
 
-// panelRows is how many rows the panel takes at the bottom of the view: from two rows over the rule over the input down.
 func (h *harness) panelRows() int { return panelFromBottom(h.view()) }
 
-// panelFromBottom is the number of rows from two rows over the rule over the input down to the end of view, or 0 without
-// that rule.
 func panelFromBottom(view string) int {
 	lines := strings.Split(view, "\n")
 	rules := 0
@@ -1571,7 +1543,6 @@ func (h *harness) resetHeights() {
 	h.seen = map[int]bool{}
 }
 
-// heights are the numbers of rows the panel took in the views since the last resetHeights, lowest first.
 func (h *harness) heights() []int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -1583,7 +1554,6 @@ func (h *harness) heights() []int {
 	return heights
 }
 
-// press sends keys by their names, as tea.Key.String writes them.
 func (h *harness) press(keys ...string) {
 	for _, name := range keys {
 		var k tea.Key
@@ -1630,23 +1600,19 @@ func (h *harness) press(keys ...string) {
 	h.settle()
 }
 
-// advance moves the TUI's clock on by d, which ends the waits that d finishes.
 func (h *harness) advance(d time.Duration) { h.clock.advance(d) }
 
-// keepPolling has the waits that follow move the clock on by pollTime each time they look, so that polls and the
-// tracker's retries go on until what the test waits for shows. A poll skips a device whose last answer the TUI has
-// not had yet, so a single poll does not always ask it.
+// The waits that follow move the clock on by pollTime each time they look, so that polls and the tracker's retries go
+// on. A poll skips a device whose last answer has not come yet, so a single poll does not always ask it.
 func (h *harness) keepPolling() { h.step = pollTime }
 
-// waitForInspects waits until the source has inspected devices count times.
 func (h *harness) waitForInspects(source *fakeSource, count int) {
 	h.t.Helper()
 	inspects := func() string { return strconv.Itoa(source.inspects()) }
 	h.wait(inspects, func(n string) bool { got, _ := strconv.Atoi(n); return got >= count }, strconv.Itoa(count)+" inspects")
 }
 
-// startWatch runs account.watch and waits for what it says first. It says nothing more until an account signs in, so
-// that what the test does next has the log to itself.
+// The watch says nothing more until an account signs in, so that what the test does next has the log to itself.
 func (h *harness) startWatch() {
 	h.t.Helper()
 	h.typing("account.watch")
@@ -1661,8 +1627,7 @@ func (h *harness) typing(text string) {
 	h.settle()
 }
 
-// settle waits until the TUI has handled every key sent so far, so that what a test reads next comes after them. It
-// returns at once when the program has ended, as a key that quits ends it.
+// Returns at once when the program has ended, as a key that quits ends it.
 func (h *harness) settle() {
 	h.t.Helper()
 	done := make(settled)
@@ -1675,7 +1640,6 @@ func (h *harness) settle() {
 	}
 }
 
-// waitFor waits until the panel holds each text, in order.
 func (h *harness) waitFor(texts ...string) {
 	h.t.Helper()
 	h.wait(h.panelText, func(panel string) bool { return holds(panel, texts) }, "want "+strings.Join(texts, " then "))
@@ -1686,20 +1650,17 @@ func (h *harness) waitForNo(text string) {
 	h.wait(h.panelText, func(panel string) bool { return !strings.Contains(panel, text) }, "want no "+text)
 }
 
-// waitForLines waits until the view is count lines high.
 func (h *harness) waitForLines(count int) {
 	h.t.Helper()
 	h.wait(h.view, func(view string) bool { return strings.Count(view, "\n")+1 == count }, strconv.Itoa(count)+" lines")
 }
 
-// waitForOverlayRows waits until the list or the box takes count rows over the input.
 func (h *harness) waitForOverlayRows(count int) {
 	h.t.Helper()
 	rows := func() string { return strconv.Itoa(h.overlayRows()) }
 	h.wait(rows, func(rows string) bool { return rows == strconv.Itoa(count) }, "a list of "+strconv.Itoa(count)+" rows")
 }
 
-// waitForLog waits until the log the view shows holds each text, in order.
 func (h *harness) waitForLog(texts ...string) {
 	h.t.Helper()
 	h.wait(h.logText, func(log string) bool { return holds(log, texts) }, "want in the log "+strings.Join(texts, " then "))
@@ -1720,7 +1681,7 @@ func (h *harness) waitForExit() {
 	}
 }
 
-// waitForRunning fails if the program ends within a moment.
+// Fails if the program ends within a moment.
 func (h *harness) waitForRunning() {
 	h.t.Helper()
 	select {
@@ -1742,9 +1703,7 @@ func (h *harness) wait(read func() string, done func(string) bool, want string) 
 	}
 }
 
-// holds is whether s holds each text, in order.
-// wrapped is text as a log width columns wide shows it: cut into rows, without the spaces at their ends. Text that
-// starts with a temp path wraps where the path's length puts it, which differs between systems.
+// Text that starts with a temp path wraps where the path's length puts it, which differs between systems.
 func wrapped(text string, width int) string {
 	rows := strings.Split(ansi.Hardwrap(text, width, true), "\n")
 	for i, row := range rows {
@@ -1764,14 +1723,12 @@ func holds(s string, texts []string) bool {
 	return true
 }
 
-// fakeClock is a clock that stands still until advance moves it.
 type fakeClock struct {
 	mu     sync.Mutex
 	now    time.Time
 	timers []fakeTimer
 }
 
-// fakeTimer is a wait of After, which ends at at.
 type fakeTimer struct {
 	at   time.Time
 	ends chan time.Time
@@ -1791,7 +1748,6 @@ func (c *fakeClock) After(d time.Duration) <-chan time.Time {
 	return ends
 }
 
-// advance moves the clock on by d and ends the waits that are due by then.
 func (c *fakeClock) advance(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1805,8 +1761,7 @@ func (c *fakeClock) advance(d time.Duration) {
 	})
 }
 
-// fakeApp answers like the sample app. account.watch prints the account each time account.create signs in, until
-// it is canceled.
+// account.watch prints the account each time account.create signs in, until it is canceled.
 type fakeApp struct {
 	status io.Writer
 	pkg    string
@@ -1816,11 +1771,9 @@ type fakeApp struct {
 	calls         []wire.Call
 	watchers      []func(string)
 	watchCanceled []chan struct{}
-	// stopsHeld, while not nil, keeps canceled watches from ending until it closes.
-	stopsHeld chan struct{}
+	stopsHeld     chan struct{}
 }
 
-// withNameHints gives the name of app.greet hints.
 func withNameHints(app *fakeApp, hints ...string) *fakeApp {
 	app.described[0].Params[0].Hints = hints
 	return app
@@ -1869,7 +1822,6 @@ func (a *fakeApp) Call(ctx context.Context, call wire.Call, notify client.Notifi
 	return wire.MessageResult{Message: message}, err
 }
 
-// reply runs call and returns its message.
 func (a *fakeApp) reply(ctx context.Context, call wire.Call, notify client.NotificationFunc) (string, error) {
 	a.mu.Lock()
 	a.calls = append(a.calls, call)
@@ -1924,7 +1876,6 @@ func (a *fakeApp) Target() client.Target {
 	return client.Target{Device: "emulator-5554", Package: a.pkg}
 }
 
-// Command answers every command with its text.
 func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
 	return adb.Output{Stdout: "ran " + cmd + "\n"}, nil
 }
@@ -1937,7 +1888,6 @@ func (a *fakeApp) Start(mode client.StartMode) error {
 	return nil
 }
 
-// holdStops keeps watches from ending when they are canceled, until release.
 func (a *fakeApp) holdStops() (release func()) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1946,7 +1896,6 @@ func (a *fakeApp) holdStops() (release func()) {
 	return sync.OnceFunc(func() { close(held) })
 }
 
-// signIn tells the watches that username signed in.
 func (a *fakeApp) signIn(username string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1963,7 +1912,6 @@ func (a *fakeApp) received() []wire.Call {
 	return append([]wire.Call(nil), a.calls...)
 }
 
-// canceled is closed once the watch call number i is canceled.
 func (a *fakeApp) canceled(i int) <-chan struct{} {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1984,27 +1932,20 @@ func (a *fakeApp) setActions(actions []wire.Action) {
 
 const timeout = 5 * time.Second
 
-// fakeSource is adb with devices on which fake apps run. Each app is the default one unless apps has one for its
-// target. It records each app it starts.
+// Each app is the default one unless apps has one for its target.
 type fakeSource struct {
 	app *fakeApp
 
-	mu      sync.Mutex
-	devices []client.Device
-	apps    map[client.Target]*fakeApp
-	// send is Track's, once it tracks.
-	send func([]adb.Listing)
-	// started is each app the source started, as its device, its package and the mode.
-	started []string
-	// failTracks is how many times Track fails before it tracks.
+	mu         sync.Mutex
+	devices    []client.Device
+	apps       map[client.Target]*fakeApp
+	send       func([]adb.Listing)
+	started    []string
 	failTracks int
-	// held keeps Connect of a target from returning until its channel closes.
-	held map[client.Target]chan struct{}
-	// inspected counts the calls of Inspect.
-	inspected int
+	held       map[client.Target]chan struct{}
+	inspected  int
 }
 
-// newFakeSource is a Pixel 8, emulator-5554, on which app is the only quack-enabled app.
 func newFakeSource(app *fakeApp, devices ...client.Device) *fakeSource {
 	if len(devices) == 0 {
 		devices = []client.Device{device("emulator-5554", "Pixel 8", "device", app.pkg)}
@@ -2012,7 +1953,6 @@ func newFakeSource(app *fakeApp, devices ...client.Device) *fakeSource {
 	return &fakeSource{app: app, devices: devices, apps: map[client.Target]*fakeApp{}, held: map[client.Target]chan struct{}{}}
 }
 
-// device is a device in state, with model and pkgs once it is ready.
 func device(serial, model, state string, pkgs ...string) client.Device {
 	return client.Device{Listing: adb.Listing{Device: adb.Device(serial), State: state}, Model: model, Packages: pkgs}
 }
@@ -2063,7 +2003,6 @@ func (s *fakeSource) Connect(target client.Target, mode client.StartMode, status
 	return app, nil
 }
 
-// hold keeps the start of pkg on serial from answering until release.
 func (s *fakeSource) hold(serial, pkg string) (release func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2084,7 +2023,6 @@ func (s *fakeSource) starts() []string {
 	return slices.Clone(s.started)
 }
 
-// set connects devices instead of the ones there are, and tells Track.
 func (s *fakeSource) set(devices ...client.Device) {
 	s.mu.Lock()
 	s.devices = devices
@@ -2095,7 +2033,7 @@ func (s *fakeSource) set(devices ...client.Device) {
 	}
 }
 
-// install changes the apps on a device without adb listing anything new, as installing an app does.
+// Installing an app changes nothing that adb lists.
 func (s *fakeSource) install(serial string, pkgs ...string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2106,7 +2044,6 @@ func (s *fakeSource) install(serial string, pkgs ...string) {
 	}
 }
 
-// appFor runs a fake app of its own for pkg on serial.
 func (s *fakeSource) appFor(serial, pkg string) *fakeApp {
 	app := newFakeApp()
 	app.pkg = pkg

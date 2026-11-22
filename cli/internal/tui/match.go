@@ -7,9 +7,8 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
-// find matches text against items fuzzily, ignoring case and word by word, best first. An item matches when every word
-// of the text, in any order, matches it, and it scores the sum of the words' scores. Its matched indexes join the
-// words'. Text without any words matches nothing.
+// Every word of the text must match, in any order, and the item scores the sum of the words' scores. Text without
+// words matches nothing.
 func find(text string, items []string) fuzzy.Matches {
 	words := strings.Fields(text)
 	if len(words) == 0 {

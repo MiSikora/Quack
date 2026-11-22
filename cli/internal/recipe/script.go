@@ -21,17 +21,15 @@ import (
 	"quack/internal/wire"
 )
 
-// Script is the recipes file of an app, bundled with the files it imports.
 type Script struct {
 	Path string
-	// Recipes are the recipes the file exports, sorted by name.
+	// Sorted by name.
 	Recipes []Recipe
 	code    string
 }
 
-// Observer hears what a run does. Started and then Ended or Failed frame each Step, with the notifications of a Call
-// between them. Logged is a line that console.log wrote. The error of a Step that failed then ends the run, unless the
-// recipe catches it. Any of them may be nil.
+// Started and then Ended or Failed frame each Step, with the notifications of a Call between them. Any of them
+// may be nil.
 type Observer struct {
 	Started  func(step Step)
 	Notified func(message string)
@@ -40,8 +38,7 @@ type Observer struct {
 	Logged   func(text string)
 }
 
-// ScriptError is a recipe that threw: what it threw, which is the Go error of a failed Step when it threw that, and
-// where in the recipes file it was, innermost first.
+// Stack is innermost first.
 type ScriptError struct {
 	Err   error
 	Stack []string
@@ -66,8 +63,7 @@ var (
 	starter []byte
 )
 
-// Dir is where recipes files are: quack/recipes in $XDG_CONFIG_HOME, or in ~/.config when that is unset or empty, on
-// every OS.
+// ~/.config on every OS when XDG_CONFIG_HOME is unset or empty.
 func Dir() string {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
@@ -77,7 +73,6 @@ func Dir() string {
 	return filepath.Join(dir, "quack", "recipes")
 }
 
-// Path is the recipes file of pkg: <pkg>.js when only that exists, and <pkg>.ts otherwise.
 func Path(pkg string) string {
 	js := filepath.Join(Dir(), pkg+".js")
 	if _, err := os.Stat(js); err == nil && !exists(filepath.Join(Dir(), pkg+".ts")) {
@@ -86,9 +81,8 @@ func Path(pkg string) string {
 	return filepath.Join(Dir(), pkg+".ts")
 }
 
-// Load reads the recipes of pkg, or returns nil when pkg has no recipes file. A file that does not bundle, throws as it
-// loads, or declares a recipe wrong fails with an error that says where. Load also brings the files that quack owns next
-// to recipes files up to date with this quack, so that editors check recipes against the "quack" quack runs.
+// Load returns nil without a recipes file. It also brings quack.d.ts and tsconfig.json next to recipes files up to
+// date, so that editors check recipes against the "quack" this quack runs.
 func Load(pkg string) (*Script, error) {
 	ts, js := filepath.Join(Dir(), pkg+".ts"), filepath.Join(Dir(), pkg+".js")
 	switch {
@@ -122,9 +116,6 @@ func Load(pkg string) (*Script, error) {
 	return s, nil
 }
 
-// Init writes the files that quack owns into Dir, so that editors check recipes files there before quack loads any,
-// and with pkg also a starter recipes file of pkg when it has none. It returns the files it wrote: none when they are
-// up to date and pkg has its file.
 func Init(pkg string) ([]string, error) {
 	written, err := writeOwned()
 	if err != nil || pkg == "" {
@@ -140,8 +131,6 @@ func Init(pkg string) ([]string, error) {
 	return append(written, ts), nil
 }
 
-// writeOwned writes quack.d.ts and tsconfig.json into Dir, where they differ from this quack's, and returns the ones it
-// wrote.
 func writeOwned() ([]string, error) {
 	if err := os.MkdirAll(Dir(), 0o755); err != nil {
 		return nil, err
@@ -161,8 +150,7 @@ func writeOwned() ([]string, error) {
 	return written, nil
 }
 
-// Run runs the recipe name against app with args, which the recipe's params check and convert as an action's params
-// would. It ends when the recipe returns or throws, or when ctx ends, which interrupts the recipe wherever it is.
+// Ending ctx interrupts the recipe wherever it is.
 func (s *Script) Run(ctx context.Context, app App, name string, args map[string]wire.RawArg, observer Observer) error {
 	at := slices.IndexFunc(s.Recipes, func(r Recipe) bool { return r.Name == name })
 	if at < 0 {
@@ -187,19 +175,16 @@ func (s *Script) Run(ctx context.Context, app App, name string, args map[string]
 	return nil
 }
 
-// canceled is the error of a run that ctx ended.
 var canceled = &client.CallError{Message: "canceled"}
 
-// runtime is a goja runtime with the "quack" module, for one load or run of a script. Its app is nil for a load, which
-// only reads what the script declares.
+// app is nil for a load, which only reads what the script declares.
 type runtime struct {
 	script   *Script
 	vm       *goja.Runtime
 	ctx      context.Context
 	app      App
 	observer Observer
-	// recipes are the recipes the script declared, by the object recipe() returned for each.
-	recipes map[goja.Value]declaredRecipe
+	recipes  map[goja.Value]declaredRecipe
 }
 
 type declaredRecipe struct {
@@ -213,7 +198,6 @@ func newRuntime(s *Script, ctx context.Context, app App, observer Observer) *run
 	return r
 }
 
-// load runs the script's top level with the "quack" module and console, and returns its exports.
 func (r *runtime) load() (*goja.Object, error) {
 	vm := r.vm
 	quack := vm.NewObject()
@@ -257,7 +241,6 @@ func (r *runtime) load() (*goja.Object, error) {
 		}
 		return nil, err
 	}
-	// A file without exports has no recipes.
 	exports, ok := vm.Get("__recipes").(*goja.Object)
 	if !ok {
 		exports = vm.NewObject()
@@ -265,7 +248,6 @@ func (r *runtime) load() (*goja.Object, error) {
 	return exports, nil
 }
 
-// recipe is recipe() of the "quack" module, which declares a recipe from its definition.
 func (r *runtime) recipe(definition *goja.Object) goja.Value {
 	vm := r.vm
 	if definition == nil {
@@ -295,7 +277,6 @@ func (r *runtime) recipe(definition *goja.Object) goja.Value {
 	return handle
 }
 
-// param reads the declaration of the param name, as quack.d.ts types it.
 func param(name string, declaration any) (wire.Param, error) {
 	fields, ok := declaration.(map[string]any)
 	if !ok {
@@ -344,14 +325,12 @@ func joinTypes() string {
 	return strings.Join(names, ", ")
 }
 
-// actionResult is what runAction() returns.
 type actionResult struct {
 	Message       string     `json:"message"`
 	Data          goja.Value `json:"data"`
 	Notifications []string   `json:"notifications"`
 }
 
-// runAction is runAction() of the "quack" module.
 func (r *runtime) runAction(id string, args map[string]any) actionResult {
 	call := Call{Action: id}
 	for key, value := range args {
@@ -375,7 +354,6 @@ func (r *runtime) runAction(id string, args map[string]any) actionResult {
 	return out
 }
 
-// step runs step in the app, and throws its error into the script when it fails.
 func (r *runtime) step(step Step) wire.MessageResult { return r.do(step, nil) }
 
 func (r *runtime) do(step Step, collect func(string)) wire.MessageResult {
@@ -405,7 +383,7 @@ func (r *runtime) do(step Step, collect func(string)) wire.MessageResult {
 	return result
 }
 
-// waitUntil is waitUntil() of the "quack" module. Its waits between checks are no steps of their own.
+// Its waits between checks are no steps of their own.
 func (r *runtime) waitUntil(check goja.Callable, options *goja.Object) {
 	timeout, every := 10*time.Second, 500*time.Millisecond
 	if options != nil {
@@ -437,7 +415,6 @@ func (r *runtime) waitUntil(check goja.Callable, options *goja.Object) {
 	}
 }
 
-// duration reads a duration of the "quack" module: text such as 2s or 500ms, or a number of milliseconds, above zero.
 func (r *runtime) duration(value goja.Value, what string) time.Duration {
 	var d time.Duration
 	var err error
@@ -457,8 +434,7 @@ func (r *runtime) duration(value goja.Value, what string) time.Duration {
 	return d
 }
 
-// thrown is the error of what the script threw: the Go error of a failed Step, or the script's own error, with where it
-// was thrown. An interrupt is the run's ctx ending.
+// A goja interrupt is the run's ctx ending.
 func (r *runtime) thrown(err error) error {
 	var interrupted *goja.InterruptedError
 	if errors.As(err, &interrupted) {
@@ -487,9 +463,7 @@ func (r *runtime) thrown(err error) error {
 	return &ScriptError{Err: cause, Stack: stack}
 }
 
-// recipeArgs checks args against the params of r, as the app checks the args of an action, and converts them to the
-// values the recipe's run gets: numbers, booleans, strings, and arrays of strings. A param without a value and without a
-// default stays out.
+// A param without a value and without a default stays out.
 func recipeArgs(r Recipe, args map[string]wire.RawArg) (map[string]any, error) {
 	fail := func(format string, a ...any) error {
 		return wire.Error{Code: wire.ErrorCodeInvalidArgs, Message: fmt.Sprintf("recipe '%s': ", r.Name) + fmt.Sprintf(format, a...)}
@@ -528,7 +502,6 @@ func recipeArgs(r Recipe, args map[string]wire.RawArg) (map[string]any, error) {
 	return values, nil
 }
 
-// argValue is the value of p, which parses, as the recipe's run gets it.
 func argValue(p wire.Param, raw wire.RawArg) any {
 	switch p.Type {
 	case wire.ParamTypeStringList:
@@ -548,8 +521,6 @@ func argValue(p wire.Param, raw wire.RawArg) any {
 	return raw[0]
 }
 
-// rawValues are the values of an arg as the command line would give them: one for a scalar, and one for each item of
-// an array.
 func rawValues(value any) (wire.RawArg, bool) {
 	var items []any
 	switch v := value.(type) {
@@ -580,8 +551,7 @@ func rawValues(value any) (wire.RawArg, bool) {
 	return values, true
 }
 
-// bundle bundles the recipes file at path with the local files it imports into one script that sets __recipes to its
-// exports, with "quack" bound to __quack. An inline source map lets errors point into the files as written.
+// The inline source map lets errors point into the files as written.
 func bundle(path string) (string, error) {
 	quack := api.Plugin{Name: "quack", Setup: func(build api.PluginBuild) {
 		build.OnResolve(api.OnResolveOptions{Filter: `^quack$`}, func(api.OnResolveArgs) (api.OnResolveResult, error) {
@@ -618,7 +588,6 @@ func bundle(path string) (string, error) {
 	return string(result.OutputFiles[0].Contents), nil
 }
 
-// environment is env of the "quack" module: quack's environment variables by name.
 func environment() map[string]string {
 	env := map[string]string{}
 	for _, entry := range os.Environ() {

@@ -20,7 +20,6 @@ const sampleDescribe = `{"result":{"actions":[` +
 	`{"id":"app.teapot","description":"Fail with an error code the CLI does not know","params":[]}` +
 	`]}}`
 
-// sampleApp is a running sample app that answers like the real one for the actions the scenarios use.
 func sampleApp() *fakeApp {
 	return &fakeApp{
 		pkg:         "io.mehow.quack.sample",

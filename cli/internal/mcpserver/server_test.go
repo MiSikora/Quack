@@ -418,7 +418,6 @@ func TestRunRecipeNamesTheFileWithoutTheRecipe(t *testing.T) {
 	assertError(t, result, "no recipe named fresh in "+path)
 }
 
-// writeRecipes writes file as the recipes of the sample app, in a config dir of the test's own, and returns its path.
 func writeRecipes(t *testing.T, file string) string {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -437,8 +436,8 @@ func quoted(text string) string {
 	return string(out)
 }
 
-// progressLog keeps the messages of the progress notifications a client gets. The client handles notifications on a
-// goroutine of their own, so a call can return before the handler has seen the notifications sent ahead of its result.
+// The client handles notifications on a goroutine of their own, so a call can return before the handler has
+// seen the notifications sent ahead of its result.
 type progressLog struct {
 	mu       sync.Mutex
 	messages []string
@@ -450,7 +449,6 @@ func (l *progressLog) handle(_ context.Context, req *mcp.ProgressNotificationCli
 	l.messages = append(l.messages, req.Params.Message)
 }
 
-// waitFor fails unless the messages come to want within a few seconds.
 func (l *progressLog) waitFor(t *testing.T, want []string) {
 	t.Helper()
 	var got []string
@@ -467,7 +465,6 @@ func (l *progressLog) waitFor(t *testing.T, want []string) {
 	}
 }
 
-// connect runs a server for source and connects a client to it in memory.
 func connect(t *testing.T, source *fakeSource) *mcp.ClientSession {
 	return connectWith(t, source, nil)
 }
@@ -477,7 +474,7 @@ func connectWith(t *testing.T, source *fakeSource, options *mcp.ClientOptions) *
 	return connectAt(t, source, options, "")
 }
 
-// connectAt connects a client that asks for the protocol version, or the latest for "".
+// "" asks for the latest protocol version.
 func connectAt(t *testing.T, source *fakeSource, options *mcp.ClientOptions, version string) *mcp.ClientSession {
 	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
@@ -496,7 +493,6 @@ func connectAt(t *testing.T, source *fakeSource, options *mcp.ClientOptions, ver
 	return session
 }
 
-// call calls a tool and fails the test when the tool fails.
 func call(t *testing.T, session *mcp.ClientSession, tool string, args map[string]any) *mcp.CallToolResult {
 	t.Helper()
 	result := callTool(t, session, tool, args)
@@ -556,15 +552,12 @@ func text(result *mcp.CallToolResult) string {
 	return strings.Join(texts, "\n")
 }
 
-// fakeSource has one ready device with the sample app, unless a test changes it.
 type fakeSource struct {
 	devices []client.Device
 	app     *fakeApp
 	findErr error
-	// finds are the device and package of each Find, joined by a space.
-	finds []string
-	// modes are the start modes of each Connect.
-	modes []client.StartMode
+	finds   []string
+	modes   []client.StartMode
 }
 
 func newFakeSource() *fakeSource {
@@ -590,8 +583,6 @@ func (s *fakeSource) Recipes(pkg string) (*recipe.Script, string, error) {
 	return clientSource{}.Recipes(pkg)
 }
 
-// fakeApp has account.create, which creates the account its username names, and account.delete, which the app
-// rejects.
 type fakeApp struct {
 	calls  []wire.Call
 	starts []client.StartMode
@@ -601,7 +592,6 @@ func (a *fakeApp) Target() client.Target {
 	return client.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}
 }
 
-// Command answers every command with its text.
 func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
 	return adb.Output{Stdout: "ran " + cmd + "\n"}, nil
 }

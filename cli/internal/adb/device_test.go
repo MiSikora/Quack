@@ -154,7 +154,6 @@ func TestTrackWaitsForChangesUntilTheContextEnds(t *testing.T) {
 	}
 }
 
-// serve runs an adb server for the test that hands each request to answer.
 func serve(t *testing.T, answer func(conn net.Conn, request string)) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -180,7 +179,6 @@ func serve(t *testing.T, answer func(conn net.Conn, request string)) {
 	}()
 }
 
-// okay accepts a request and answers it with text.
 func okay(conn net.Conn, text string) {
 	io.WriteString(conn, "OKAY")
 	writeLengthPrefixed(conn, text)
@@ -191,7 +189,6 @@ func fail(conn net.Conn, reason string) {
 	writeLengthPrefixed(conn, reason)
 }
 
-// packet writes a packet of adb's shell protocol.
 func packet(conn net.Conn, id byte, data string) {
 	header := []byte{id, 0, 0, 0, 0}
 	binary.LittleEndian.PutUint32(header[1:], uint32(len(data)))

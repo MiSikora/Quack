@@ -1,4 +1,3 @@
-// Package client reaches a quack-enabled app on a device: it finds the app, starts it, and sends it requests.
 package client
 
 import (
@@ -17,42 +16,35 @@ import (
 	"quack/internal/wire"
 )
 
-// StartMode is how the CLI gets the app running before each request.
 type StartMode string
 
 const (
-	// Wake starts the app in the background, or thaws it when Android froze it there.
-	Wake StartMode = "wake"
-	// OpenApp shows the app's main screen.
+	// Wake also thaws an app that Android froze in the background.
+	Wake    StartMode = "wake"
 	OpenApp StartMode = "open-app"
 )
 
-// AppError is an app that is missing, does not start, or speaks a protocol this CLI cannot use.
 type AppError struct {
 	Message string
 }
 
 func (e *AppError) Error() string { return e.Message }
 
-// CallError is a request that ended without the app's answer: canceled, or cut off.
 type CallError struct {
 	Message string
 }
 
 func (e *CallError) Error() string { return e.Message }
 
-// NotificationFunc receives the message of each notification of a call as it arrives.
 type NotificationFunc func(message string)
 
-// Target is a quack-enabled app on a device: the device and the app's package. The package goes into shell commands,
-// so it must be a valid package name.
+// The package goes into shell commands, so it must be a valid package name.
 type Target struct {
 	Device  adb.Device
 	Package string
 }
 
-// Device is a device adb knows and the quack-enabled apps on it. Model and Packages are empty unless the device is
-// ready.
+// Model and Packages are empty unless the device is ready.
 type Device struct {
 	adb.Listing
 	Model    string
@@ -63,11 +55,11 @@ type Options struct {
 	Target       Target
 	Mode         StartMode
 	StartTimeout time.Duration
-	// Status receives what the CLI says about the app while it works: that it starts the app, or cannot keep it running.
+	// Status receives "starting" and keep-alive warnings.
 	Status io.Writer
 }
 
-// App is a quack-enabled app on a device. Each request runs on a connection of its own.
+// Each request runs on a connection of its own.
 type App struct {
 	device       adb.Device
 	pkg          string
@@ -77,7 +69,6 @@ type App struct {
 	status       io.Writer
 }
 
-// Resolve finds the app that options name.
 func Resolve(options Options) (App, error) {
 	device, pkg := options.Target.Device, options.Target.Package
 	// The app puts the user ID in its socket name so that copies in different Android users do not collide.
@@ -95,8 +86,7 @@ func Resolve(options Options) (App, error) {
 	}, nil
 }
 
-// Find returns the one target that device and pkg leave, either of which may be "" for any. It fails when none is
-// left, saying what is missing, and when several are, listing the flags that pick each.
+// device and pkg may be empty to match any. When several targets match, the error lists the flags that pick each.
 func Find(device adb.Device, pkg string) (Target, error) {
 	devices, err := readyDevices(device)
 	if err != nil {
@@ -132,11 +122,8 @@ func Find(device adb.Device, pkg string) (Target, error) {
 	}
 }
 
-// IsPackageName says whether pkg is an Android package name. Packages go into shell commands, so nothing else may
-// pass.
 func IsPackageName(pkg string) bool { return packagePattern.MatchString(pkg) }
 
-// Packages lists the quack-enabled apps on device: those that receive wakeAction.
 func Packages(device adb.Device) ([]string, error) {
 	out, err := device.Shell("cmd package query-receivers --components -a " + wakeAction)
 	if err != nil {
@@ -152,7 +139,7 @@ func Packages(device adb.Device) ([]string, error) {
 	return pkgs, nil
 }
 
-// Inspect asks a ready device for its model and its quack-enabled apps. Any other device is only its listing.
+// A device that is not ready is only its listing.
 func Inspect(listing adb.Listing) (Device, error) {
 	device := Device{Listing: listing}
 	if listing.State != adb.Ready {
@@ -170,8 +157,7 @@ func Inspect(listing adb.Listing) (Device, error) {
 	return device, nil
 }
 
-// Describe lists the app's actions, sorted by id, so that every list of them reads the same whatever order the app
-// declares them in.
+// Sorted by id, whatever order the app declares them in.
 func (a App) Describe(ctx context.Context) (wire.Hello, []wire.Action, error) {
 	hello, result, err := a.send(ctx, wire.EncodeDescribe(), func(string) {})
 	if err != nil {
@@ -185,8 +171,7 @@ func (a App) Describe(ctx context.Context) (wire.Hello, []wire.Action, error) {
 	return hello, actions.Actions, nil
 }
 
-// Call runs an action and returns its message and data. Canceling ctx closes the connection, which cancels the action
-// in the app.
+// Canceling ctx closes the connection, which cancels the action in the app.
 func (a App) Call(ctx context.Context, call wire.Call, notify NotificationFunc) (wire.MessageResult, error) {
 	_, result, err := a.send(ctx, wire.EncodeCall(call), notify)
 	if err != nil {
@@ -199,19 +184,16 @@ func (a App) Call(ctx context.Context, call wire.Call, notify NotificationFunc) 
 	return message, nil
 }
 
-// Target is the device of the app and its package.
 func (a App) Target() Target { return Target{a.device, a.pkg} }
 
-// Command runs cmd on the app's device, apart from the app.
 func (a App) Command(ctx context.Context, cmd string) (adb.Output, error) {
 	return a.device.Command(ctx, cmd)
 }
 
-// Start gets the app running the way mode asks, in one round trip. It says "starting" when the app was not running,
-// as soon as pidof answers and before the slow part.
+// One round trip. "starting" prints as soon as pidof answers, before the slow part.
 func (a App) Start(mode StartMode) error {
-	// A stopped app may be missing, which would otherwise surface only as a timeout. The check runs first, so that
-	// "starting" is not said for an app that is not there.
+	// A stopped app may be missing, which would otherwise surface only as a timeout. Check first, so that "starting"
+	// is not said for an app that is not there.
 	notInstalled := fmt.Sprintf(`pm path %[1]s >/dev/null 2>&1 || echo "Error: %[1]s is not installed"`, a.pkg)
 	out, err := a.device.ShellStream("pidof " + a.pkg + " >/dev/null || { " + notInstalled + "; echo stopped; }; " + fmt.Sprintf(startCommands[mode], a.pkg))
 	if err != nil {
@@ -233,8 +215,7 @@ func (a App) Start(mode StartMode) error {
 	return nil
 }
 
-// send gets the app running, sends request on a new connection and returns the app's hello and the result frame,
-// a MessageResult or an ActionsResult. The keep alive watchdog starts once the request outlasts keepAliveAfter.
+// The keep-alive watchdog starts once the request outlasts keepAliveAfter.
 func (a App) send(ctx context.Context, request []byte, notify NotificationFunc) (wire.Hello, wire.Frame, error) {
 	if err := a.Start(a.mode); err != nil {
 		return wire.Hello{}, nil, err
@@ -267,8 +248,7 @@ func (a App) send(ctx context.Context, request []byte, notify NotificationFunc) 
 	}
 }
 
-// keepAlive starts the app's foreground service, which keeps the app from being frozen or killed until no call runs.
-// Failing to start it only warns, since the call goes on and may finish before Android freezes the app.
+// Failing to start the service only warns, since the call may finish before Android freezes the app.
 func (a App) keepAlive() {
 	out, err := a.device.Shell("am start-foreground-service -n " + a.pkg + "/" + keepAliveService)
 	if err == nil && strings.Contains(out, "Error") {
@@ -279,7 +259,6 @@ func (a App) keepAlive() {
 	}
 }
 
-// readyDevices is device when it is ready, or else every device adb reports ready. It fails when none is.
 func readyDevices(device adb.Device) ([]adb.Device, error) {
 	if device != "" {
 		if state, err := device.State(); err != nil || state != adb.Ready {
@@ -312,7 +291,6 @@ func readyDevices(device adb.Device) ([]adb.Device, error) {
 	}
 }
 
-// ambiguity says that several targets are left, with the flags that pick each, ready to paste.
 func ambiguity(targets []Target) string {
 	devices := map[adb.Device]bool{}
 	var flags []string
@@ -329,10 +307,9 @@ func ambiguity(targets []Target) string {
 
 var packagePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)
 
-// wakeAction is the broadcast that starts a quack-enabled app. Its receiver also identifies those apps.
+// Its receiver is also how quack recognizes a quack-enabled app.
 const wakeAction = "io.mehow.quack.WAKE"
 
-// startCommands maps each StartMode to its shell command. %[1]s is the package.
 var startCommands = map[StartMode]string{
 	// The broadcast starts a stopped app and thaws one that Android froze in the background.
 	Wake: "am broadcast -a " + wakeAction + " -p %[1]s --include-stopped-packages",
@@ -343,9 +320,8 @@ var startCommands = map[StartMode]string{
 		`case $c in */*) am start -W -n "$c" ;; *) echo "Error: %[1]s has no launcher activity" ;; esac`,
 }
 
-// keepAliveService keeps a quack-enabled app running while a long call runs. Android freezes an app in the background
-// about 10 s after quack wakes it, and the app may not start a foreground service itself from there, so quack starts
-// it once a call outlasts keepAliveAfter.
+// Android freezes a background app about 10 s after quack wakes it, and the app may not start a foreground
+// service itself from there.
 const keepAliveService = "io.mehow.quack.android.QuackService"
 
 const keepAliveAfter = 3 * time.Second

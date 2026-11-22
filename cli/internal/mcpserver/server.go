@@ -1,6 +1,3 @@
-// Package mcpserver serves quack-enabled apps to MCP clients, such as Claude, over stdin and stdout. Its tools list the
-// devices and their apps, list an app's actions and recipes, and run one. Devices and apps come and go, so every call
-// finds them again: a tool picks the only app there is, or the one its device and app arguments name.
 package mcpserver
 
 import (
@@ -25,19 +22,15 @@ import (
 	"quack/internal/wire"
 )
 
-// Source is where the server finds the devices and the apps on them. clientSource is the real one.
 type Source interface {
 	Devices() ([]client.Device, error)
-	// Find returns the one app that device and pkg leave, either of which may be "" for any, as client.Find does.
+	// device and pkg may be "" for any, as in client.Find.
 	Find(device adb.Device, pkg string) (client.Target, error)
-	// Connect gets the app of target running the way mode says before each request.
 	Connect(target client.Target, mode client.StartMode) (App, error)
-	// Recipes are the recipes of pkg, as recipe.Load reads them, or nil without a recipes file, and the file they come
-	// from.
+	// Recipes is nil without a recipes file.
 	Recipes(pkg string) (*recipe.Script, string, error)
 }
 
-// App is what the server needs from a quack app. client.App satisfies it.
 type App interface {
 	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
 	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
@@ -46,13 +39,10 @@ type App interface {
 	Target() client.Target
 }
 
-// Serve serves the apps that adb reaches until the client disconnects. A started app waits up to startTimeout to
-// answer, and what the server says about starting apps goes to status.
 func Serve(ctx context.Context, version string, startTimeout time.Duration, status io.Writer) error {
 	return New(clientSource{startTimeout, status}, version).Run(ctx, &mcp.StdioTransport{})
 }
 
-// New is a server for the apps of source.
 func New(source Source, version string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "quack", Version: version}, &mcp.ServerOptions{Instructions: instructions})
 	s := tools{source}
@@ -105,7 +95,7 @@ type listDevicesOutput struct {
 type deviceOutput struct {
 	Serial string `json:"serial"`
 	Model  string `json:"model"`
-	// State is adb's: device when it is ready, or else why it is not, such as offline or unauthorized.
+	// adb's state: device when ready, or else why not, such as offline or unauthorized.
 	State string   `json:"state"`
 	Apps  []string `json:"apps"`
 }
@@ -134,17 +124,17 @@ type paramOutput struct {
 	Type        string   `json:"type"`
 	Description string   `json:"description"`
 	Choices     []string `json:"choices,omitempty"`
-	// Hints are values the app offers for a string param, in its order. Other values work too.
+	// Other values work too.
 	Hints    []string `json:"hints,omitempty"`
 	Required bool     `json:"required"`
-	// Default is a string, or an array of strings for a list param, or absent without a default.
+	// A string, an array of strings for a list param, or absent without a default.
 	Default any `json:"default,omitempty"`
 }
 
 type runActionInput struct {
 	Action string `json:"action"`
-	// Args are JSON values, so that a number reaches the app as the client wrote it. The SDK's validation still turns
-	// numbers into float64 first, so a long beyond 2^53 loses precision unless it comes as a string.
+	// The SDK's validation turns numbers into float64, so a long beyond 2^53 loses precision unless it comes as a
+	// string.
 	Args    map[string]json.RawMessage `json:"args,omitempty"`
 	Device  string                     `json:"device,omitempty"`
 	App     string                     `json:"app,omitempty"`
@@ -160,7 +150,7 @@ type listRecipesInput struct {
 type listRecipesOutput struct {
 	Device string `json:"device"`
 	App    string `json:"app"`
-	// File is where the recipes come from, and where to write them when there are none.
+	// Also where to write recipes when there are none.
 	File    string         `json:"file"`
 	Recipes []recipeOutput `json:"recipes"`
 }
@@ -172,8 +162,7 @@ type recipeOutput struct {
 }
 
 type runRecipeInput struct {
-	Recipe string `json:"recipe" jsonschema:"the name of the recipe, as list_recipes gives it"`
-	// Args are JSON values, as the args of run_action are.
+	Recipe string                     `json:"recipe" jsonschema:"the name of the recipe, as list_recipes gives it"`
 	Args   map[string]json.RawMessage `json:"args,omitempty" jsonschema:"the recipe's params by name, as the args of run_action"`
 	Device string                     `json:"device,omitempty" jsonschema:"the device's serial, as list_devices gives it"`
 	App    string                     `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
@@ -181,12 +170,10 @@ type runRecipeInput struct {
 
 type runRecipeOutput struct {
 	Steps []stepOutput `json:"steps"`
-	// Log is what the recipe logged with console.log, in order.
-	Log []string `json:"log"`
+	Log   []string     `json:"log"`
 }
 
-// stepOutput is what a step of a recipe gave. Only a call of an action or a command has a message, and only a call
-// data. A step that failed has an error instead, which the recipe caught when it went on.
+// A failed step has an error instead, which the recipe caught when it went on.
 type stepOutput struct {
 	Step          string          `json:"step"`
 	Notifications []string        `json:"notifications"`
@@ -195,8 +182,8 @@ type stepOutput struct {
 	Error         *errorOutput    `json:"error,omitempty"`
 }
 
-// errorOutput is why a step failed: the app's error code, or command for a command that exited with another status
-// than 0, no_reply for a call that ended without the app's answer, and error for anything else.
+// The app's error code, command for a command that exited with another status than 0, no_reply for a call that
+// ended without the app's answer, and error for anything else.
 type errorOutput struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -249,9 +236,8 @@ func (s tools) listActions(ctx context.Context, _ *mcp.CallToolRequest, in listA
 	return nil, out, nil
 }
 
-// runAction runs the action and sends each of its notifications as a progress notification when the client asked for
-// them. The client canceling the request cancels the action. A failed action keeps the notifications it sent before the
-// error.
+// The client canceling the request cancels the action. A failed action keeps the notifications it sent before
+// the error.
 func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runActionInput) (*mcp.CallToolResult, runActionOutput, error) {
 	args, err := rawArgs(in.Args)
 	if err != nil {
@@ -323,9 +309,7 @@ func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRec
 	return nil, out, nil
 }
 
-// runRecipe runs the recipe with args. Each step's line and then its notifications go out as progress notifications
-// when the client asked for them, and so do the lines the recipe logs. The client canceling the request interrupts the
-// recipe. A recipe that fails ends with an error that holds what came before it, as the command line prints it.
+// Each step's line goes out before its notifications. The client canceling the request interrupts the recipe.
 func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRecipeInput) (*mcp.CallToolResult, runRecipeOutput, error) {
 	args, err := rawArgs(in.Args)
 	if err != nil {
@@ -398,7 +382,6 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	return nil, out, nil
 }
 
-// stepError is the errorOutput of err, which failed a step.
 func stepError(err error) *errorOutput {
 	var refused wire.Error
 	var command *recipe.CommandError
@@ -414,7 +397,7 @@ func stepError(err error) *errorOutput {
 	return &errorOutput{"error", err.Error()}
 }
 
-// canElicit is whether the client of session can show the user a form, as the SDK's Elicit decides it.
+// Decides as the SDK's Elicit does.
 func canElicit(session *mcp.ServerSession) bool {
 	init := session.InitializeParams()
 	if init == nil || init.Capabilities == nil || init.Capabilities.Elicitation == nil {
@@ -424,14 +407,10 @@ func canElicit(session *mcp.ServerSession) bool {
 	return caps.Form != nil || caps.URL == nil
 }
 
-// paramsForm is the key of the form that asks the user for params, in the input requests of a result and in the input
-// responses of the call that retries it.
 const paramsForm = "params"
 
-// askForParams gets the user to give the required params that args leave out. A first call returns the form that asks
-// for them, which the handler returns instead of running, and the client shows it and retries the call with the values.
-// The retry adds them to args, or fails when the user declined or canceled the form, so that it does not run without
-// them. what names the action or recipe that needs them.
+// A first call returns the form, which the handler returns instead of running. The client retries with the
+// values, and a declined or canceled form fails the retry so that it does not run without them.
 func askForParams(req *mcp.CallToolRequest, what string, params []wire.Param, args map[string]wire.RawArg) (*mcp.CallToolResult, error) {
 	schema := &jsonschema.Schema{Type: "object", Properties: map[string]*jsonschema.Schema{}}
 	missing := map[string]wire.Param{}
@@ -481,8 +460,8 @@ func askForParams(req *mcp.CallToolRequest, what string, params []wire.Param, ar
 	return nil, nil
 }
 
-// fieldSchema is the form field of p. A long takes an integer, which loses precision beyond 2^53 as the args of
-// run_action do, and a string_list takes its values separated by commas, since a form's arrays only pick from choices.
+// A long loses precision beyond 2^53, as the args of run_action do. A string_list takes comma-separated values,
+// since a form's arrays only pick from choices.
 func fieldSchema(p wire.Param) *jsonschema.Schema {
 	field := &jsonschema.Schema{Title: p.Name, Description: p.Description, Type: "string"}
 	switch p.Type {
@@ -515,7 +494,6 @@ func (s tools) connect(device, pkg string, mode client.StartMode) (client.Target
 	return target, app, err
 }
 
-// progress sends each message as a progress notification when the client asked for them, counting them from 1.
 func progress(ctx context.Context, req *mcp.CallToolRequest) func(message string) {
 	token := req.Params.GetProgressToken()
 	sent := 0
@@ -552,8 +530,7 @@ func action(a wire.Action) actionOutput {
 	return actionOutput{ID: a.ID, Description: a.Description, Params: params}
 }
 
-// rawArgs turns JSON arguments into the text the app parses, as a user would type it: a string as it is, a number as
-// written and a boolean as true or false. An array gives a list param its values, and null leaves the param out.
+// A number stays as written. An array gives a list param its values, and null leaves the param out.
 func rawArgs(values map[string]json.RawMessage) (map[string]wire.RawArg, error) {
 	args := map[string]wire.RawArg{}
 	for key, raw := range values {
@@ -582,7 +559,6 @@ func rawArgs(values map[string]json.RawMessage) (map[string]wire.RawArg, error) 
 	return args, nil
 }
 
-// clientSource finds devices through adb, and the apps on them through the client.
 type clientSource struct {
 	startTimeout time.Duration
 	status       io.Writer
@@ -624,7 +600,6 @@ func (clientSource) Recipes(pkg string) (*recipe.Script, string, error) {
 	return script, recipe.Path(pkg), err
 }
 
-// runActionSchema is run_action's input schema, with the descriptions of its properties.
 var runActionSchema = func() *jsonschema.Schema {
 	schema := schemaFor[runActionInput]()
 	schema.Properties["action"].Description = "the id of the action, as list_actions gives it"
@@ -638,7 +613,7 @@ var runActionSchema = func() *jsonschema.Schema {
 	return schema
 }()
 
-// schemaFor is the JSON schema of T, where raw JSON may be any value. It would otherwise infer as an array of bytes.
+// Raw JSON would otherwise infer as an array of bytes.
 func schemaFor[T any]() *jsonschema.Schema {
 	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
 		TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[json.RawMessage](): {}},

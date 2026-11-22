@@ -15,7 +15,6 @@ import (
 	"quack/internal/wire"
 )
 
-// stepError is the error that ended step of a recipe, numbered from 1.
 type stepError struct {
 	step int
 	err  error
@@ -25,9 +24,7 @@ func (e *stepError) Error() string { return e.err.Error() }
 
 func (e *stepError) Unwrap() error { return e.err }
 
-// runRecipe runs the recipe name of s with args. Each step prints its line, then what the call of an action prints,
-// and console.log prints its lines. A step that fails ends the recipe with its error, unless the recipe catches it:
-// then the error prints as the step's outcome once the recipe goes on.
+// A step error that the recipe catches prints as that step's outcome only once the recipe goes on.
 func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wire.RawArg, terminal Terminal, json bool) error {
 	ctx := context.Background()
 	_, actions, err := app.Describe(ctx)
@@ -53,7 +50,6 @@ func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wi
 		},
 		Notified: func(message string) { printNotifications(terminal, json, step)(message) },
 		Ended: func(ended recipe.Step, result wire.MessageResult) {
-			// Only a call or a command has a message to print, which may be empty.
 			if json || hasMessage(ended) {
 				printResult(terminal, json, result, step)
 			}
@@ -75,8 +71,6 @@ func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wi
 	return err
 }
 
-// printFailure prints the error of a step that the recipe caught, as the step's outcome: its message, or with json its
-// outcomeJSON.
 func printFailure(terminal Terminal, json bool, failed *stepError) {
 	code, message, _ := failure(failed.err)
 	if json {
@@ -86,7 +80,6 @@ func printFailure(terminal Terminal, json bool, failed *stepError) {
 	fmt.Fprintln(terminal.Out, failed.err.Error())
 }
 
-// hasMessage is whether step ends with a message to print: what an action returns, or what a command prints.
 func hasMessage(step recipe.Step) bool {
 	switch step.(type) {
 	case recipe.OpenApp, recipe.Wait:
@@ -95,8 +88,7 @@ func hasMessage(step recipe.Step) bool {
 	return true
 }
 
-// findRecipe reads the recipes of pkg and checks that they have one named name. A file that does not load is bad
-// usage, like a name it does not have.
+// A file that does not load is bad usage, like a name it does not have.
 func findRecipe(pkg, name string) (*recipe.Script, error) {
 	s, err := recipe.Load(pkg)
 	if err != nil {
@@ -108,9 +100,6 @@ func findRecipe(pkg, name string) (*recipe.Script, error) {
 	return s, nil
 }
 
-// printRecipes lists the recipes of pkg whose name filter matches, or all of them without a filter, each like an
-// action: its name, then its description and its params indented below it. With asJSON they are an array of
-// recipeJSON instead. Without any recipes, it says how to start them. It fails when filter matches none.
 func printRecipes(w io.Writer, pkg string, filter *regexp.Regexp, asJSON bool) error {
 	s, err := recipe.Load(pkg)
 	if err != nil {
@@ -146,8 +135,6 @@ func printRecipes(w io.Writer, pkg string, filter *regexp.Regexp, asJSON bool) e
 	return nil
 }
 
-// initRecipes writes the files that let editors check recipes, and with pkg a starter recipes file of pkg, and says
-// which it wrote and where recipes go.
 func initRecipes(w io.Writer, pkg string) error {
 	written, err := recipe.Init(pkg)
 	if err != nil {

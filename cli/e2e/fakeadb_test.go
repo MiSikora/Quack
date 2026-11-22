@@ -14,9 +14,7 @@ import (
 	"time"
 )
 
-// fakeAdb is an adb server with devices on which quack-enabled apps run. It speaks the adb smart-socket protocol,
-// answers the shell commands quack sends, and plays each app's side of the quack protocol. It records what quack asks
-// for, so tests can check side effects such as starting the keep-alive service.
+// It records what quack asks for, so tests can check side effects such as starting the keep-alive service.
 type fakeAdb struct {
 	listener net.Listener
 	devices  []*fakeDevice
@@ -27,8 +25,7 @@ type fakeAdb struct {
 
 type fakeDevice struct {
 	serial string
-	// state is what adb reports for the device, such as device, offline or unauthorized. Empty means adb does not know
-	// the device.
+	// Empty means adb does not know the device.
 	state string
 	model string
 	user  string
@@ -38,9 +35,8 @@ type fakeDevice struct {
 }
 
 type fakeApp struct {
-	pkg     string
-	version string
-	// installed is false for a package that the device does not have.
+	pkg       string
+	version   string
 	installed bool
 	running   bool
 	// deaf apps never bind their socket, so quack times out waiting for them.
@@ -143,7 +139,6 @@ func (a *fakeAdb) handle(conn net.Conn) {
 	}
 }
 
-// device returns the device adb knows by serial, or nil.
 func (a *fakeAdb) device(serial string) *fakeDevice {
 	for _, d := range a.devices {
 		if d.serial == serial && d.state != "" {
@@ -153,7 +148,6 @@ func (a *fakeAdb) device(serial string) *fakeDevice {
 	return nil
 }
 
-// handleService runs service on d.
 func (a *fakeAdb) handleService(conn net.Conn, d *fakeDevice, service string) {
 	if cmd, ok := strings.CutPrefix(service, "shell:"); ok {
 		okay(conn)
@@ -186,15 +180,12 @@ func (a *fakeAdb) handleService(conn net.Conn, d *fakeDevice, service string) {
 	fail(conn, "unknown service "+service)
 }
 
-// shellPacket writes a packet of adb's shell protocol: id, the length of data in 4 little-endian bytes, and data.
 func shellPacket(conn net.Conn, id byte, data string) {
 	header := []byte{id, 0, 0, 0, 0}
 	binary.LittleEndian.PutUint32(header[1:], uint32(len(data)))
 	conn.Write(append(header, data...))
 }
 
-// shell answers the commands quack runs on d, as Android's tools would. It records each command with the device that
-// ran it.
 func (a *fakeAdb) shell(d *fakeDevice, cmd string) string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -253,7 +244,6 @@ func (a *fakeAdb) shell(d *fakeDevice, cmd string) string {
 	}
 }
 
-// listening returns the app on d whose server listens on socket, or nil when nothing does.
 func (a *fakeAdb) listening(d *fakeDevice, socket string) *fakeApp {
 	a.mu.Lock()
 	defer a.mu.Unlock()

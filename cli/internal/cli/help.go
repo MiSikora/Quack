@@ -9,8 +9,7 @@ import (
 	"quack/internal/wire"
 )
 
-// matching keeps the actions whose id filter matches, or all of them without a filter. It fails when filter matches
-// none.
+// A nil filter keeps all. Fails when filter matches none.
 func matching(actions []wire.Action, filter *regexp.Regexp) ([]wire.Action, error) {
 	if filter == nil {
 		return actions, nil
@@ -27,7 +26,6 @@ func matching(actions []wire.Action, filter *regexp.Regexp) ([]wire.Action, erro
 	return kept, nil
 }
 
-// printHelp lists actions, after the app's name and version when header is set.
 func printHelp(w io.Writer, hello wire.Hello, actions []wire.Action, header bool) {
 	var out strings.Builder
 	if header {
@@ -39,8 +37,6 @@ func printHelp(w io.Writer, hello wire.Hello, actions []wire.Action, header bool
 	fmt.Fprint(w, strings.TrimSuffix(out.String(), "\n"))
 }
 
-// writeAction writes one action like a man page entry: its id, then its description and each param indented below
-// it. A param with text gets a blank line after it, and a run of params without text stays together.
 func writeAction(out *strings.Builder, a wire.Action) {
 	out.WriteString(a.ID + "\n")
 	if a.Description != "" {
@@ -80,8 +76,7 @@ func paramUsage(p wire.Param) string {
 	}
 }
 
-// writeWrapped writes text wrapped at helpWidth, each line after indent. Each line break in text starts a new
-// paragraph.
+// Each line break in text starts a new paragraph.
 func writeWrapped(out *strings.Builder, text, indent string) {
 	for _, paragraph := range strings.Split(text, "\n") {
 		line := indent
@@ -99,7 +94,6 @@ func writeWrapped(out *strings.Builder, text, indent string) {
 	}
 }
 
-// sentence ends text with a period unless it already ends with punctuation.
 func sentence(text string) string {
 	if text == "" || strings.HasSuffix(text, ".") || strings.HasSuffix(text, "!") || strings.HasSuffix(text, "?") {
 		return text

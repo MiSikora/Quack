@@ -1,5 +1,3 @@
-// Package e2e runs quack against a fake adb server and compares everything it does with golden files.
-// Run go test ./e2e -update to record the current behavior.
 package e2e
 
 import (
@@ -18,9 +16,8 @@ import (
 
 var update = flag.Bool("update", false, "rewrite the golden files with the current behavior")
 
-// TestMain runs the tests, or quack itself when a scenario starts this test binary with runAsQuack set. Each scenario
-// then runs quack in a process of its own, with its own environment and stdin, and go test sees the CLI's code, so
-// that a change to it reruns the tests.
+// Each scenario runs quack in a process of its own, with its own environment and stdin, and go test sees the CLI's
+// code, so that a change to it reruns the tests.
 func TestMain(m *testing.M) {
 	if os.Getenv(runAsQuack) != "" {
 		os.Exit(cli.Run(os.Args[1:], cli.StdTerminal()))
@@ -29,7 +26,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// runAsQuack is the environment variable that makes this test binary run quack.
 const runAsQuack = "QUACK_E2E_RUN_AS_QUACK"
 
 type scenario struct {
@@ -38,16 +34,14 @@ type scenario struct {
 	// stdinDevNull reads stdin from /dev/null, a character device that is not a terminal, instead of a pipe.
 	stdinDevNull bool
 	env          []string
-	// device changes the default device: emulator-5554, a Pixel 8, user 0, with the sample app running.
+	// The default device is emulator-5554, a Pixel 8, user 0, with the sample app running.
 	device func(*fakeDevice)
-	// others are devices connected besides the default one.
 	others func() []*fakeDevice
-	// recipes is the sample app's recipe file, which is missing when recipes is empty.
+	// Empty means no recipes file.
 	recipes string
 }
 
 var scenarios = []scenario{
-	// Usage.
 	{name: "help", args: []string{"--help"}},
 	{name: "no-action"},
 	{name: "no-action-with-device-flag", args: []string{"-d", "emulator-5554"}},
@@ -65,7 +59,6 @@ var scenarios = []scenario{
 	{name: "list-actions-two-regexes", args: []string{"--list-actions", "a", "b"}},
 	{name: "list-actions-invalid-regex", args: []string{"--list-actions", "acc("}},
 
-	// Calls.
 	{name: "call", args: []string{"app.greet", "name=Bob"}},
 	{name: "call-repeated-key", args: []string{"app.params", "tag=a", "tag=b c"}},
 	{name: "call-variable", args: []string{"app.greet", "name=${QUACK_NAME} on ${ANDROID_SERIAL}"}, env: []string{"QUACK_NAME=Bob"}},
@@ -89,7 +82,6 @@ var scenarios = []scenario{
 	{name: "malformed-reply", args: []string{"app.garbled"}},
 	{name: "keep-alive", args: []string{"account.sync"}},
 
-	// Help from the app.
 	{name: "list-actions", args: []string{"--list-actions"}},
 	{name: "list-actions-filter", args: []string{"--list-actions", "account"}},
 	{name: "list-actions-no-match", args: []string{"--list-actions", "nope"}},
@@ -97,7 +89,6 @@ var scenarios = []scenario{
 	{name: "list-actions-filter-json", args: []string{"--json", "--list-actions", "account"}},
 	{name: "list-actions-no-match-json", args: []string{"--json", "--list-actions", "nope"}},
 
-	// Starting the app.
 	{name: "start-stopped-app", args: []string{"app.greet", "name=Bob"}, device: stopped},
 	{name: "open-stopped-app", args: []string{"--open-app", "app.greet", "name=Bob"}, device: stopped},
 	{name: "open-without-launcher", args: []string{"--open-app", "app.greet", "name=Bob"}, device: func(d *fakeDevice) {
@@ -116,7 +107,6 @@ var scenarios = []scenario{
 		d.apps[0].deaf = true
 	}},
 
-	// Devices.
 	{name: "device-flag", args: []string{"--device", "3A251FDH2000XY", "--app", "io.mehow.quack.sample", "app.greet", "name=Bob"}, others: phone},
 	{name: "device-from-env", args: []string{"--app", "io.mehow.quack.sample", "app.greet", "name=Bob"}, env: []string{"ANDROID_SERIAL=3A251FDH2000XY"}, others: phone},
 	{name: "device-flag-over-env", args: []string{"--device", "emulator-5554", "app.greet", "name=Bob"}, env: []string{"ANDROID_SERIAL=3A251FDH2000XY"}, others: phone},
@@ -133,7 +123,6 @@ var scenarios = []scenario{
 	{name: "only-device-offline", args: []string{"app.greet"}, device: func(d *fakeDevice) { d.state = "offline" }},
 	{name: "adb-server-hangs", args: []string{"app.greet"}, device: func(d *fakeDevice) { d.adbHangs = true }},
 
-	// Several devices.
 	{name: "several-devices", args: []string{"app.greet"}, others: phone},
 	{name: "several-devices-device-flag", args: []string{"--device", "3A251FDH2000XY", "app.greet"}, others: phone},
 	{name: "several-devices-app-flag", args: []string{"--app", "com.duckduckgo.mobile", "--list-actions"}, others: phone},
@@ -144,7 +133,6 @@ var scenarios = []scenario{
 		return []*fakeDevice{{serial: "3A251FDH2000XY", state: "device", user: "0"}}
 	}},
 
-	// Listing devices.
 	{name: "list-devices", args: []string{"--list-devices"}, others: phone},
 	{name: "list-devices-json", args: []string{"--list-devices", "--json"}, others: phone},
 	{name: "list-devices-unauthorized", args: []string{"--list-devices"}, others: unauthorizedPhone},
@@ -158,7 +146,6 @@ var scenarios = []scenario{
 	// Without an action, quack prints its help instead of opening the TUI, since stdin is not a terminal here.
 	{name: "no-action-from-dev-null", stdinDevNull: true},
 
-	// Recipes.
 	{name: "recipe", args: []string{"--recipe", "setup"}, recipes: sampleRecipes},
 	{name: "recipe-json", args: []string{"--json", "--recipe", "setup"}, recipes: sampleRecipes},
 	{name: "recipe-open-app-flag", args: []string{"--open-app", "--recipe", "greet"}, recipes: sampleRecipes},
@@ -199,7 +186,6 @@ var scenarios = []scenario{
 	{name: "init-recipes-with-android-serial", args: []string{"--init-recipes"}, env: []string{"ANDROID_SERIAL=emulator-5554"}},
 }
 
-// sampleRecipes is a recipes file for the sample app.
 const sampleRecipes = `import quack from "quack"
 
 export const setup = quack.recipe({
@@ -306,7 +292,6 @@ func TestScenarios(t *testing.T) {
 	}
 }
 
-// run runs quack for s and describes everything it did: its exit code, its output and what reached the device.
 func run(t *testing.T, adb *fakeAdb, s scenario) string {
 	config := t.TempDir()
 	if s.recipes != "" {
@@ -357,7 +342,6 @@ func run(t *testing.T, adb *fakeAdb, s scenario) string {
 	return out.String()
 }
 
-// cleanEnv is the test's environment without what would change quack's behavior.
 func cleanEnv() []string {
 	var env []string
 	for _, kv := range os.Environ() {
@@ -375,14 +359,12 @@ func defaultDevice() *fakeDevice {
 	return &fakeDevice{serial: "emulator-5554", state: "device", model: "Pixel 8", user: "0", apps: []*fakeApp{sampleApp()}}
 }
 
-// phone is a second device, with the sample app and another quack-enabled app.
 func phone() []*fakeDevice {
 	other := sampleApp()
 	other.pkg = "com.duckduckgo.mobile"
 	return []*fakeDevice{{serial: "3A251FDH2000XY", state: "device", model: "Pixel 7", user: "0", apps: []*fakeApp{sampleApp(), other}}}
 }
 
-// unauthorizedPhone is a second device that does not trust this computer yet.
 func unauthorizedPhone() []*fakeDevice {
 	return []*fakeDevice{{serial: "3A251FDH2000XY", state: "unauthorized", user: "0"}}
 }

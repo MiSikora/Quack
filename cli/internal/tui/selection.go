@@ -11,29 +11,23 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// point is a cell of the log: a row of its rows and a column of that row. It stays on the same text while the log
-// scrolls.
+// A point stays on the same text while the log scrolls.
 type point struct {
 	row, col int
 }
 
-// span is the cells of the log from from to to, both included, in reading order.
+// Both ends are included.
 type span struct {
 	from, to point
 }
 
-// mouse is what the left button does over the log.
 type mouse struct {
-	// dragging is whether the button went down over the log and is not up yet, and anchor the cell it went down on.
-	dragging bool
-	anchor   point
-	// pressed is the cell of the last press and pressedAt its time, which tell a double click from two clicks.
+	dragging  bool
+	anchor    point
 	pressed   point
 	pressedAt time.Time
 }
 
-// click handles a press of a mouse button. The left button over the log starts a selection there, or selects the word
-// under it and copies it on a double click. Any press clears the selection there was.
 func (m *model) click(msg tea.MouseClickMsg) tea.Cmd {
 	m.log.marked = nil
 	m.mouse.dragging = false
@@ -57,8 +51,8 @@ func (m *model) click(msg tea.MouseClickMsg) tea.Cmd {
 	return nil
 }
 
-// drag extends the selection to the cell under the mouse. Dragging onto the log's first row or below the rows of it
-// that show scrolls the log a row, so that the selection can reach past what the view shows.
+// Dragging onto the log's first row or below its shown rows scrolls the log a row, so that the selection can reach
+// past the view.
 func (m *model) drag(msg tea.MouseMotionMsg) {
 	if !m.mouse.dragging {
 		return
@@ -78,7 +72,6 @@ func (m *model) drag(msg tea.MouseMotionMsg) {
 	m.log.marked = &span{earlier(m.mouse.anchor, at), later(m.mouse.anchor, at)}
 }
 
-// release ends a drag and copies what it selected, which stays highlighted. A click without a drag selected nothing.
 func (m *model) release() tea.Cmd {
 	if !m.mouse.dragging {
 		return nil
@@ -90,8 +83,8 @@ func (m *model) release() tea.Cmd {
 	return m.copy(m.log.markedText())
 }
 
-// copy puts text on the clipboard through the terminal, with OSC 52, and through the system's clipboard, for terminals
-// that keep OSC 52 from programs, and says so in the footer. A clipboard that fails leaves the other.
+// OSC 52 reaches the terminal's clipboard, and the system's clipboard covers terminals that keep OSC 52 from
+// programs. A clipboard that fails leaves the other.
 func (m *model) copy(text string) tea.Cmd {
 	if text == "" {
 		return nil
@@ -107,8 +100,6 @@ func (m *model) copy(text string) tea.Cmd {
 	)
 }
 
-// at is the cell of the log under the mouse at x and y in a view of height rows. Above the log's first row it is the
-// first cell, and below its last row the end of the last row.
 func (l *sessionLog) at(x, y, height int) point {
 	row := l.top(height) + y
 	switch {
@@ -120,8 +111,6 @@ func (l *sessionLog) at(x, y, height int) point {
 	return point{row, max(0, x)}
 }
 
-// word is the span of the word under at: the cells around it up to a space or the end of the row. There is none on a
-// space.
 func (l *sessionLog) word(at point) (span, bool) {
 	plain := ansi.Strip(l.rows[at.row].text)
 	letter := func(col int) bool {
@@ -141,8 +130,6 @@ func (l *sessionLog) word(at point) (span, bool) {
 	return span{point{at.row, from}, point{at.row, to}}, true
 }
 
-// markedText is the text of the selection without its styles. Rows that start lines end with a line break and lose
-// the spaces at their ends, and a row cut from the end of the row before it joins that row as it is.
 func (l *sessionLog) markedText() string {
 	var b strings.Builder
 	for row := l.marked.from.row; row <= l.marked.to.row; row++ {
@@ -160,7 +147,6 @@ func (l *sessionLog) markedText() string {
 	return b.String()
 }
 
-// markedCols is the columns of row in the selection, from included to excluded.
 func (l *sessionLog) markedCols(row int) (from, to int) {
 	from, to = 0, l.width
 	if row == l.marked.from.row {
@@ -172,8 +158,7 @@ func (l *sessionLog) markedCols(row int) (from, to int) {
 	return from, to
 }
 
-// highlight is the text of row with its selected cells in reverse video. A row with any selected cells loses its own
-// styles.
+// A row with any selected cells loses its own styles.
 func (l *sessionLog) highlight(row int) string {
 	text := l.rows[row].text
 	if l.marked == nil || row < l.marked.from.row || row > l.marked.to.row {
@@ -204,5 +189,4 @@ func later(a, b point) point {
 
 var markedStyle = lipgloss.NewStyle().Reverse(true)
 
-// doubleClickTime is how soon a second press on the same cell makes a double click.
 const doubleClickTime = 500 * time.Millisecond

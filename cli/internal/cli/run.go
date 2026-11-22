@@ -1,5 +1,3 @@
-// Package cli is the quack command: it parses the command line, runs one request or the interactive TUI, and turns
-// what happened into output and an exit code.
 package cli
 
 import (
@@ -22,7 +20,7 @@ import (
 	"quack/internal/wire"
 )
 
-// Run runs quack with args, the command line without the program name, and returns its exit code.
+// args is the command line without the program name.
 func Run(args []string, terminal Terminal) int {
 	opts, err := parseOptions(args, terminal)
 	if err == nil {
@@ -46,26 +44,22 @@ func Run(args []string, terminal Terminal) int {
 }
 
 type options struct {
-	device      string
-	pkg         string
-	json        bool
-	listActions bool
-	// interactive opens the TUI, which quack without an action does when a person sits at the terminal.
-	interactive bool
-	listDevices bool
-	listRecipes bool
-	initRecipes bool
-	openApp     bool
-	// recipe is the name of the recipe to run, or "" for none.
+	device       string
+	pkg          string
+	json         bool
+	listActions  bool
+	interactive  bool
+	listDevices  bool
+	listRecipes  bool
+	initRecipes  bool
+	openApp      bool
 	recipe       string
 	startTimeout time.Duration
-	// help asks for usage, which holds quack's own help.
-	help    bool
-	version bool
-	usage   string
-	action  string
-	// filter keeps the actions whose id, or the recipes whose name, it matches when listActions or listRecipes has a
-	// pattern, and is nil otherwise.
+	help         bool
+	version      bool
+	usage        string
+	action       string
+	// nil unless listActions or listRecipes has a pattern.
 	filter *regexp.Regexp
 	args   map[string]wire.RawArg
 }
@@ -257,8 +251,7 @@ func run(opts options, terminal Terminal) error {
 	return nil
 }
 
-// printResult prints the message and the data of a call, or with json its outcomeJSON for step, which is 0 outside a
-// recipe.
+// step is 0 outside a recipe.
 func printResult(terminal Terminal, json bool, result wire.MessageResult, step int) {
 	if json {
 		printJSON(terminal.Out, outcomeJSON{Code: codeOK, Message: result.Message, Data: result.Data, Step: step})
@@ -270,7 +263,6 @@ func printResult(terminal Terminal, json bool, result wire.MessageResult, step i
 	}
 }
 
-// parseFilter reads the one regex that flag may take, or nil without one.
 func parseFilter(rest []string, flag string) (*regexp.Regexp, error) {
 	switch len(rest) {
 	case 0:
@@ -298,7 +290,7 @@ func boolFlag(fs *pflag.FlagSet, p *bool, name, shorthand, usage string) {
 	})
 }
 
-// parseArgs groups key=value words by key. A repeated key keeps its values in command-line order.
+// A repeated key keeps its values in command-line order.
 func parseArgs(words []string) (map[string]wire.RawArg, error) {
 	args := map[string]wire.RawArg{}
 	for _, word := range words {
@@ -311,8 +303,7 @@ func parseArgs(words []string) (map[string]wire.RawArg, error) {
 	return args, nil
 }
 
-// printNotifications prints the message of each notification, or with json each notification as a notificationJSON of
-// step, which is 0 outside a recipe.
+// step is 0 outside a recipe.
 func printNotifications(terminal Terminal, json bool, step int) client.NotificationFunc {
 	return func(message string) {
 		if json {
@@ -323,7 +314,6 @@ func printNotifications(terminal Terminal, json bool, step int) client.Notificat
 	}
 }
 
-// usageError is a command line that quack cannot run as written.
 type usageError struct {
 	message string
 }
@@ -341,14 +331,14 @@ const (
 	exitDevice = 3
 )
 
-// errorExits maps the app's error codes to exit codes. A code missing here exits with exitAction.
+// A code missing here exits with exitAction.
 var errorExits = map[wire.ErrorCode]int{
-	wire.ErrorCodeBadFrame:      exitUsage,  // the request is malformed
-	wire.ErrorCodeUnknownAction: exitUsage,  // no action has that id
-	wire.ErrorCodeInvalidArgs:   exitUsage,  // an argument is missing, unknown, or of the wrong type
-	wire.ErrorCodeRejected:      exitAction, // the action refused the request
-	wire.ErrorCodeFailed:        exitAction, // the action crashed
+	wire.ErrorCodeBadFrame:      exitUsage,
+	wire.ErrorCodeUnknownAction: exitUsage,
+	wire.ErrorCodeInvalidArgs:   exitUsage,
+	wire.ErrorCodeRejected:      exitAction,
+	wire.ErrorCodeFailed:        exitAction,
 }
 
-// version is quack's version. Release builds set it with -ldflags "-X quack/internal/cli.version=<version>".
+// Release builds set it with -ldflags "-X quack/internal/cli.version=<version>".
 var version = "dev"

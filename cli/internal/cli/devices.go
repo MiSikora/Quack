@@ -10,7 +10,6 @@ import (
 	"quack/internal/client"
 )
 
-// deviceJSON is a device as quack --list-devices --json prints it.
 type deviceJSON struct {
 	Serial string    `json:"serial"`
 	Model  string    `json:"model"`
@@ -22,9 +21,7 @@ type appJSON struct {
 	Package string `json:"package"`
 }
 
-// printDevices lists the devices adb knows, each with its quack-enabled apps indented under it: only device when it is
-// not "", and only the devices that have pkg when it is not "". With asJSON each device is an object on a line of its
-// own instead.
+// An empty device or pkg matches any.
 func printDevices(w io.Writer, device adb.Device, pkg string, asJSON bool) error {
 	listings, err := adb.Devices()
 	if err != nil {
