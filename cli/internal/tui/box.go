@@ -277,8 +277,13 @@ func (f boxField) row(names, column int) string {
 
 func (b *paramBox) fieldWidth() int { return min(max(b.width/3, 10), 40) }
 
+// value is the text as the call takes it, or the selected hint while one is selected, so that the call shows what enter
+// would pick.
 func (f *textField) value() wire.RawArg {
 	text := f.input.Value()
+	if f.selected >= 0 {
+		text = f.matches()[f.selected].Str
+	}
 	switch {
 	case f.list:
 		return split(text)

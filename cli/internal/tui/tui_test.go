@@ -674,6 +674,24 @@ func TestEnterPicksTheSelectedHintOrElseKeepsTheText(t *testing.T) {
 	}
 }
 
+func TestCallPreviewsTheSelectedHintInsteadOfTheText(t *testing.T) {
+	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
+	h.press("up", "enter")
+	h.waitFor("3/3", "› app.greet\n")
+
+	h.press("up")
+	h.waitFor("▸ Alice", "› app.greet name=Alice\n")
+	h.press("up")
+	h.waitFor("▸ Albert", "› app.greet name=Albert\n")
+	h.press("esc")
+	h.waitFor("▸ name", "› app.greet\n", "↑ hints")
+	h.typing("B")
+	h.press("up")
+	h.waitFor("▸ Bob", "› app.greet name=Bob\n")
+	h.press("down")
+	h.waitFor("› app.greet name=B\n")
+}
+
 func TestUpPastTheFirstHintAndTypingSelectNone(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
 	h.press("up", "enter")
