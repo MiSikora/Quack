@@ -38,7 +38,7 @@ func TestListActionsGivesTheParamsOfEachActionThatMatchesTheFilter(t *testing.T)
 
 	want := `{"device":"emulator-5554","app":"io.mehow.quack.sample","version":"1.0","actions":[` +
 		`{"id":"account.create","description":"Create an account","params":[` +
-		`{"name":"username","type":"string","description":"Who signs in","required":true},` +
+		`{"name":"username","type":"string","description":"Who signs in","hints":["alice","bob"],"required":true},` +
 		`{"name":"age","type":"int","description":"","required":false,"default":"30"},` +
 		`{"name":"tags","type":"string_list","description":"","required":false,"default":["a","b"]}]}]}`
 	assertStructured(t, result, want)
@@ -267,7 +267,7 @@ func (a *fakeApp) Describe(context.Context) (wire.Hello, []wire.Action, error) {
 	return wire.Hello{Package: "io.mehow.quack.sample", Version: "1.0"}, []wire.Action{
 		{ID: "app.greet", Description: "Greet someone"},
 		{ID: "account.create", Description: "Create an account", Params: []wire.Param{
-			{Name: "username", Type: wire.ParamTypeString, Description: "Who signs in", Presence: wire.Required{}},
+			{Name: "username", Type: wire.ParamTypeString, Description: "Who signs in", Hints: []string{"alice", "bob"}, Presence: wire.Required{}},
 			{Name: "age", Type: wire.ParamTypeInt, Presence: wire.Default{Values: []string{"30"}}},
 			{Name: "tags", Type: wire.ParamTypeStringList, Presence: wire.Default{Values: []string{"a", "b"}}},
 		}},
