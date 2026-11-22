@@ -53,13 +53,7 @@ type pickRow struct {
 }
 
 func newPicker(want client.Target, width int) *picker {
-	input := textinput.New()
-	input.Prompt = "> "
-	styles := input.Styles()
-	styles.Focused.Prompt = promptStyle
-	styles.Blurred.Prompt = promptStyle
-	input.SetStyles(styles)
-	p := &picker{want: want, input: input}
+	p := &picker{want: want, input: newInput("")}
 	p.toStep(deviceStep)
 	p.resize(width)
 	return p
@@ -225,8 +219,6 @@ func (p *picker) forward(msg tea.Msg) tea.Cmd {
 	p.input, cmd = p.input.Update(msg)
 	return cmd
 }
-
-func (p *picker) focus() tea.Cmd { return p.input.Focus() }
 
 func (p *picker) clear() bool {
 	had := p.input.Value() != ""

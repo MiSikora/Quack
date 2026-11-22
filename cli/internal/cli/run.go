@@ -242,8 +242,7 @@ func run(opts options, terminal Terminal) error {
 	if opts.recipe != "" {
 		return runRecipe(app, script, opts.recipe, args, terminal, opts.json)
 	}
-	call := wire.Call{Action: opts.action, Args: args}
-	result, err := app.Call(context.Background(), call, printNotifications(terminal, opts.json, 0))
+	result, err := app.Call(context.Background(), wire.Call{Action: opts.action, Args: args}, printNotifications(terminal, opts.json, 0))
 	if err != nil {
 		return err
 	}
@@ -336,8 +335,6 @@ var errorExits = map[wire.ErrorCode]int{
 	wire.ErrorCodeBadFrame:      exitUsage,
 	wire.ErrorCodeUnknownAction: exitUsage,
 	wire.ErrorCodeInvalidArgs:   exitUsage,
-	wire.ErrorCodeRejected:      exitAction,
-	wire.ErrorCodeFailed:        exitAction,
 }
 
 // Release builds set it with -ldflags "-X quack/internal/cli.version=<version>".

@@ -20,19 +20,15 @@ import (
 )
 
 type App interface {
+	recipe.App
 	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
-	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
-	Start(mode client.StartMode) error
-	Command(ctx context.Context, cmd string) (adb.Output, error)
-	Target() client.Target
 }
 
 // The app's status lines go into the log, since anything printed around the TUI would break the screen.
 func Run(want client.Target, mode client.StartMode, startTimeout time.Duration, version string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	activity := newActivity(ctx)
-	_, err := tea.NewProgram(newModel(clientSource{startTimeout}, activity, want, mode, version)).Run()
+	_, err := tea.NewProgram(newModel(clientSource{startTimeout}, newActivity(ctx), want, mode, version)).Run()
 	return err
 }
 
@@ -107,18 +103,9 @@ type recipes struct {
 	err    error
 }
 
-type opened struct {
-	err error
+type listed struct {
+	listings []adb.Listing
 }
-
-type (
-	listed struct {
-		listings []adb.Listing
-	}
-	trackLost struct {
-		err error
-	}
-)
 
 type (
 	inspected struct {
@@ -131,12 +118,9 @@ type (
 )
 
 type connected struct {
-	target  client.Target
-	app     App
-	hello   wire.Hello
-	actions []wire.Action
-	err     error
-	recipes recipes
+	target client.Target
+	app    App
+	described
 }
 
 type clientSource struct {
@@ -151,7 +135,7 @@ func newModel(source Source, activity activity, want client.Target, mode client.
 		mode:      mode,
 		picker:    newPicker(want, 0),
 		clock:     wallClock{},
-		prompt:    newPrompt(nil),
+		prompt:    prompt{input: newInput("find an action, $ for recipes, / for commands")},
 		runs:      newRuns(),
 		clipboard: clipboard.WriteAll,
 		header:    header(version),
@@ -162,7 +146,7 @@ func newModel(source Source, activity activity, want client.Target, mode client.
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(m.activity.listen(), m.track(), m.picker.focus(), m.poll())
+	return tea.Batch(m.activity.listen(), m.track(), m.picker.input.Focus(), m.poll())
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -213,7 +197,7 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 		m.log.add(m.runs.stepStarted(msg))
 		return m.activity.listen()
 	case runNotification:
-		m.log.add(m.runs.notification(msg))
+		m.log.add(indent(msg.message))
 		return m.activity.listen()
 	case stepEnded:
 		m.log.add(m.runs.stepEnded(msg))
@@ -221,28 +205,19 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 	case stepFailed:
 		m.log.add(m.runs.stepFailed(msg))
 		return m.activity.listen()
-	case runLogged:
-		m.log.add(msg.text)
-		return m.activity.listen()
 	case runEnded:
 		if lines := m.runs.ended(msg); lines != "" {
 			m.log.add(lines)
 		}
 		return m.activity.listen()
-	case statusLine:
-		m.log.add(statusStyle.Render(msg.text))
+	case logged:
+		m.log.add(msg.text)
 		return m.activity.listen()
 	case described:
 		m.describe(msg)
 		return m.activity.listen()
-	case opened:
-		m.log.add(m.openedLine(msg))
-		return m.activity.listen()
 	case listed:
 		return tea.Batch(m.list(msg.listings), m.activity.listen())
-	case trackLost:
-		m.log.add(problemStyle.Render(msg.err.Error()))
-		return m.activity.listen()
 	case inspected:
 		m.inspected(msg)
 		return m.advance()
@@ -253,8 +228,7 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 		}
 		return tea.Batch(m.inspectAll(), m.poll())
 	case connected:
-		cmd := m.connected(msg)
-		return tea.Batch(cmd, m.activity.listen())
+		return tea.Batch(m.connected(msg), m.activity.listen())
 	case noticeEnded:
 		if msg.shown == msg.notice.shown {
 			msg.notice.showing = false
@@ -275,7 +249,7 @@ func (m *model) press(msg tea.KeyPressMsg) tea.Cmd {
 		m.log.scroll(-m.logHeight(), m.logHeight())
 		return nil
 	case key == "end" && m.log.scrolled > 0:
-		m.log.follow()
+		m.log.scrolled = 0
 		return nil
 	}
 	if m.picker != nil {
@@ -293,7 +267,7 @@ func (m *model) press(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+c":
 		return m.interrupt()
 	case "ctrl+d":
-		if m.prompt.value() == "" {
+		if m.prompt.input.Value() == "" {
 			return m.exit()
 		}
 	case "enter":
@@ -333,7 +307,7 @@ func (m *model) pressPicker(msg tea.KeyPressMsg) tea.Cmd {
 			p.toStep(deviceStep)
 		case m.app != nil:
 			m.picker = nil
-			return m.prompt.focus()
+			return m.prompt.input.Focus()
 		default:
 			p.clear()
 		}
@@ -352,7 +326,7 @@ func (m *model) pressBox(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case key == "esc", key == "ctrl+c":
 		m.box = nil
-		return m.prompt.focus()
+		return m.prompt.input.Focus()
 	}
 	run, cmd := m.box.press(msg)
 	switch {
@@ -364,7 +338,7 @@ func (m *model) pressBox(msg tea.KeyPressMsg) tea.Cmd {
 	action, args := m.box.action, m.box.args()
 	m.box = nil
 	m.prompt.clear()
-	return tea.Batch(m.start(action, args), m.prompt.focus())
+	return tea.Batch(m.start(action, args), m.prompt.input.Focus())
 }
 
 // A second ctrl+c while the action stops asks to quit too, so that an action that does not stop cannot keep quack
@@ -407,14 +381,8 @@ func (m *model) choose() tea.Cmd {
 }
 
 func (m *model) start(action wire.Action, args map[string]wire.RawArg) tea.Cmd {
-	app := m.app
-	if name, ok := strings.CutPrefix(action.ID, "$"); ok {
-		script := m.script
-		return m.startRun(&run{id: action.ID, recipe: true}, func(ctx context.Context, observer recipe.Observer) error {
-			return script.Run(ctx, app, name, args, observer)
-		})
-	}
-	return m.startRun(&run{id: action.ID}, func(ctx context.Context, observer recipe.Observer) error {
+	app, script, r := m.app, m.script, &run{id: action.ID}
+	work := func(ctx context.Context, observer recipe.Observer) error {
 		step := recipe.Call{Action: action.ID, Args: args}
 		observer.Started(step)
 		result, err := recipe.Do(ctx, app, step, observer.Notified)
@@ -422,10 +390,13 @@ func (m *model) start(action wire.Action, args map[string]wire.RawArg) tea.Cmd {
 			observer.Ended(step, result)
 		}
 		return err
-	})
-}
-
-func (m *model) startRun(r *run, work work) tea.Cmd {
+	}
+	if name, ok := strings.CutPrefix(action.ID, "$"); ok {
+		r.recipe = true
+		work = func(ctx context.Context, observer recipe.Observer) error {
+			return script.Run(ctx, app, name, args, observer)
+		}
+	}
 	header, cmd := m.runs.start(m.activity, r, m.prompt.actions, work)
 	m.log.add(header)
 	return cmd
@@ -433,7 +404,7 @@ func (m *model) startRun(r *run, work work) tea.Cmd {
 
 func (m *model) openBox(action wire.Action) tea.Cmd {
 	m.box = newParamBox(action, m.width)
-	m.prompt.blur()
+	m.prompt.input.Blur()
 	return m.box.init()
 }
 
@@ -450,7 +421,11 @@ func (m *model) reload() tea.Cmd {
 func (m *model) openApp() tea.Cmd {
 	app, activity := m.app, m.activity
 	return func() tea.Msg {
-		activity.send(opened{app.Start(client.OpenApp)})
+		line := statusStyle.Render("showed the app's main screen")
+		if err := app.Start(client.OpenApp); err != nil {
+			line = problemStyle.Render("open-app: " + err.Error())
+		}
+		activity.send(logged{line})
 		return nil
 	}
 }
@@ -502,13 +477,6 @@ func (m *model) setRecipes(r recipes) {
 	}
 }
 
-func (m *model) openedLine(msg opened) string {
-	if msg.err != nil {
-		return problemStyle.Render("open-app: " + msg.err.Error())
-	}
-	return statusStyle.Render("showed the app's main screen")
-}
-
 func (m *model) cancel() tea.Cmd {
 	m.runs.stop()
 	return nil
@@ -538,10 +506,10 @@ func (m *model) pickApp() tea.Cmd {
 
 func (m *model) openPicker(setup func(*picker)) tea.Cmd {
 	m.box = nil
-	m.prompt.blur()
+	m.prompt.input.Blur()
 	m.picker = newPicker(client.Target{}, m.width)
 	setup(m.picker)
-	return tea.Batch(m.picker.focus(), m.inspectAll(), m.poll())
+	return tea.Batch(m.picker.input.Focus(), m.inspectAll(), m.poll())
 }
 
 func (m *model) pick() tea.Cmd {
@@ -579,7 +547,7 @@ func (m *model) connect(target client.Target) tea.Cmd {
 	source, activity, mode := m.source, m.activity, m.mode
 	return func() tea.Msg {
 		app, err := source.Connect(target, mode, activity)
-		msg := connected{target: target, app: app, err: err}
+		msg := connected{target: target, app: app, described: described{err: err}}
 		if err == nil {
 			msg.hello, msg.actions, msg.err = app.Describe(activity.ctx)
 			msg.recipes = loadRecipes(target.Package)
@@ -610,7 +578,7 @@ func (m *model) connected(msg connected) tea.Cmd {
 	}
 	m.log.add(statusStyle.Render("switched to " + msg.target.Package + " on " + where))
 	m.setRecipes(msg.recipes)
-	return m.prompt.focus()
+	return m.prompt.input.Focus()
 }
 
 func (m *model) track() tea.Cmd {
@@ -624,7 +592,7 @@ func (m *model) track() tea.Cmd {
 			})
 			if err != nil && !failing {
 				failing = true
-				activity.send(trackLost{err})
+				activity.send(logged{problemStyle.Render(err.Error())})
 			}
 			select {
 			case <-activity.ctx.Done():

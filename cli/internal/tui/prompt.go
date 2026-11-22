@@ -33,15 +33,15 @@ type choice struct {
 	matched []int
 }
 
-func newPrompt(actions []wire.Action) prompt {
+func newInput(placeholder string) textinput.Model {
 	input := textinput.New()
 	input.Prompt = "> "
-	input.Placeholder = "find an action, $ for recipes, / for commands"
+	input.Placeholder = placeholder
 	styles := input.Styles()
 	styles.Focused.Prompt = promptStyle
 	styles.Blurred.Prompt = promptStyle
 	input.SetStyles(styles)
-	return prompt{input: input, actions: actions}
+	return input
 }
 
 func (p *prompt) choices() ([]choice, int) {
@@ -88,8 +88,6 @@ func (p *prompt) selection() (choice, bool) {
 	}
 	return choices[p.selected], true
 }
-
-func (p *prompt) value() string { return p.input.Value() }
 
 func (p *prompt) update(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
@@ -150,10 +148,6 @@ func (p *prompt) keepSelection(change func()) {
 		}
 	}
 }
-
-func (p *prompt) focus() tea.Cmd { return p.input.Focus() }
-
-func (p *prompt) blur() { p.input.Blur() }
 
 func (p *prompt) resize(width int) {
 	p.width = width

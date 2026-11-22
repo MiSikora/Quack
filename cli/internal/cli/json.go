@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,10 +60,7 @@ func failure(err error) (code, message string, exit int) {
 	var command *recipe.CommandError
 	switch {
 	case errors.As(err, &refused):
-		exit, ok := errorExits[refused.Code]
-		if !ok {
-			exit = exitAction
-		}
+		exit := cmp.Or(errorExits[refused.Code], exitAction)
 		message := refused.Message
 		// A recipe that ended on the app's error says where it was.
 		var thrown *recipe.ScriptError

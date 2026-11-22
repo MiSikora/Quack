@@ -172,10 +172,6 @@ func CommandLine(action wire.Action, args map[string]wire.RawArg) string {
 
 // Only args typed on the command line or in the TUI take variables. A recipe reads the environment through env.
 func ExpandArgs(args map[string]wire.RawArg, target client.Target) (map[string]wire.RawArg, error) {
-	return expandArgs(args, lookup(target))
-}
-
-func expandArgs(args map[string]wire.RawArg, lookup func(string) (string, bool)) (map[string]wire.RawArg, error) {
 	if args == nil {
 		return nil, nil
 	}
@@ -183,7 +179,7 @@ func expandArgs(args map[string]wire.RawArg, lookup func(string) (string, bool))
 	for _, key := range slices.Sorted(maps.Keys(args)) {
 		values := make(wire.RawArg, len(args[key]))
 		for i, value := range args[key] {
-			v, err := expand(value, lookup)
+			v, err := expand(value, target)
 			if err != nil {
 				return nil, fmt.Errorf("arg '%s': %w", key, err)
 			}
@@ -195,7 +191,7 @@ func expandArgs(args map[string]wire.RawArg, lookup func(string) (string, bool))
 }
 
 // Any other $ stays as it is, so only text that mentions ${ needs escaping.
-func expand(text string, lookup func(string) (string, bool)) (string, error) {
+func expand(text string, target client.Target) (string, error) {
 	var out strings.Builder
 	rest := text
 	for {
@@ -223,7 +219,7 @@ func expand(text string, lookup func(string) (string, bool)) (string, error) {
 			if !isVariable(name) {
 				return "", fmt.Errorf("'${%s}' does not name an environment variable", name)
 			}
-			value, ok := lookup(name)
+			value, ok := lookup(target, name)
 			if !ok {
 				return "", fmt.Errorf("environment variable '%s' is not set", name)
 			}
@@ -236,16 +232,14 @@ func expand(text string, lookup func(string) (string, bool)) (string, error) {
 	}
 }
 
-func lookup(target client.Target) func(string) (string, bool) {
-	return func(name string) (string, bool) {
-		switch name {
-		case "QUACK_PACKAGE":
-			return target.Package, true
-		case "ANDROID_SERIAL":
-			return string(target.Device), true
-		}
-		return os.LookupEnv(name)
+func lookup(target client.Target, name string) (string, bool) {
+	switch name {
+	case "QUACK_PACKAGE":
+		return target.Package, true
+	case "ANDROID_SERIAL":
+		return string(target.Device), true
 	}
+	return os.LookupEnv(name)
 }
 
 func isVariable(name string) bool {

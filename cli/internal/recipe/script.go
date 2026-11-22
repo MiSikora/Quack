@@ -208,10 +208,10 @@ func (r *runtime) load() (*goja.Object, error) {
 	for name, value := range map[string]any{
 		"recipe":    r.recipe,
 		"runAction": r.runAction,
-		"openApp":   func() { r.step(OpenApp{}) },
-		"shell":     func(command string) string { return r.step(Shell{command}).Message },
-		"run":       func(command string) string { return r.step(Run{command}).Message },
-		"wait":      func(d goja.Value) { r.step(Wait{r.duration(d, "wait")}) },
+		"openApp":   func() { r.do(OpenApp{}, nil) },
+		"shell":     func(command string) string { return r.do(Shell{command}, nil).Message },
+		"run":       func(command string) string { return r.do(Run{command}, nil).Message },
+		"wait":      func(d goja.Value) { r.do(Wait{r.duration(d, "wait")}, nil) },
 		"waitUntil": r.waitUntil,
 		"app":       map[string]string{"package": target.Package},
 		"device":    map[string]string{"serial": string(target.Device)},
@@ -343,9 +343,9 @@ func (r *runtime) runAction(id string, args map[string]any) actionResult {
 		}
 		call.Args[key] = values
 	}
-	var notifications []string
+	notifications := []string{}
 	result := r.do(call, func(message string) { notifications = append(notifications, message) })
-	out := actionResult{Message: result.Message, Data: goja.Null(), Notifications: append([]string{}, notifications...)}
+	out := actionResult{Message: result.Message, Data: goja.Null(), Notifications: notifications}
 	if result.Data != nil {
 		// JSON.parse keeps the keys in the app's order, which Go maps do not. The app sends valid JSON.
 		parse, _ := goja.AssertFunction(r.vm.Get("JSON").ToObject(r.vm).Get("parse"))
@@ -353,8 +353,6 @@ func (r *runtime) runAction(id string, args map[string]any) actionResult {
 	}
 	return out
 }
-
-func (r *runtime) step(step Step) wire.MessageResult { return r.do(step, nil) }
 
 func (r *runtime) do(step Step, collect func(string)) wire.MessageResult {
 	if r.app == nil {

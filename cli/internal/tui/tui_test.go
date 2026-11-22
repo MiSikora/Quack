@@ -1703,15 +1703,6 @@ func (h *harness) wait(read func() string, done func(string) bool, want string) 
 	}
 }
 
-// Text that starts with a temp path wraps where the path's length puts it, which differs between systems.
-func wrapped(text string, width int) string {
-	rows := strings.Split(ansi.Hardwrap(text, width, true), "\n")
-	for i, row := range rows {
-		rows[i] = strings.TrimRight(row, " ")
-	}
-	return strings.Join(rows, "\n")
-}
-
 func holds(s string, texts []string) bool {
 	for _, text := range texts {
 		i := strings.Index(s, text)

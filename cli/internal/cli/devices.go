@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -47,11 +46,7 @@ func printDevices(w io.Writer, device adb.Device, pkg string, asJSON bool) error
 			for _, p := range d.Packages {
 				apps = append(apps, appJSON{p})
 			}
-			line, err := json.Marshal(deviceJSON{string(d.Device), d.Model, d.State, apps})
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(w, string(line))
+			printJSON(w, deviceJSON{string(d.Device), d.Model, d.State, apps})
 		}
 		return nil
 	}

@@ -33,16 +33,6 @@ type run struct {
 	cancel   context.CancelFunc
 }
 
-type work func(ctx context.Context, observer recipe.Observer) error
-
-type runEnd interface{ runEnd() }
-
-type (
-	finished struct{}
-	failed   struct{ err error }
-	canceled struct{}
-)
-
 // Only Update touches the run.
 type (
 	stepStarted struct {
@@ -60,16 +50,15 @@ type (
 		run *run
 		err error
 	}
-	runLogged struct {
-		text string
-	}
 	runEnded struct {
-		run *run
-		end runEnd
+		run      *run
+		err      error
+		canceled bool
 	}
 )
 
-type statusLine struct {
+// A line for the log from outside Update, styled already.
+type logged struct {
 	text string
 }
 
@@ -84,7 +73,7 @@ func newRuns() runs {
 	return runs{spinner: spinner.New(spinner.WithSpinner(spinner.Dot)), now: time.Now}
 }
 
-func (r *runs) start(activity activity, started *run, actions []wire.Action, work work) (string, tea.Cmd) {
+func (r *runs) start(activity activity, started *run, actions []wire.Action, work func(context.Context, recipe.Observer) error) (string, tea.Cmd) {
 	ctx, cancel := context.WithCancel(activity.ctx)
 	started.started, started.cancel = r.now(), cancel
 	r.active = started
@@ -93,21 +82,12 @@ func (r *runs) start(activity activity, started *run, actions []wire.Action, wor
 		Notified: func(message string) { activity.send(runNotification{message}) },
 		Ended:    func(_ recipe.Step, result wire.MessageResult) { activity.send(stepEnded{started, result}) },
 		Failed:   func(_ recipe.Step, err error) { activity.send(stepFailed{started, err}) },
-		Logged:   func(text string) { activity.send(runLogged{text}) },
+		Logged:   func(text string) { activity.send(logged{text}) },
 	}
 	do := func() tea.Msg {
 		defer cancel()
 		err := work(ctx, observer)
-		var end runEnd
-		switch {
-		case err == nil:
-			end = finished{}
-		case ctx.Err() != nil:
-			end = canceled{}
-		default:
-			end = failed{err}
-		}
-		activity.send(runEnded{started, end})
+		activity.send(runEnded{started, err, ctx.Err() != nil})
 		return nil
 	}
 	header := ""
@@ -122,10 +102,6 @@ func (r *runs) stepStarted(e stepStarted) string {
 	return commandStyle.Render("› " + e.command)
 }
 
-func (r *runs) notification(e runNotification) string {
-	return prefixed("  ", "  ", e.message)
-}
-
 func (r *runs) stepEnded(e stepEnded) string {
 	text := e.result.Message
 	if text == "" {
@@ -134,7 +110,7 @@ func (r *runs) stepEnded(e stepEnded) string {
 	now := r.now()
 	lines := text + statusStyle.Render(" · "+duration(now.Sub(e.run.started)))
 	if e.result.Data != nil {
-		lines += "\n" + prefixed("  ", "  ", e.result.IndentedData())
+		lines += "\n" + indent(e.result.IndentedData())
 	}
 	e.run.step, e.run.started = "", now
 	return lines
@@ -150,11 +126,13 @@ func (r *runs) stepFailed(e stepFailed) string {
 func (r *runs) ended(e runEnded) string {
 	r.active = nil
 	var first, rest string
-	switch end := e.end.(type) {
-	case finished:
+	switch {
+	case e.err == nil:
 		return ""
-	case failed:
-		head, tail, more := strings.Cut(end.err.Error(), "\n")
+	case e.canceled:
+		first = statusStyle.Render("canceled")
+	default:
+		head, tail, more := strings.Cut(e.err.Error(), "\n")
 		first = problemStyle.Render(head)
 		if more {
 			// Styling each line on its own keeps lipgloss from padding the lines to the widest.
@@ -163,11 +141,9 @@ func (r *runs) ended(e runEnded) string {
 			}
 		}
 		// The failed step said its error already, so only where the recipe was is left to say.
-		if e.run.failure != nil && errors.Is(end.err, e.run.failure) {
+		if e.run.failure != nil && errors.Is(e.err, e.run.failure) {
 			return strings.TrimPrefix(rest, "\n")
 		}
-	case canceled:
-		first = statusStyle.Render("canceled")
 	}
 	return first + statusStyle.Render(" · "+duration(r.now().Sub(e.run.started))) + rest
 }
@@ -236,7 +212,7 @@ func (a activity) listen() tea.Cmd {
 
 func (a activity) Write(p []byte) (int, error) {
 	for _, line := range strings.Split(strings.TrimSuffix(string(p), "\n"), "\n") {
-		a.send(statusLine{line})
+		a.send(logged{statusStyle.Render(line)})
 	}
 	return len(p), nil
 }
@@ -249,20 +225,6 @@ func duration(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
-func prefixed(first, rest, text string) string {
-	lines := strings.Split(text, "\n")
-	for i := range lines {
-		if i == 0 {
-			lines[i] = first + lines[i]
-		} else {
-			lines[i] = rest + lines[i]
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (finished) runEnd() {}
-func (failed) runEnd()   {}
-func (canceled) runEnd() {}
+func indent(text string) string { return "  " + strings.ReplaceAll(text, "\n", "\n  ") }
 
 var commandStyle = lipgloss.NewStyle().Bold(true)

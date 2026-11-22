@@ -35,18 +35,15 @@ type fakeDevice struct {
 }
 
 type fakeApp struct {
-	pkg       string
-	version   string
-	installed bool
-	running   bool
+	pkg     string
+	version string
+	running bool
 	// deaf apps never bind their socket, so quack times out waiting for them.
 	deaf bool
 	// noDump apps close every connection without hello, as an app does for a caller without DUMP.
 	noDump      bool
 	protocol    int
 	hasLauncher bool
-	// reply writes the frames after hello for one request. It may sleep to simulate a long action.
-	reply func(request map[string]any, write func(frame string))
 }
 
 func startFakeAdb(t *testing.T, devices []*fakeDevice) *fakeAdb {
@@ -198,9 +195,7 @@ func (a *fakeAdb) shell(d *fakeDevice, cmd string) string {
 		record("query-receivers")
 		var out strings.Builder
 		for _, app := range d.apps {
-			if app.installed {
-				fmt.Fprintf(&out, "%s/.lib.android.QuackWakeReceiver\n", app.pkg)
-			}
+			fmt.Fprintf(&out, "%s/.lib.android.QuackWakeReceiver\n", app.pkg)
 		}
 		return out.String()
 	case cmd == "cmd activity get-current-user":
@@ -211,7 +206,7 @@ func (a *fakeAdb) shell(d *fakeDevice, cmd string) string {
 		app := d.app(pkg)
 		var out strings.Builder
 		if app == nil || !app.running {
-			if app == nil || !app.installed {
+			if app == nil {
 				fmt.Fprintf(&out, "Error: %s is not installed\n", pkg)
 			}
 			out.WriteString("stopped\n")
@@ -222,7 +217,7 @@ func (a *fakeAdb) shell(d *fakeDevice, cmd string) string {
 			out.WriteString("Broadcasting: Intent { act=io.mehow.quack.WAKE flg=0x400010 pkg=" + pkg + " }\nBroadcast completed: result=0\n")
 		case strings.Contains(cmd, "query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "+pkg):
 			record("open " + pkg)
-			if app != nil && app.installed && app.hasLauncher {
+			if app != nil && app.hasLauncher {
 				out.WriteString("Starting: Intent { cmp=" + pkg + "/.MainActivity }\nStatus: ok\n")
 			} else {
 				fmt.Fprintf(&out, "Error: %s has no launcher activity\n", pkg)
@@ -230,7 +225,7 @@ func (a *fakeAdb) shell(d *fakeDevice, cmd string) string {
 		default:
 			record("unexpected " + cmd)
 		}
-		if app != nil && app.installed && (app.hasLauncher || !strings.Contains(cmd, "query-activities")) {
+		if app != nil && (app.hasLauncher || !strings.Contains(cmd, "query-activities")) {
 			app.running = true
 		}
 		return out.String()
@@ -248,7 +243,7 @@ func (a *fakeAdb) listening(d *fakeDevice, socket string) *fakeApp {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, app := range d.apps {
-		if socket == app.pkg+".quack."+d.user && app.installed && app.running && !app.deaf {
+		if socket == app.pkg+".quack."+d.user && app.running && !app.deaf {
 			return app
 		}
 	}
@@ -274,7 +269,7 @@ func (a *fakeAdb) converse(conn net.Conn, app *fakeApp) {
 		fmt.Fprintln(conn, `{"error":{"code":"bad_frame","message":"malformed request"}}`)
 		return
 	}
-	app.reply(request, func(frame string) { fmt.Fprintln(conn, frame) })
+	sampleReply(request, func(frame string) { fmt.Fprintln(conn, frame) })
 }
 
 func (d *fakeDevice) app(pkg string) *fakeApp {

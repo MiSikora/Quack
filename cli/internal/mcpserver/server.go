@@ -32,11 +32,8 @@ type Source interface {
 }
 
 type App interface {
+	recipe.App
 	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
-	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
-	Start(mode client.StartMode) error
-	Command(ctx context.Context, cmd string) (adb.Output, error)
-	Target() client.Target
 }
 
 func Serve(ctx context.Context, version string, startTimeout time.Duration, status io.Writer) error {
@@ -60,7 +57,7 @@ func New(source Source, version string) *mcp.Server {
 		Description: "Run an action of a quack-enabled app and return its notifications, its message and its data. " +
 			"Get the action ids and their params from list_actions. The args reach the app as given: ${NAME} stays as " +
 			"it is. " + askHelp + targetHelp,
-		InputSchema:  runActionSchema,
+		InputSchema:  schemaFor[runActionInput](),
 		OutputSchema: schemaFor[runActionOutput](),
 	}, s.runAction)
 	mcp.AddTool(server, &mcp.Tool{
@@ -132,13 +129,13 @@ type paramOutput struct {
 }
 
 type runActionInput struct {
-	Action string `json:"action"`
+	Action string `json:"action" jsonschema:"the id of the action, as list_actions gives it"`
 	// The SDK's validation turns numbers into float64, so a long beyond 2^53 loses precision unless it comes as a
 	// string.
-	Args    map[string]json.RawMessage `json:"args,omitempty"`
-	Device  string                     `json:"device,omitempty"`
-	App     string                     `json:"app,omitempty"`
-	OpenApp bool                       `json:"open_app,omitempty"`
+	Args    map[string]json.RawMessage `json:"args,omitempty" jsonschema:"the action's params by name: a string, a number or a boolean, or an array of them for a string_list param. Leave out params to use their defaults. Pass a long beyond 2^53 as a string, since JSON numbers that large lose precision on the way."`
+	Device  string                     `json:"device,omitempty" jsonschema:"the device's serial, as list_devices gives it"`
+	App     string                     `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
+	OpenApp bool                       `json:"open_app,omitempty" jsonschema:"whether to show the app's main screen before the action runs, instead of starting the app in the background"`
 }
 
 type listRecipesInput struct {
@@ -212,12 +209,9 @@ func (s tools) listDevices(context.Context, *mcp.CallToolRequest, listDevicesInp
 }
 
 func (s tools) listActions(ctx context.Context, _ *mcp.CallToolRequest, in listActionsInput) (*mcp.CallToolResult, listActionsOutput, error) {
-	var filter *regexp.Regexp
-	if in.Filter != "" {
-		var err error
-		if filter, err = regexp.Compile(in.Filter); err != nil {
-			return nil, listActionsOutput{}, fmt.Errorf("invalid filter: %v", err)
-		}
+	filter, err := regexp.Compile(in.Filter)
+	if err != nil {
+		return nil, listActionsOutput{}, fmt.Errorf("invalid filter: %v", err)
 	}
 	target, app, err := s.connect(in.Device, in.App, client.Wake)
 	if err != nil {
@@ -229,7 +223,7 @@ func (s tools) listActions(ctx context.Context, _ *mcp.CallToolRequest, in listA
 	}
 	out := listActionsOutput{Device: string(target.Device), App: target.Package, Version: hello.Version, Actions: []actionOutput{}}
 	for _, a := range actions {
-		if filter == nil || filter.MatchString(a.ID) {
+		if filter.MatchString(a.ID) {
 			out.Actions = append(out.Actions, action(a))
 		}
 	}
@@ -280,15 +274,12 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 }
 
 func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRecipesInput) (*mcp.CallToolResult, listRecipesOutput, error) {
-	var filter *regexp.Regexp
-	if in.Filter != "" {
-		var err error
-		if filter, err = regexp.Compile(in.Filter); err != nil {
-			return nil, listRecipesOutput{}, fmt.Errorf("invalid filter: %v", err)
-		}
+	filter, err := regexp.Compile(in.Filter)
+	if err != nil {
+		return nil, listRecipesOutput{}, fmt.Errorf("invalid filter: %v", err)
 	}
 	// Recipes need only the package, so the app does not start.
-	target, err := s.find(in.Device, in.App)
+	target, err := s.source.Find(adb.Device(in.Device), in.App)
 	if err != nil {
 		return nil, listRecipesOutput{}, err
 	}
@@ -301,7 +292,7 @@ func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRec
 		return nil, out, nil
 	}
 	for _, r := range script.Recipes {
-		if filter == nil || filter.MatchString(r.Name) {
+		if filter.MatchString(r.Name) {
 			params := action(wire.Action{Params: r.Params}).Params
 			out.Recipes = append(out.Recipes, recipeOutput{Name: r.Name, Description: r.Description, Params: params})
 		}
@@ -481,12 +472,8 @@ func fieldSchema(p wire.Param) *jsonschema.Schema {
 	return field
 }
 
-func (s tools) find(device, pkg string) (client.Target, error) {
-	return s.source.Find(adb.Device(device), pkg)
-}
-
 func (s tools) connect(device, pkg string, mode client.StartMode) (client.Target, App, error) {
-	target, err := s.find(device, pkg)
+	target, err := s.source.Find(adb.Device(device), pkg)
 	if err != nil {
 		return client.Target{}, nil, err
 	}
@@ -589,29 +576,13 @@ func (clientSource) Find(device adb.Device, pkg string) (client.Target, error) {
 
 func (s clientSource) Connect(target client.Target, mode client.StartMode) (App, error) {
 	app, err := client.Resolve(client.Options{Target: target, Mode: mode, StartTimeout: s.startTimeout, Status: s.status})
-	if err != nil {
-		return nil, err
-	}
-	return app, nil
+	return app, err
 }
 
 func (clientSource) Recipes(pkg string) (*recipe.Script, string, error) {
 	script, err := recipe.Load(pkg)
 	return script, recipe.Path(pkg), err
 }
-
-var runActionSchema = func() *jsonschema.Schema {
-	schema := schemaFor[runActionInput]()
-	schema.Properties["action"].Description = "the id of the action, as list_actions gives it"
-	schema.Properties["args"].Description = "the action's params by name: a string, a number or a boolean, or an array of them for a " +
-		"string_list param. Leave out params to use their defaults. Pass a long beyond 2^53 as a string, since JSON numbers " +
-		"that large lose precision on the way."
-	schema.Properties["device"].Description = "the device's serial, as list_devices gives it"
-	schema.Properties["app"].Description = "the app's package, as list_devices gives it"
-	schema.Properties["open_app"].Description = "whether to show the app's main screen before the action runs, instead of " +
-		"starting the app in the background"
-	return schema
-}()
 
 // Raw JSON would otherwise infer as an array of bytes.
 func schemaFor[T any]() *jsonschema.Schema {

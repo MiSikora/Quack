@@ -517,12 +517,7 @@ func assertStructured(t *testing.T, result *mcp.CallToolResult, want string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var gotValue, wantValue any
-	json.Unmarshal(got, &gotValue)
-	json.Unmarshal([]byte(want), &wantValue)
-	if !reflect.DeepEqual(gotValue, wantValue) {
-		t.Errorf("the structured content is\n%s\nwant\n%s", got, want)
-	}
+	assertJSON(t, string(got), want)
 }
 
 func assertJSON(t *testing.T, got, want string) {

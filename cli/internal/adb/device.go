@@ -239,33 +239,23 @@ func parseListings(text string) []Listing {
 // Starts the server once if it is not running. Reads and writes fail after serverTimeout, so that a server that
 // stopped answering cannot hang quack.
 func dialServer() (net.Conn, error) {
-	conn, err := dialOrStartServer()
-	if err != nil {
-		return nil, err
-	}
-	conn.SetDeadline(time.Now().Add(serverTimeout))
-	return conn, nil
-}
-
-func dialOrStartServer() (net.Conn, error) {
 	port := os.Getenv("ANDROID_ADB_SERVER_PORT")
 	if port == "" {
 		port = "5037"
 	}
 	conn, err := net.Dial("tcp", "127.0.0.1:"+port)
-	if err == nil {
-		return conn, nil
-	}
-	if _, err := exec.LookPath("adb"); err != nil {
-		return nil, &Error{"the adb server is not running and adb is not on PATH. Install it with brew install --cask android-platform-tools, or add the Android SDK's platform-tools to PATH."}
-	}
-	if out, err := exec.Command("adb", "start-server").CombinedOutput(); err != nil {
-		return nil, &Error{fmt.Sprintf("the adb server is not running and adb start-server failed: %s", strings.TrimSpace(string(out)))}
-	}
-	conn, err = net.Dial("tcp", "127.0.0.1:"+port)
 	if err != nil {
-		return nil, &Error{fmt.Sprintf("connect to the adb server: %v", err)}
+		if _, err := exec.LookPath("adb"); err != nil {
+			return nil, &Error{"the adb server is not running and adb is not on PATH. Install it with brew install --cask android-platform-tools, or add the Android SDK's platform-tools to PATH."}
+		}
+		if out, err := exec.Command("adb", "start-server").CombinedOutput(); err != nil {
+			return nil, &Error{fmt.Sprintf("the adb server is not running and adb start-server failed: %s", strings.TrimSpace(string(out)))}
+		}
+		if conn, err = net.Dial("tcp", "127.0.0.1:"+port); err != nil {
+			return nil, &Error{fmt.Sprintf("connect to the adb server: %v", err)}
+		}
 	}
+	conn.SetDeadline(time.Now().Add(serverTimeout))
 	return conn, nil
 }
 

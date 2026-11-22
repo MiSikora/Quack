@@ -51,8 +51,6 @@ func (l *sessionLog) scroll(rows, height int) {
 	l.scrolled = max(0, min(l.scrolled+rows, len(l.rows)-height))
 }
 
-func (l *sessionLog) follow() { l.scrolled = 0 }
-
 func (l *sessionLog) top(height int) int {
 	return max(0, len(l.rows)-l.scrolled-height)
 }

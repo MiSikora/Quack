@@ -24,14 +24,13 @@ func sampleApp() *fakeApp {
 	return &fakeApp{
 		pkg:         "io.mehow.quack.sample",
 		version:     "1.0",
-		installed:   true,
 		running:     true,
 		protocol:    1,
 		hasLauncher: true,
-		reply:       sampleReply,
 	}
 }
 
+// sampleReply writes the frames after hello for one request. It may sleep to simulate a long action.
 func sampleReply(request map[string]any, write func(string)) {
 	if request["method"] == "describe" {
 		write(sampleDescribe)
