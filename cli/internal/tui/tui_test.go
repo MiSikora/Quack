@@ -459,7 +459,7 @@ func TestSlashListsTheCommands(t *testing.T) {
 
 	h.typing("/")
 
-	h.waitFor("/quit", "/stop-action", "/switch-app", "/switch-device", "/clear", "/open-app", "▸ /reload", "7/7")
+	h.waitFor("/switch-device", "/switch-app", "/stop-action", "/quit", "/open-app", "/clear", "▸ /reload", "7/7")
 	h.waitForNo("app.greet")
 	h.typing("q")
 	h.waitFor("▸ /quit")
