@@ -1,9 +1,9 @@
 // Package tui is quack's interactive mode. It takes the whole terminal, on the alternate screen, and leaves it as it was
-// on quit. A panel of five rows sits on the last rows: the title, a rule, the input, a rule, and a footer of key hints
-// or the run going on. The rows above it show the session's log, which quack draws and scrolls itself, and where a drag
-// of the mouse selects text and copies it. The list of the actions the input matches, or of the devices or apps to pick
-// from, or else the box of one action's params, shows over the bottom of the log and the title, right over the input,
-// and leaves the log where it is.
+// on quit. A panel of six rows sits on the last rows: a blank row, the title, a rule, the input, a rule, and a footer of
+// key hints or the run going on. The rows above it show the session's log, which quack draws and scrolls itself, and
+// where a drag of the mouse selects text and copies it. The list of the actions the input matches, or of the devices or
+// apps to pick from, or else the box of one action's params, shows under a rule over the bottom of the log, the blank
+// row and the title, right over the input, and leaves the log where it is.
 package tui
 
 import (
@@ -748,8 +748,8 @@ func (m *model) deviceIndex(device adb.Device) int {
 // the log never moves.
 func (m *model) logHeight() int { return max(0, m.height-panelRows) }
 
-// logShown is the number of the log's rows that show: those over the list or the box while one shows.
-func (m *model) logShown() int { return m.logHeight() - len(m.overlay()) }
+// logShown is the number of the log's rows that show: those over the list or the box and its rule while one shows.
+func (m *model) logShown() int { return min(m.logHeight(), m.logHeight()+1-len(m.overlay())) }
 
 // forward hands a message that is not quack's own, such as a cursor blink, to the inputs that may be waiting for it.
 func (m *model) forward(msg tea.Msg) tea.Cmd {
@@ -763,28 +763,29 @@ func (m *model) forward(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// screen is the rows of the window: the log, and under it the panel, which is the title, a rule, the input, a rule and
-// the footer, fitted to the window's width. The list or the box, while one shows, covers the bottom rows of the log and
-// the title, under a blank row, so that its last row sits right over the input. Every state goes through it, so that
-// the panel never changes height and neither the log nor the panel's rows ever move.
+// screen is the rows of the window: the log, and under it the panel, which is a blank row, the title, a rule, the input,
+// a rule and the footer, fitted to the window's width. The list or the box, while one shows, covers the bottom rows of
+// the log, the blank row and the title, under a rule, so that its last row sits right over the input. Every state goes
+// through it, so that the panel never changes height and neither the log nor the panel's rows ever move.
 func (m *model) screen() []string {
 	rows := m.log.view(m.logHeight())
 	if m.width < minWidth || m.height < minHeight {
 		return fit(append(rows, "Make the window larger."), m.width, m.height)
 	}
-	rows = append(rows, m.title())
-	if overlay := m.overlay(); overlay != nil {
-		copy(rows[len(rows)-len(overlay)-1:], append([]string{""}, overlay...))
-	}
 	rule := ruleStyle.Render(strings.Repeat("─", m.width))
+	rows = append(rows, "", m.title())
+	if overlay := m.overlay(); overlay != nil {
+		copy(rows[len(rows)-len(overlay)-1:], append([]string{rule}, overlay...))
+	}
 	rows = append(rows, rule, m.inputRow(), rule, footerStyle.Render(" "+m.footer()))
 	return fit(rows, m.width, m.height)
 }
 
 // overlay is the lines of the open picker's list, of the box, or of the list of the actions while it shows, the line
-// next to the input last, or nil while none shows. It takes no more rows than the log leaves under a blank row.
+// next to the input last, or nil while none shows. It takes no more rows than the log, the blank row and the title leave
+// under its rule.
 func (m *model) overlay() []string {
-	rows := min(maxListRows, m.height-panelRows)
+	rows := min(maxListRows, m.logHeight()+1)
 	switch {
 	case m.picker != nil:
 		return m.picker.list(m.devices, m.listed, rows)
@@ -905,11 +906,11 @@ var (
 const (
 	// maxListRows is the most rows the list or the box takes.
 	maxListRows = 10
-	// panelRows is the panel's rows: the title, a rule, the input, a rule and the footer.
-	panelRows = 5
+	// panelRows is the panel's rows: a blank row, the title, a rule, the input, a rule and the footer.
+	panelRows = 6
 	minWidth  = 24
-	// minHeight leaves room over the input for a blank row and the three rows of a box with a hint.
-	minHeight  = panelRows + 3
+	// minHeight leaves room over the input for a rule and the three rows of a box with a hint.
+	minHeight  = panelRows + 2
 	noticeTime = 2 * time.Second
 	// pollTime is how often an open picker asks the devices for their apps, so that an app installed while it waits
 	// shows by itself.

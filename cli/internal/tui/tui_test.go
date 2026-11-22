@@ -26,28 +26,29 @@ import (
 	"quack/internal/wire"
 )
 
-func TestPanelShowsTheTitleTheInputAndTheKeysAtRest(t *testing.T) {
+func TestPanelShowsABlankRowTheTitleTheInputAndTheKeysAtRest(t *testing.T) {
 	h := start(t, newFakeApp())
 
 	checkPanel(t, h, []string{
+		"",
 		"quack · io.mehow.quack.sample 1.0 · emulator-5554",
 		strings.Repeat("─", 100),
 		"> find an action, $ for recipes, / for commands",
 		strings.Repeat("─", 100),
 		" type or ↑ to find an action · ctrl+c stop/quit",
 	})
-	if lines := h.panel(); !strings.HasSuffix(lines[2], " 6/6") {
-		t.Errorf("the input line is %q, want the counter at its end", lines[2])
+	if lines := h.panel(); !strings.HasSuffix(lines[3], " 6/6") {
+		t.Errorf("the input line is %q, want the counter at its end", lines[3])
 	}
 }
 
-func TestUpOnEmptyTextListsEveryActionBestLastOverTheTitleAndEscClosesIt(t *testing.T) {
+func TestUpOnEmptyTextListsEveryActionBestLastUnderARuleAndEscClosesIt(t *testing.T) {
 	h := start(t, newFakeApp())
 
 	h.press("up")
 
 	checkPanel(t, h, []string{
-		"",
+		strings.Repeat("─", 100),
 		"  app.count        Count to 50",
 		"  account.watch    Print the account each time it changes, until stopped",
 		"  account.delete   Delete the account",
@@ -99,8 +100,8 @@ func TestBestMatchSitsRightOverTheInputAndTheListTakesOnlyTheMatches(t *testing.
 	h.waitFor("3/6")
 
 	lines := h.panel()
-	if len(lines) != 8 || lines[0] != "" {
-		t.Fatalf("the panel is %q, want a blank row, the three matches and the last four rows", lines)
+	if len(lines) != 8 || lines[0] != strings.Repeat("─", 100) {
+		t.Fatalf("the panel is %q, want a rule, the three matches and the last four rows", lines)
 	}
 	if !strings.HasPrefix(lines[1], "  account.") || !strings.HasPrefix(lines[2], "  account.") {
 		t.Errorf("the list is %q, want the other matches over the best", lines[1:3])
@@ -151,7 +152,7 @@ func TestListCoversTheBottomOfTheLogWithoutMovingIt(t *testing.T) {
 	h.waitFor("▸ app.greet")
 
 	after := strings.Split(h.view(), "\n")
-	if len(after) != 30 || !reflect.DeepEqual(after[:19], before[:19]) || strings.TrimSpace(after[19]) != "" {
+	if len(after) != 30 || !reflect.DeepEqual(after[:19], before[:19]) || after[19] != strings.Repeat("─", 100) {
 		t.Errorf("the list moved the log:\n%s", h.view())
 	}
 	if !strings.HasPrefix(after[20], "  app.count") || !strings.HasPrefix(after[25], "▸ app.greet") {
@@ -200,8 +201,8 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	h.resetHeights()
 	check := func(state string) {
 		t.Helper()
-		if got := h.panelRows(); got != 5 {
-			t.Errorf("%s: the panel takes the last %d rows, want 5:\n%s", state, got, h.view())
+		if got := h.panelRows(); got != 6 {
+			t.Errorf("%s: the panel takes the last %d rows, want 6:\n%s", state, got, h.view())
 		}
 		if got := h.lines(); got != 30 {
 			t.Errorf("%s: the view has %d rows, want the window's 30", state, got)
@@ -244,8 +245,8 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	h.waitFor("press ctrl+c again to quit")
 	check("quit prompt")
 
-	if heights := h.heights(); !reflect.DeepEqual(heights, []int{5}) {
-		t.Errorf("the panel had these heights: %v, want only 5", heights)
+	if heights := h.heights(); !reflect.DeepEqual(heights, []int{6}) {
+		t.Errorf("the panel had these heights: %v, want only 6", heights)
 	}
 }
 
@@ -299,12 +300,12 @@ func TestWheelAndPageUpScrollBackAndEndReturnsToTheNewest(t *testing.T) {
 	h.wait(bottom, func(row string) bool { return row == "  48" }, "a turn of the wheel 3 rows back")
 	h.waitFor("scrolled back · end newest · type or ↑ to find an action")
 	h.press("pgup")
-	h.wait(bottom, func(row string) bool { return row == "  23" }, "pgup a page of 25 rows further back")
+	h.wait(bottom, func(row string) bool { return row == "  24" }, "pgup a page of 24 rows further back")
 
 	h.typing("account.delete")
 	h.press("enter")
 	h.waitForRunning()
-	if got := bottom(); got != "  23" {
+	if got := bottom(); got != "  24" {
 		t.Errorf("new output moved the view scrolled back to %q", got)
 	}
 
@@ -335,8 +336,8 @@ func TestResizeCutsTheLogAgainAtTheNewWidth(t *testing.T) {
 			t.Errorf("row wider than the window: %q", row)
 		}
 	}
-	if got := h.panelRows(); got != 5 {
-		t.Errorf("the panel takes the last %d rows, want 5", got)
+	if got := h.panelRows(); got != 6 {
+		t.Errorf("the panel takes the last %d rows, want 6", got)
 	}
 
 	h.resize(100, 30)
@@ -1138,8 +1139,8 @@ func TestSmallWindowsShrinkTheList(t *testing.T) {
 		h.resize(size.width, size.height)
 		h.waitForOverlayRows(size.rows)
 		h.waitFor("▸ app.greet", "> find an action", "enter run")
-		if got := h.panelRows(); got != 5 {
-			t.Errorf("at %d rows the panel takes %d, want 5", size.height, got)
+		if got := h.panelRows(); got != 6 {
+			t.Errorf("at %d rows the panel takes %d, want 6", size.height, got)
 		}
 	}
 	h.press("tab")
@@ -1375,20 +1376,22 @@ func checkPanel(t *testing.T, h *harness, want []string) {
 	}
 }
 
-// split cuts the view into the log that shows and the panel: the last rows, from the title, or from the blank row over
-// the list or the box that covers the title.
+// split cuts the view into the log that shows and the panel: the last rows, from the blank row over the title, or from
+// the rule over the list or the box that covers the title.
 func (h *harness) split() (log, panel []string) {
 	h.mu.Lock()
 	lines := strings.Split(h.latest, "\n")
 	h.mu.Unlock()
 	at := max(0, len(lines)-panelRows)
-	if !isTitle(lines[at]) {
-		for at > 0 && strings.TrimSpace(lines[at]) != "" {
+	if at+1 >= len(lines) || !isTitle(lines[at+1]) {
+		for at > 0 && !isRule(lines[at]) {
 			at--
 		}
 	}
 	return lines[:at], lines[at:]
 }
+
+func isRule(line string) bool { return line != "" && strings.Trim(line, "─") == "" }
 
 func isTitle(line string) bool {
 	return strings.HasPrefix(line, "quack · ") || strings.TrimRight(line, " ") == "quack"
@@ -1420,17 +1423,27 @@ func (h *harness) logText() string {
 func (h *harness) lines() int { return strings.Count(h.view(), "\n") + 1 }
 
 // overlayRows is how many rows the list or the box takes over the input, or 0 while none shows.
-func (h *harness) overlayRows() int { return len(h.panel()) - panelRows }
+func (h *harness) overlayRows() int {
+	panel := h.panel()
+	if len(panel) == 0 || !isRule(panel[0]) {
+		return 0
+	}
+	return len(panel) - 5
+}
 
-// panelRows is how many rows the panel takes at the bottom of the view: from the row over the first rule down.
+// panelRows is how many rows the panel takes at the bottom of the view: from two rows over the rule over the input down.
 func (h *harness) panelRows() int { return panelFromBottom(h.view()) }
 
-// panelFromBottom is the number of rows from the row over the first rule down to the end of view, or 0 without a rule.
+// panelFromBottom is the number of rows from two rows over the rule over the input down to the end of view, or 0 without
+// that rule.
 func panelFromBottom(view string) int {
 	lines := strings.Split(view, "\n")
-	for i, line := range lines {
-		if line != "" && strings.Trim(line, "─") == "" {
-			return len(lines) - i + 1
+	rules := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		if isRule(lines[i]) {
+			if rules++; rules == 2 {
+				return len(lines) - i + 2
+			}
 		}
 	}
 	return 0

@@ -347,8 +347,8 @@ func TestPanelKeepsItsHeightInEveryPickerState(t *testing.T) {
 	h := startPicking(t, source, client.Target{}, client.Wake)
 	check := func(state string) {
 		t.Helper()
-		if got := h.panelRows(); got != 5 {
-			t.Errorf("%s: the panel takes the last %d rows, want 5:\n%s", state, got, h.view())
+		if got := h.panelRows(); got != 6 {
+			t.Errorf("%s: the panel takes the last %d rows, want 6:\n%s", state, got, h.view())
 		}
 		if got := h.lines(); got != 30 {
 			t.Errorf("%s: the view has %d rows, want the window's 30", state, got)
@@ -386,8 +386,8 @@ func TestPanelKeepsItsHeightInEveryPickerState(t *testing.T) {
 	h.waitFor("type or ↑ to find an action")
 	check("actions")
 
-	if heights := h.heights(); !reflect.DeepEqual(heights, []int{5}) {
-		t.Errorf("the panel had these heights: %v, want only 5", heights)
+	if heights := h.heights(); !reflect.DeepEqual(heights, []int{6}) {
+		t.Errorf("the panel had these heights: %v, want only 6", heights)
 	}
 }
 
