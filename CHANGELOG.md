@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - CLI: the terminal UI commands `/quit`, `/stop-action`, `/switch-app` and `/switch-device` are now `/exit`, `/cancel`, `/pick-app` and `/pick-device`.
 - CLI: the terminal UI and the CLI's messages say app where they said package, except for the package name itself.
+- CLI: `/clear` in the terminal UI keeps the duck at the top of the log.
 
 ## [0.1.1] - 2026-11-22
 

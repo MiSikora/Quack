@@ -87,7 +87,9 @@ type model struct {
 	copied  notice
 	refused notice
 	log     sessionLog
-	mouse   mouse
+	// header starts the log, and starts it again after a clear.
+	header string
+	mouse  mouse
 	// clipboard writes text to the system's clipboard. Tests swap it to read what the model copies.
 	clipboard func(text string) error
 	width     int
@@ -184,9 +186,10 @@ func newModel(source Source, activity activity, want client.Target, mode client.
 		prompt:    newPrompt(nil),
 		runs:      newRuns(),
 		clipboard: clipboard.WriteAll,
+		header:    header(version),
 	}
 	m.picker.auto, m.picker.skipPackage = true, true
-	m.log.add(header(version))
+	m.log.add(m.header)
 	return m
 }
 
@@ -488,9 +491,10 @@ func (m *model) openApp() tea.Cmd {
 	}
 }
 
-// clear empties the log.
+// clear empties the log down to its header.
 func (m *model) clear() tea.Cmd {
 	m.log.clear()
+	m.log.add(m.header)
 	return nil
 }
 

@@ -1122,19 +1122,19 @@ func TestFailedReloadKeepsTheActions(t *testing.T) {
 	h.waitFor("▸ app.greet", "6/6")
 }
 
-func TestClearEmptiesTheLog(t *testing.T) {
+func TestClearLeavesOnlyTheDuck(t *testing.T) {
 	h := start(t, newFakeApp())
 	h.press("ctrl+r")
 	h.waitForLog("reloaded 6 actions")
 
 	h.press("ctrl+l")
 
-	h.waitForEmptyLog()
+	h.waitForOnlyHeader()
 	h.press("ctrl+r")
 	h.waitForLog("reloaded 6 actions")
 	h.typing("/clear")
 	h.press("enter")
-	h.waitForEmptyLog()
+	h.waitForOnlyHeader()
 }
 
 func TestStatusLinesGoIntoTheLog(t *testing.T) {
@@ -1593,9 +1593,10 @@ func (h *harness) waitForLog(texts ...string) {
 	h.wait(h.logText, func(log string) bool { return holds(log, texts) }, "want in the log "+strings.Join(texts, " then "))
 }
 
-func (h *harness) waitForEmptyLog() {
+func (h *harness) waitForOnlyHeader() {
 	h.t.Helper()
-	h.wait(h.logText, func(log string) bool { return strings.TrimSpace(log) == "" }, "want an empty log")
+	header := ansi.Strip(header("dev"))
+	h.wait(h.logText, func(log string) bool { return strings.TrimRight(log, "\n") == header }, "want only the duck in the log")
 }
 
 func (h *harness) waitForExit() {
