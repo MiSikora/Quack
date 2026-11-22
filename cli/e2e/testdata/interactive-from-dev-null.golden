@@ -1,7 +1,0 @@
-$ quack --interactive
---- stdin from /dev/null
---- exit 2
---- stdout
---- stderr
-quack: --interactive needs a terminal. Run actions as separate quack commands.
---- device

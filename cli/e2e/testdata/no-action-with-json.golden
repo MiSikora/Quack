@@ -1,0 +1,6 @@
+$ quack --json
+--- exit 2
+--- stdout
+{"code":"usage","message":"--json needs an action, --list-actions or --list-devices"}
+--- stderr
+--- device

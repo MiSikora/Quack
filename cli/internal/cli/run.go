@@ -40,10 +40,11 @@ func Run(args []string, terminal Terminal) int {
 }
 
 type options struct {
-	device       string
-	pkg          string
-	json         bool
-	listActions  bool
+	device      string
+	pkg         string
+	json        bool
+	listActions bool
+	// interactive opens the TUI, which quack without an action does when a person sits at the terminal.
 	interactive  bool
 	listDevices  bool
 	openApp      bool
@@ -67,7 +68,6 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	fs.SetOutput(io.Discard)
 	fs.StringVarP(&opts.pkg, "app", "a", "", "the app, by its `package` (default: the only quack-enabled app on the device)")
 	fs.StringVarP(&opts.device, "device", "d", "", "the device, by its `serial` as adb devices lists it (default: $ANDROID_SERIAL)")
-	boolFlag(fs, &opts.interactive, "interactive", "i", "pick and run actions in a terminal UI")
 	boolFlag(fs, &opts.json, "json", "j", "print JSON lines: each notification, then the outcome with its code")
 	boolFlag(fs, &opts.listActions, "list-actions", "l", "list the app's actions, or only those whose id matches regex")
 	boolFlag(fs, &opts.listDevices, "list-devices", "", "list the devices and the quack-enabled apps on each")
@@ -75,9 +75,9 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
 	boolFlag(fs, &opts.version, "version", "", "show quack's version")
 	boolFlag(fs, &opts.help, "help", "h", "show this help")
-	opts.usage = "usage: quack [options] <action> [key=value]...\n" +
+	opts.usage = "usage: quack [options]\n" +
+		"       quack [options] <action> [key=value]...\n" +
 		"       quack [options] --list-actions [regex]\n" +
-		"       quack [options] --interactive\n" +
 		"       quack [options] --list-devices\n\n" +
 		"options:\n" + fs.FlagUsages()
 	if err := fs.Parse(argv); err != nil {
@@ -95,18 +95,8 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	rest := fs.Args()
 	switch {
 	case opts.listDevices:
-		if len(rest) > 0 || opts.listActions || opts.interactive {
-			return opts, usageErrorf("--list-devices takes no action, --list-actions or --interactive")
-		}
-	case opts.interactive:
 		if len(rest) > 0 || opts.listActions {
-			return opts, usageErrorf("--interactive takes no action or --list-actions")
-		}
-		if opts.json {
-			return opts, usageErrorf("--interactive does not print --json")
-		}
-		if !terminal.Prompts {
-			return opts, usageErrorf("--interactive needs a terminal. Run actions as separate quack commands.")
+			return opts, usageErrorf("--list-devices takes no action or --list-actions")
 		}
 	case opts.listActions:
 		if len(rest) > 1 {
@@ -119,9 +109,10 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 			}
 			opts.filter = filter
 		}
+	case len(rest) == 0 && opts.json:
+		return opts, usageErrorf("--json needs an action, --list-actions or --list-devices")
 	case len(rest) == 0:
-		fmt.Fprint(terminal.Err, opts.usage)
-		return opts, usageErrorf("missing action")
+		opts.interactive, opts.help = terminal.TUI, !terminal.TUI
 	default:
 		args, err := parseArgs(rest[1:])
 		if err != nil {

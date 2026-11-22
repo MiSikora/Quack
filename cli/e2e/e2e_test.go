@@ -47,19 +47,19 @@ type scenario struct {
 var scenarios = []scenario{
 	// Usage.
 	{name: "help", args: []string{"--help"}},
-	{name: "missing-action"},
+	{name: "no-action"},
+	{name: "no-action-with-device-flag", args: []string{"-d", "emulator-5554"}},
+	{name: "no-action-with-json", args: []string{"--json"}},
 	{name: "unknown-flag", args: []string{"--nope", "app.greet"}},
 	{name: "short-flag", args: []string{"-d", "emulator-5554", "app.greet"}},
 	{name: "short-help", args: []string{"-h"}},
 	{name: "version", args: []string{"--version"}},
 	{name: "short-flags-call", args: []string{"-j", "-a", "io.mehow.quack.sample", "app.greet", "name=Bob"}},
 	{name: "short-flags-list-actions", args: []string{"-l", "account"}},
-	{name: "short-flags-interactive", args: []string{"-i"}},
 	{name: "flag-turned-off", args: []string{"--json=false", "app.greet", "name=Bob"}},
 	{name: "flag-invalid-value", args: []string{"--json=maybe", "app.greet", "name=Bob"}},
 	{name: "invalid-app", args: []string{"--app", "nope", "app.greet"}},
 	{name: "arg-not-key-value", args: []string{"app.greet", "Bob"}},
-	{name: "interactive-with-action", args: []string{"--interactive", "app.greet"}},
 	{name: "list-actions-two-regexes", args: []string{"--list-actions", "a", "b"}},
 	{name: "list-actions-invalid-regex", args: []string{"--list-actions", "acc("}},
 
@@ -150,12 +150,9 @@ var scenarios = []scenario{
 	{name: "list-devices-none", args: []string{"--list-devices"}, device: func(d *fakeDevice) { d.state = "" }},
 	{name: "list-devices-with-action", args: []string{"--list-devices", "app.greet"}},
 	{name: "list-devices-with-list-actions", args: []string{"--list-devices", "--list-actions"}},
-	{name: "list-devices-with-interactive", args: []string{"--list-devices", "--interactive"}},
 
-	// The TUI needs a terminal, and stdin is a pipe here.
-	{name: "interactive-piped", args: []string{"--interactive"}},
-	{name: "interactive-with-json", args: []string{"--interactive", "--json"}},
-	{name: "interactive-from-dev-null", args: []string{"--interactive"}, stdinDevNull: true},
+	// Without an action, quack prints its help instead of opening the TUI, since stdin is not a terminal here.
+	{name: "no-action-from-dev-null", stdinDevNull: true},
 }
 
 func TestScenarios(t *testing.T) {

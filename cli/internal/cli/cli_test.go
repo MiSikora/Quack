@@ -46,3 +46,27 @@ func TestWriteActionWrapsLongTextUnderItsIndent(t *testing.T) {
 		}
 	}
 }
+
+func TestTUIOpensOnlyForAPersonAtATerminal(t *testing.T) {
+	cases := []struct {
+		name     string
+		terminal bool
+		env      map[string]string
+		want     bool
+	}{
+		{"terminal", true, nil, true},
+		{"no terminal", false, nil, false},
+		{"agent", true, map[string]string{"AI_AGENT": "claude-code"}, false},
+		{"ci", true, map[string]string{"CI": "true"}, false},
+		{"ci turned off", true, map[string]string{"CI": "false"}, true},
+		{"ci zero", true, map[string]string{"CI": "0"}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			getenv := func(key string) string { return c.env[key] }
+			if got := opensTUI(c.terminal, getenv); got != c.want {
+				t.Errorf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}

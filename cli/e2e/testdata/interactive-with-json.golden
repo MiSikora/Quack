@@ -1,6 +1,0 @@
-$ quack --interactive --json
---- exit 2
---- stdout
-{"code":"usage","message":"--interactive does not print --json"}
---- stderr
---- device
