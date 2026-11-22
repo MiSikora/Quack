@@ -8,11 +8,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
@@ -40,7 +42,8 @@ func TestListActionsGivesTheParamsOfEachActionThatMatchesTheFilter(t *testing.T)
 		`{"id":"account.create","description":"Create an account","params":[` +
 		`{"name":"username","type":"string","description":"Who signs in","hints":["alice","bob"],"required":true},` +
 		`{"name":"age","type":"int","description":"","required":false,"default":"30"},` +
-		`{"name":"tags","type":"string_list","description":"","required":false,"default":["a","b"]}]}]}`
+		`{"name":"tags","type":"string_list","description":"","required":false,"default":["a","b"]}]},` +
+		`{"id":"account.delete","description":"Delete the account","params":[]}]}`
 	assertStructured(t, result, want)
 }
 
@@ -171,6 +174,119 @@ func TestListActionsRefusesAnInvalidFilter(t *testing.T) {
 	}
 }
 
+func TestListRecipesGivesTheStepsOfEachRecipeThatMatchesTheFilter(t *testing.T) {
+	source := newFakeSource()
+	source.recipes = []recipe.Recipe{
+		{Name: "fresh", Description: "Start over", Steps: []recipe.Step{
+			recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
+			recipe.OpenApp{},
+			recipe.Wait{Duration: 2 * time.Second},
+		}},
+		{Name: "gone", Steps: []recipe.Step{recipe.Call{Action: "account.delete"}}},
+	}
+	session := connect(t, source)
+
+	result := call(t, session, "list_recipes", map[string]any{"filter": "^fr"})
+
+	want := `{"device":"emulator-5554","app":"io.mehow.quack.sample","file":"/config/io.mehow.quack.sample.toml","recipes":[` +
+		`{"name":"fresh","description":"Start over","steps":["account.create username=alice","/open-app","wait 2s"]}]}`
+	assertStructured(t, result, want)
+	if len(source.modes) > 0 {
+		t.Errorf("the app started %q, want it left alone", source.modes)
+	}
+}
+
+func TestRunRecipeGivesWhatEachStepGave(t *testing.T) {
+	source := newFakeSource()
+	source.recipes = []recipe.Recipe{{Name: "fresh", Steps: []recipe.Step{
+		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
+		recipe.OpenApp{},
+		recipe.Wait{Duration: time.Millisecond},
+	}}}
+	session := connect(t, source)
+
+	result := call(t, session, "run_recipe", map[string]any{"recipe": "fresh"})
+
+	assertStructured(t, result, `{"steps":[`+
+		`{"step":"account.create username=alice","notifications":["Creating alice"],"message":"Created alice","data":{"id":7}},`+
+		`{"step":"/open-app","notifications":[],"message":""},`+
+		`{"step":"wait 1ms","notifications":[],"message":""}]}`)
+	if want := []client.StartMode{client.Open}; !reflect.DeepEqual(source.app.starts, want) {
+		t.Errorf("starts are %q, want %q", source.app.starts, want)
+	}
+}
+
+func TestRunRecipeSendsStepsAndNotificationsAsProgressWhenAskedTo(t *testing.T) {
+	source := newFakeSource()
+	source.recipes = []recipe.Recipe{{Name: "fresh", Steps: []recipe.Step{
+		recipe.OpenApp{},
+		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
+	}}}
+	var mu sync.Mutex
+	var progress []string
+	session := connectWith(t, source, &mcp.ClientOptions{
+		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
+			mu.Lock()
+			defer mu.Unlock()
+			progress = append(progress, req.Params.Message)
+		},
+	})
+	params := &mcp.CallToolParams{Name: "run_recipe", Arguments: map[string]any{"recipe": "fresh"}}
+	params.SetProgressToken("run-1")
+
+	if _, err := session.CallTool(t.Context(), params); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []string{"› /open-app", "› account.create username=alice", "Creating alice"}; !reflect.DeepEqual(progress, want) {
+		t.Errorf("progress is %q, want %q", progress, want)
+	}
+}
+
+func TestRunRecipeStopsAtTheFirstStepThatFails(t *testing.T) {
+	source := newFakeSource()
+	source.recipes = []recipe.Recipe{{Name: "redo", Steps: []recipe.Step{
+		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
+		recipe.Call{Action: "account.delete"},
+		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"bob"}}},
+	}}}
+	session := connect(t, source)
+
+	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "redo"})
+
+	assertError(t, result, "› account.create username=alice\nCreating alice\nCreated alice\n› account.delete\nDeleting\n"+
+		"[rejected] there is no account")
+	if got := len(source.app.calls); got != 2 {
+		t.Errorf("the app got %d calls, want 2", got)
+	}
+}
+
+func TestRunRecipeRunsNoStepWhenACallWouldNotPassTheAppsChecks(t *testing.T) {
+	source := newFakeSource()
+	source.recipes = []recipe.Recipe{{Name: "bad", Steps: []recipe.Step{
+		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
+		recipe.Call{Action: "account.create"},
+	}}}
+	session := connect(t, source)
+
+	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "bad"})
+
+	assertError(t, result, "[invalid_args] recipe 'bad' step 2: missing argument 'username'")
+	if len(source.app.calls) > 0 {
+		t.Errorf("the app got calls %+v, want none", source.app.calls)
+	}
+}
+
+func TestRunRecipeNamesTheFileWithoutTheRecipe(t *testing.T) {
+	session := connect(t, newFakeSource())
+
+	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "fresh"})
+
+	assertError(t, result, "no recipe named fresh in /config/io.mehow.quack.sample.toml")
+}
+
 // connect runs a server for source and connects a client to it in memory.
 func connect(t *testing.T, source *fakeSource) *mcp.ClientSession {
 	return connectWith(t, source, nil)
@@ -252,7 +368,8 @@ type fakeSource struct {
 	// finds are the device and package of each Find, joined by a space.
 	finds []string
 	// modes are the start modes of each Connect.
-	modes []client.StartMode
+	modes   []client.StartMode
+	recipes []recipe.Recipe
 }
 
 func newFakeSource() *fakeSource {
@@ -274,10 +391,20 @@ func (s *fakeSource) Connect(_ client.Target, mode client.StartMode) (App, error
 	return s.app, nil
 }
 
+func (s *fakeSource) Recipes(pkg string) ([]recipe.Recipe, string, error) {
+	return s.recipes, "/config/" + pkg + ".toml", nil
+}
+
 // fakeApp has account.create, which creates the account its username names, and account.delete, which the app
 // rejects.
 type fakeApp struct {
-	calls []wire.Call
+	calls  []wire.Call
+	starts []client.StartMode
+}
+
+func (a *fakeApp) Start(mode client.StartMode) error {
+	a.starts = append(a.starts, mode)
+	return nil
 }
 
 func (a *fakeApp) Describe(context.Context) (wire.Hello, []wire.Action, error) {
@@ -288,6 +415,7 @@ func (a *fakeApp) Describe(context.Context) (wire.Hello, []wire.Action, error) {
 			{Name: "age", Type: wire.ParamTypeInt, Presence: wire.Default{Values: []string{"30"}}},
 			{Name: "tags", Type: wire.ParamTypeStringList, Presence: wire.Default{Values: []string{"a", "b"}}},
 		}},
+		{ID: "account.delete", Description: "Delete the account"},
 	}, nil
 }
 
