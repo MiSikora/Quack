@@ -129,8 +129,8 @@ func Load(pkg string) ([]Recipe, error) {
 // that cannot finish fails before its first step. Its errors carry the codes the app would answer with, except for an environment
 // variable that is not set.
 func Check(r Recipe, actions []wire.Action, target client.Target) error {
-	for i, step := range r.Steps {
-		step, err := expandStep(step, lookup(target))
+	for i, written := range r.Steps {
+		step, err := expandStep(written, lookup(target))
 		if err != nil {
 			return fmt.Errorf("recipe '%s' step %d: %w", r.Name, i+1, err)
 		}
@@ -163,9 +163,11 @@ func Check(r Recipe, actions []wire.Action, target client.Target) error {
 			case !p.Type.IsList() && len(values) == 0:
 				return fail(wire.ErrorCodeInvalidArgs, "'%s' expects %s, got none", p.Name, expected(p))
 			}
-			for _, value := range values {
+			for j, value := range values {
 				if !parses(p, value) {
-					return fail(wire.ErrorCodeInvalidArgs, "'%s' expects %s, got '%s'", p.Name, expected(p), value)
+					// The value as written, so that the error shows ${NAME} rather than the variable's value.
+					typed := written.(Call).Args[p.Name][j]
+					return fail(wire.ErrorCodeInvalidArgs, "'%s' expects %s, got '%s'", p.Name, expected(p), typed)
 				}
 			}
 		}
@@ -419,22 +421,38 @@ func expandStep(step Step, lookup func(string) (string, bool)) (Step, error) {
 		return Run{command}, err
 	}
 	call, ok := step.(Call)
-	if !ok || call.Args == nil {
+	if !ok {
 		return step, nil
 	}
-	args := make(map[string]wire.RawArg, len(call.Args))
-	for _, key := range slices.Sorted(maps.Keys(call.Args)) {
-		values := make(wire.RawArg, len(call.Args[key]))
-		for i, value := range call.Args[key] {
-			expanded, err := expand(value, lookup)
+	args, err := expandArgs(call.Args, lookup)
+	if err != nil {
+		return nil, err
+	}
+	return Call{Action: call.Action, Args: args}, nil
+}
+
+// ExpandArgs returns args with their variables replaced, as a recipe that runs against target replaces them.
+func ExpandArgs(args map[string]wire.RawArg, target client.Target) (map[string]wire.RawArg, error) {
+	return expandArgs(args, lookup(target))
+}
+
+func expandArgs(args map[string]wire.RawArg, lookup func(string) (string, bool)) (map[string]wire.RawArg, error) {
+	if args == nil {
+		return nil, nil
+	}
+	expanded := make(map[string]wire.RawArg, len(args))
+	for _, key := range slices.Sorted(maps.Keys(args)) {
+		values := make(wire.RawArg, len(args[key]))
+		for i, value := range args[key] {
+			v, err := expand(value, lookup)
 			if err != nil {
 				return nil, fmt.Errorf("arg '%s': %w", key, err)
 			}
-			values[i] = expanded
+			values[i] = v
 		}
-		args[key] = values
+		expanded[key] = values
 	}
-	return Call{Action: call.Action, Args: args}, nil
+	return expanded, nil
 }
 
 // expand replaces each ${NAME} in text with the value lookup gives for NAME, and each $$ with $. Any other $ stays as

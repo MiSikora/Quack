@@ -183,7 +183,7 @@ func TestCheckFailsOnACallTheAppWouldRefuse(t *testing.T) {
 	}
 }
 
-func TestCheckFailsOnAVariableThatIsNotSetOrGivesAValueTheAppWouldRefuse(t *testing.T) {
+func TestCheckFailsOnAVariableThatIsNotSetOrGivesAValueTheAppWouldRefuseShowingItAsWritten(t *testing.T) {
 	t.Setenv("QUACK_COUNT", "many")
 	os.Unsetenv("QUACK_MISSING")
 
@@ -192,7 +192,7 @@ func TestCheckFailsOnAVariableThatIsNotSetOrGivesAValueTheAppWouldRefuse(t *test
 		t.Errorf("unset: got %v", err)
 	}
 	err = Check(recipeOf(OpenApp{}, call("app.params", "count", "${QUACK_COUNT}")), actions, target)
-	if want := invalid("'count' expects int, got 'many'"); !reflect.DeepEqual(err, want) {
+	if want := invalid("'count' expects int, got '${QUACK_COUNT}'"); !reflect.DeepEqual(err, want) {
 		t.Errorf("value: got %v, want %v", err, want)
 	}
 }

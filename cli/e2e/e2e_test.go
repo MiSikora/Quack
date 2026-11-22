@@ -68,6 +68,8 @@ var scenarios = []scenario{
 	// Calls.
 	{name: "call", args: []string{"app.greet", "name=Bob"}},
 	{name: "call-repeated-key", args: []string{"app.params", "tag=a", "tag=b c"}},
+	{name: "call-variable", args: []string{"app.greet", "name=${QUACK_NAME} on ${ANDROID_SERIAL}"}, env: []string{"QUACK_NAME=Bob"}},
+	{name: "call-variable-unset", args: []string{"app.greet", "name=${QUACK_NAME}"}},
 	{name: "call-streams-notifications", args: []string{"account.create", "username=alice"}},
 	{name: "call-json", args: []string{"--json", "account.create", "username=alice"}},
 	{name: "call-data", args: []string{"account.show"}},

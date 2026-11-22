@@ -1,0 +1,8 @@
+$ quack app.greet name=${QUACK_NAME}
+--- exit 2
+--- stdout
+--- stderr
+quack: arg 'name': environment variable 'QUACK_NAME' is not set
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user

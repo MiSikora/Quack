@@ -99,7 +99,8 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		"       quack [options] --list-recipes [regex]    list the app's recipes and their steps\n" +
 		"       quack [options] --list-devices            list the devices and their quack-enabled apps\n\n" +
 		"arguments:\n" +
-		"  key=value   a param of the action. Repeat the key for a list: tag=a tag=b\n\n" +
+		"  key=value   a param of the action. Repeat the key for a list: tag=a tag=b. The value takes variables as\n" +
+		"              a recipe arg does: quack account.login 'token=${API_TOKEN}'\n\n" +
 		"options:\n" + fs.FlagUsages() + "\n" +
 		"recipes:\n" +
 		"  A recipe runs steps in order with fixed args, and stops at the first that fails: a call of an action, open-app\n" +
@@ -231,7 +232,11 @@ func run(opts options, terminal Terminal) error {
 	if opts.recipe != "" {
 		return runRecipe(app, r, terminal, opts.json)
 	}
-	call := wire.Call{Action: opts.action, Args: opts.args}
+	args, err := recipe.ExpandArgs(opts.args, app.Target())
+	if err != nil {
+		return usageErrorf("%v", err)
+	}
+	call := wire.Call{Action: opts.action, Args: args}
 	result, err := app.Call(context.Background(), call, printNotifications(terminal, opts.json, 0))
 	if err != nil {
 		return err

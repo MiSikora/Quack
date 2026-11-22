@@ -16,7 +16,8 @@ usage: quack [options]                           open the terminal UI
        quack [options] --list-devices            list the devices and their quack-enabled apps
 
 arguments:
-  key=value   a param of the action. Repeat the key for a list: tag=a tag=b
+  key=value   a param of the action. Repeat the key for a list: tag=a tag=b. The value takes variables as
+              a recipe arg does: quack account.login 'token=${API_TOKEN}'
 
 options:
   -a, --app package              the app, by its package (default: the only quack-enabled app on the device)
