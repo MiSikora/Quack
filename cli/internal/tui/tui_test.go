@@ -39,6 +39,9 @@ func TestPanelShowsTheTitleTheInputTheListAndTheKeys(t *testing.T) {
 		"  account.create   Create the account",
 		"  account.delete   Delete the account",
 		"  account.watch    Print the account each time it changes, until stopped",
+		"  app.count        Count to 50",
+		"",
+		"",
 		strings.Repeat("─", 100),
 		" enter run · tab params · ↑↓ select · ctrl+c stop/quit",
 	}
@@ -107,8 +110,8 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	h.resetHeights()
 	check := func(state string) {
 		t.Helper()
-		if got := h.panelRows(); got != 12 {
-			t.Errorf("%s: the panel takes the last %d rows, want 12:\n%s", state, got, h.view())
+		if got := h.panelRows(); got != 15 {
+			t.Errorf("%s: the panel takes the last %d rows, want 15:\n%s", state, got, h.view())
 		}
 		if got := h.lines(); got != 30 {
 			t.Errorf("%s: the view has %d rows, want the window's 30", state, got)
@@ -151,7 +154,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	h.waitFor("press ctrl+c again to quit")
 	check("quit prompt")
 
-	if heights := h.heights(); !reflect.DeepEqual(heights, []int{12}) {
+	if heights := h.heights(); !reflect.DeepEqual(heights, []int{15}) {
 		t.Errorf("the panel had these heights: %v, want only 12", heights)
 	}
 }
@@ -200,12 +203,12 @@ func TestWheelAndPageUpScrollBackAndEndReturnsToTheNewest(t *testing.T) {
 	h.wait(bottom, func(row string) bool { return row == "  48" }, "a turn of the wheel 3 rows back")
 	h.waitFor("scrolled back · end newest · enter run")
 	h.press("pgup")
-	h.wait(bottom, func(row string) bool { return row == "  30" }, "pgup a page of 18 rows further back")
+	h.wait(bottom, func(row string) bool { return row == "  33" }, "pgup a page of 15 rows further back")
 
 	h.typing("account.delete")
 	h.press("enter")
 	h.waitForRunning()
-	if got := bottom(); got != "  30" {
+	if got := bottom(); got != "  33" {
 		t.Errorf("new output moved the view scrolled back to %q", got)
 	}
 
@@ -237,8 +240,8 @@ func TestResizeCutsTheLogAgainAtTheNewWidth(t *testing.T) {
 			t.Errorf("row wider than the window: %q", row)
 		}
 	}
-	if got := h.panelRows(); got != 12 {
-		t.Errorf("the panel takes the last %d rows, want 12", got)
+	if got := h.panelRows(); got != 15 {
+		t.Errorf("the panel takes the last %d rows, want 15", got)
 	}
 
 	h.resize(100, 30)
@@ -324,6 +327,9 @@ func TestDoubleClickCopiesTheWordAndAClickClearsTheSelection(t *testing.T) {
 
 func TestEmptyQueryListsEveryActionInTheAppsOrder(t *testing.T) {
 	h := start(t, newFakeApp())
+	// A list of 5 rows, so that the 6 actions scroll.
+	h.resize(100, 24)
+	h.waitForPanelRows(12)
 
 	h.waitFor("▸ app.greet", "  app.params", "  account.create", "  account.delete", "  account.watch")
 	h.press("down", "down", "down", "down", "down", "down")

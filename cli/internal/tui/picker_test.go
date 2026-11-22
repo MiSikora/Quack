@@ -345,8 +345,8 @@ func TestPanelKeepsItsHeightInEveryPickerState(t *testing.T) {
 	h := startPicking(t, source, client.Target{}, client.Wake)
 	check := func(state string) {
 		t.Helper()
-		if got := h.panelRows(); got != 12 {
-			t.Errorf("%s: the panel takes the last %d rows, want 12:\n%s", state, got, h.view())
+		if got := h.panelRows(); got != 15 {
+			t.Errorf("%s: the panel takes the last %d rows, want 15:\n%s", state, got, h.view())
 		}
 		if got := h.lines(); got != 30 {
 			t.Errorf("%s: the view has %d rows, want the window's 30", state, got)
@@ -384,7 +384,7 @@ func TestPanelKeepsItsHeightInEveryPickerState(t *testing.T) {
 	h.waitFor("enter run")
 	check("actions")
 
-	if heights := h.heights(); !reflect.DeepEqual(heights, []int{12}) {
+	if heights := h.heights(); !reflect.DeepEqual(heights, []int{15}) {
 		t.Errorf("the panel had these heights: %v, want only 12", heights)
 	}
 }
@@ -433,6 +433,9 @@ func TestDeviceListScrollsToTheSelectionAndNewTextSelectsTheBestMatch(t *testing
 	}
 	h := startPicking(t, newFakeSource(newFakeApp(), devices...), client.Target{}, client.Wake)
 	h.waitFor("> pick a device", "7/7", "▸ Pixel 0")
+	// A list of 5 rows, so that the 7 devices scroll.
+	h.resize(100, 24)
+	h.waitForPanelRows(12)
 
 	h.press("down", "down", "down", "down", "down", "down")
 	h.waitFor("▸ Pixel 6 · emulator-5556")

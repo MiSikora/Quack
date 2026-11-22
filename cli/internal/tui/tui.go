@@ -835,7 +835,7 @@ var (
 )
 
 const (
-	maxListRows = 5
+	maxListRows = 10
 	// panelOverhead is the panel's rows besides the list: a blank row, the title, three rules, the input and the
 	// footer.
 	panelOverhead = 7
