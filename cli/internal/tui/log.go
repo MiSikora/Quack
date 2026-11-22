@@ -42,6 +42,11 @@ func (l *sessionLog) add(text string) {
 	}
 }
 
+// clear drops everything written, and the view follows new output again.
+func (l *sessionLog) clear() {
+	*l = sessionLog{width: l.width}
+}
+
 // resize cuts the lines again at width, for a view of height rows. A view that followed new output keeps following
 // it, and one scrolled back stays as far back as the new rows allow.
 func (l *sessionLog) resize(width, height int) {

@@ -486,6 +486,12 @@ func (m *model) open() tea.Cmd {
 	}
 }
 
+// clear empties the log.
+func (m *model) clear() tea.Cmd {
+	m.log.clear()
+	return nil
+}
+
 // describe takes the recipes of a reload and its actions, or keeps the actions there are when describing failed, and
 // says which.
 func (m *model) describe(msg described) {
@@ -858,6 +864,7 @@ func commands() []command {
 	return []command{
 		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", (*model).reload},
 		{"/open-app", "ctrl+o", "Show the app's main screen", (*model).open},
+		{"/clear", "ctrl+l", "Clear the log", (*model).clear},
 		{"/switch-device", "", "Pick another device", (*model).switchDevice},
 		{"/switch-app", "", "Pick another app on this device", (*model).switchApp},
 		{"/stop-action", "ctrl+c", "Stop the running action", (*model).stop},

@@ -459,7 +459,7 @@ func TestSlashListsTheCommands(t *testing.T) {
 
 	h.typing("/")
 
-	h.waitFor("/quit", "/stop-action", "/switch-app", "/switch-device", "/open-app", "▸ /reload", "6/6")
+	h.waitFor("/quit", "/stop-action", "/switch-app", "/switch-device", "/clear", "/open-app", "▸ /reload", "7/7")
 	h.waitForNo("app.greet")
 	h.typing("q")
 	h.waitFor("▸ /quit")
@@ -1122,6 +1122,21 @@ func TestFailedReloadKeepsTheActions(t *testing.T) {
 	h.waitFor("▸ app.greet", "6/6")
 }
 
+func TestClearEmptiesTheLog(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.press("ctrl+r")
+	h.waitForLog("reloaded 6 actions")
+
+	h.press("ctrl+l")
+
+	h.waitForEmptyLog()
+	h.press("ctrl+r")
+	h.waitForLog("reloaded 6 actions")
+	h.typing("/clear")
+	h.press("enter")
+	h.waitForEmptyLog()
+}
+
 func TestStatusLinesGoIntoTheLog(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
@@ -1563,6 +1578,11 @@ func (h *harness) waitForOverlayRows(count int) {
 func (h *harness) waitForLog(texts ...string) {
 	h.t.Helper()
 	h.wait(h.logText, func(log string) bool { return holds(log, texts) }, "want in the log "+strings.Join(texts, " then "))
+}
+
+func (h *harness) waitForEmptyLog() {
+	h.t.Helper()
+	h.wait(h.logText, func(log string) bool { return strings.TrimSpace(log) == "" }, "want an empty log")
 }
 
 func (h *harness) waitForExit() {
