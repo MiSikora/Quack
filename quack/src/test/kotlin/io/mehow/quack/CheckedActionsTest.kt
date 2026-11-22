@@ -28,7 +28,7 @@ class CheckedActionsTest {
 
   @Test
   fun `do not serve actions with ids the CLI cannot pass`() {
-    val ids = listOf("", " ", "-help", "/exit", "app greet", "app\tgreet")
+    val ids = listOf("", " ", "-help", "/exit", "\$login", "app greet", "app\tgreet")
     val malformed = ids.map { FakeAction(id = it) }
     val valid = FakeAction(id = "app.greet")
 
