@@ -36,13 +36,17 @@ type App interface {
 	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
 }
 
+// The session ends with stdin, which cancels the runs that start_action started.
 func Serve(ctx context.Context, version string, startTimeout time.Duration, status io.Writer) error {
-	return New(clientSource{startTimeout, status}, version).Run(ctx, &mcp.StdioTransport{})
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	return New(ctx, clientSource{startTimeout, status}, version).Run(ctx, &mcp.StdioTransport{})
 }
 
-func New(source Source, version string) *mcp.Server {
+// The runs that start_action starts end with ctx.
+func New(ctx context.Context, source Source, version string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "quack", Version: version}, &mcp.ServerOptions{Instructions: instructions})
-	s := tools{source}
+	s := tools{source, newRuns(ctx)}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_devices",
 		Description: "List the devices adb knows, each with its state and the quack-enabled apps on it.",
@@ -56,10 +60,43 @@ func New(source Source, version string) *mcp.Server {
 		Name: "run_action",
 		Description: "Run an action of a quack-enabled app and return its notifications, each a message with optional " +
 			"data, and its message and its data. Get the action ids and their params from list_actions. The args reach " +
-			"the app as given: ${NAME} stays as it is. " + askHelp + targetHelp,
+			"the app as given: ${NAME} stays as it is. For an action that waits for something outside the call before " +
+			"it ends, such as another device, use start_action instead. " + askHelp + targetHelp,
 		InputSchema:  schemaFor[runActionInput](),
 		OutputSchema: schemaFor[runActionOutput](),
 	}, s.runAction)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "start_action",
+		Description: "Start an action as run_action does, without waiting for it to end, and return the id of its run. " +
+			"Use it for an action that waits for something outside the call before it ends, such as another device, " +
+			"and read its notifications with read_run while it runs. An unknown action, an unknown arg or a missing " +
+			"required one fails this call. Any other refusal of the app ends the run with an error. " + askHelp + targetHelp,
+		InputSchema:  schemaFor[runActionInput](),
+		OutputSchema: schemaFor[startActionOutput](),
+	}, s.startAction)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "read_run",
+		Description: "Read a run that start_action started: its notifications from index after on, and next to pass " +
+			"as after to the following read. Once the run has ended, done is true and the run's message and data, or " +
+			"its error, come too. With wait, the call waits for a notification or the end when there is nothing new " +
+			"yet, and returns without notifications when the wait runs out. A run keeps its latest " +
+			strconv.Itoa(maxRunNotifications) + " notifications, and dropped counts the ones between after and the " +
+			"oldest one kept.",
+		OutputSchema: schemaFor[readRunOutput](),
+	}, s.readRun)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "cancel_run",
+		Description: "Cancel a run that start_action started. The app sees the action canceled, and read_run gives " +
+			"the run's end as the error canceled. A run that has ended stays as it was.",
+	}, s.cancelRun)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "list_runs",
+		Description: "List the runs that start_action started in this session, oldest first, with their action, " +
+			"device and app, whether they are done, and next, their count of notifications so far. Use it to find a " +
+			"run whose id you no longer have. Finished runs past the latest " + strconv.Itoa(maxFinishedRuns) +
+			" are gone.",
+		OutputSchema: schemaFor[listRunsOutput](),
+	}, s.listRuns)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "list_recipes",
 		Description: "List the recipes of a quack-enabled app with their params: scripts that the user keeps in a file " +
@@ -81,6 +118,7 @@ func New(source Source, version string) *mcp.Server {
 
 type tools struct {
 	source Source
+	runs   *runs
 }
 
 type listDevicesInput struct{}
@@ -180,10 +218,33 @@ type stepOutput struct {
 }
 
 // The app's error code, command for a command that exited with another status than 0, no_reply for a call that
-// ended without the app's answer, and error for anything else.
+// ended without the app's answer, canceled for a run that cancel_run or the session's end canceled, and error for
+// anything else.
 type errorOutput struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+type startActionOutput struct {
+	Run string `json:"run"`
+}
+
+type readRunInput struct {
+	Run   string `json:"run" jsonschema:"the id of the run, as start_action gives it"`
+	After int    `json:"after,omitempty" jsonschema:"how many of the run's notifications you have read, as the last read gave it in next: the read gives the ones from that index on"`
+	Wait  string `json:"wait,omitempty" jsonschema:"how long to wait for a notification or the end when there is nothing new yet, such as 30s, at most 1m. Leave it out to return at once."`
+}
+
+type cancelRunInput struct {
+	Run string `json:"run" jsonschema:"the id of the run, as start_action gives it"`
+}
+
+type cancelRunOutput struct{}
+
+type listRunsInput struct{}
+
+type listRunsOutput struct {
+	Runs []runOutput `json:"runs"`
 }
 
 type runActionOutput struct {
@@ -238,35 +299,14 @@ func (s tools) listActions(ctx context.Context, _ *mcp.CallToolRequest, in listA
 // The client canceling the request cancels the action. A failed action keeps the notifications it sent before
 // the error.
 func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runActionInput) (*mcp.CallToolResult, runActionOutput, error) {
-	args, err := rawArgs(in.Args)
-	if err != nil {
-		return nil, runActionOutput{}, err
-	}
-	mode := client.Wake
-	if in.OpenApp {
-		mode = client.OpenApp
-	}
-	_, app, err := s.connect(in.Device, in.App, mode)
-	if err != nil {
-		return nil, runActionOutput{}, err
-	}
-	if canElicit(req.Session) {
-		_, actions, err := app.Describe(ctx)
-		if err != nil {
-			return nil, runActionOutput{}, err
-		}
-		for _, a := range actions {
-			if a.ID == in.Action {
-				if form, err := askForParams(req, in.Action, a.Params, args); form != nil || err != nil {
-					return form, runActionOutput{}, err
-				}
-			}
-		}
+	prepared, form, err := s.prepareCall(ctx, req, in, canElicit(req.Session))
+	if form != nil || err != nil {
+		return form, runActionOutput{}, err
 	}
 	notifications := []notificationOutput{}
 	var messages []string
 	report := progress(ctx, req)
-	result, err := app.Call(ctx, wire.Call{Action: in.Action, Args: args}, func(notification wire.Notification) {
+	result, err := prepared.app.Call(ctx, prepared.call, func(notification wire.Notification) {
 		notifications = append(notifications, notificationOutput(notification))
 		messages = append(messages, notification.Message)
 		report(notification.Message)
@@ -278,6 +318,38 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 		return nil, runActionOutput{}, err
 	}
 	return nil, runActionOutput{Notifications: notifications, Message: result.Message, Data: result.Data}, nil
+}
+
+func (s tools) startAction(ctx context.Context, req *mcp.CallToolRequest, in runActionInput) (*mcp.CallToolResult, startActionOutput, error) {
+	prepared, form, err := s.prepareCall(ctx, req, in, true)
+	if form != nil || err != nil {
+		return form, startActionOutput{}, err
+	}
+	if err := checkCall(prepared.actions, prepared.call); err != nil {
+		return nil, startActionOutput{}, err
+	}
+	return nil, startActionOutput{s.runs.start(prepared.target, prepared.app, prepared.call)}, nil
+}
+
+func (s tools) readRun(ctx context.Context, _ *mcp.CallToolRequest, in readRunInput) (*mcp.CallToolResult, readRunOutput, error) {
+	var wait time.Duration
+	if in.Wait != "" {
+		parsed, err := time.ParseDuration(in.Wait)
+		if err != nil || parsed < 0 {
+			return nil, readRunOutput{}, fmt.Errorf("wait %q is not a duration such as 30s", in.Wait)
+		}
+		wait = min(parsed, maxWait)
+	}
+	out, err := s.runs.read(ctx, in.Run, in.After, wait)
+	return nil, out, err
+}
+
+func (s tools) cancelRun(_ context.Context, _ *mcp.CallToolRequest, in cancelRunInput) (*mcp.CallToolResult, cancelRunOutput, error) {
+	return nil, cancelRunOutput{}, s.runs.cancel(in.Run)
+}
+
+func (s tools) listRuns(context.Context, *mcp.CallToolRequest, listRunsInput) (*mcp.CallToolResult, listRunsOutput, error) {
+	return nil, listRunsOutput{s.runs.list()}, nil
 }
 
 func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRecipesInput) (*mcp.CallToolResult, listRecipesOutput, error) {
@@ -479,6 +551,51 @@ func fieldSchema(p wire.Param) *jsonschema.Schema {
 	return field
 }
 
+type preparedCall struct {
+	target client.Target
+	app    App
+	call   wire.Call
+	// Nil unless describe.
+	actions []wire.Action
+}
+
+// The front half of run_action and start_action. With describe, it asks the app for its actions, and the user for
+// the required params that args leave out when the client can ask. A form comes back instead of the call, for the
+// client to show.
+func (s tools) prepareCall(ctx context.Context, req *mcp.CallToolRequest, in runActionInput, describe bool) (preparedCall, *mcp.CallToolResult, error) {
+	args, err := rawArgs(in.Args)
+	if err != nil {
+		return preparedCall{}, nil, err
+	}
+	mode := client.Wake
+	if in.OpenApp {
+		mode = client.OpenApp
+	}
+	target, app, err := s.connect(in.Device, in.App, mode)
+	if err != nil {
+		return preparedCall{}, nil, err
+	}
+	prepared := preparedCall{target: target, app: app, call: wire.Call{Action: in.Action, Args: args}}
+	if !describe {
+		return prepared, nil, nil
+	}
+	_, prepared.actions, err = app.Describe(ctx)
+	if err != nil {
+		return preparedCall{}, nil, err
+	}
+	if !canElicit(req.Session) {
+		return prepared, nil, nil
+	}
+	for _, a := range prepared.actions {
+		if a.ID == in.Action {
+			if form, err := askForParams(req, in.Action, a.Params, args); form != nil || err != nil {
+				return preparedCall{}, form, err
+			}
+		}
+	}
+	return prepared, nil, nil
+}
+
 func (s tools) connect(device, pkg string, mode client.StartMode) (client.Target, App, error) {
 	target, err := s.source.Find(adb.Device(device), pkg)
 	if err != nil {
@@ -606,7 +723,11 @@ func schemaFor[T any]() *jsonschema.Schema {
 const instructions = "quack runs debug actions in Android apps on devices that adb reaches. list_devices shows the devices " +
 	"and their quack-enabled apps, list_actions an app's actions, and run_action runs one. list_recipes shows the " +
 	"recipes the user keeps for an app, and run_recipe runs one. Devices and apps change while you work, so call " +
-	"list_devices again when a call says that a device or app is missing or that several match."
+	"list_devices again when a call says that a device or app is missing or that several match. An action that " +
+	"waits for something outside the call before it ends, such as another device, returns only once it ends: start " +
+	"it with start_action instead, and read its notifications with read_run while it runs. list_runs finds the runs " +
+	"again. Runs belong to this MCP session: reconnecting the server cancels the ones still running, so finish or " +
+	"cancel them first."
 
 const askHelp = "When the client can show the user a form, the user is asked for the required params that args leave " +
 	"out, so leave out the ones that only the user knows. A user who declines or cancels fails the call. "

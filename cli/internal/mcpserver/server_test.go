@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -229,6 +230,143 @@ func TestListActionsRefusesAnInvalidFilter(t *testing.T) {
 	if !result.IsError || !strings.HasPrefix(text(result), "invalid filter: ") {
 		t.Errorf("the result is %q with isError %v, want an invalid filter error", text(result), result.IsError)
 	}
+}
+
+func TestReadRunFollowsARunWhileItWaitsAndGivesItsEnd(t *testing.T) {
+	source := newFakeSource()
+	session := connect(t, source)
+
+	run := startRun(t, session, map[string]any{"action": "sync.present"})
+	first := call(t, session, "read_run", map[string]any{"run": run, "wait": "5s"})
+	close(source.app.release)
+	last := call(t, session, "read_run", map[string]any{"run": run, "after": 1, "wait": "5s"})
+
+	assertStructured(t, first, `{"notifications":[{"message":"Pairing code","data":{"code":"abc123"}}],"next":1,"done":false}`)
+	assertStructured(t, last, `{"notifications":[],"next":1,"done":true,"message":"Paired"}`)
+}
+
+func TestReadRunGivesNothingNewWhenItsWaitRunsOut(t *testing.T) {
+	session := connect(t, newFakeSource())
+	run := startRun(t, session, map[string]any{"action": "sync.present"})
+	call(t, session, "read_run", map[string]any{"run": run, "wait": "5s"})
+
+	result := call(t, session, "read_run", map[string]any{"run": run, "after": 1, "wait": "1ms"})
+
+	assertStructured(t, result, `{"notifications":[],"next":1,"done":false}`)
+}
+
+func TestReadRunGivesTheErrorOfARunTheAppRefused(t *testing.T) {
+	session := connect(t, newFakeSource())
+	run := startRun(t, session, map[string]any{"action": "account.delete"})
+
+	result := readToEnd(t, session, run)
+
+	assertStructured(t, result, `{"notifications":[{"message":"Deleting"}],"next":1,"done":true,"error":{"code":"rejected","message":"there is no account"}}`)
+}
+
+func TestReadRunCountsTheNotificationsARunDroppedPastItsCap(t *testing.T) {
+	session := connect(t, newFakeSource())
+	run := startRun(t, session, map[string]any{"action": "app.chatty"})
+	readToEnd(t, session, run)
+
+	result := call(t, session, "read_run", map[string]any{"run": run})
+
+	var out readRunOutput
+	got, _ := json.Marshal(result.StructuredContent)
+	json.Unmarshal(got, &out)
+	if out.Dropped != 2 || out.Next != 1002 || len(out.Notifications) != 1000 || out.Notifications[0].Message != "3" || !out.Done {
+		t.Errorf("got dropped %d, next %d, %d notifications from %q and done %v, want 2, 1002, 1000 from \"3\" and done",
+			out.Dropped, out.Next, len(out.Notifications), out.Notifications[0].Message, out.Done)
+	}
+}
+
+func TestCancelRunEndsTheRunAsCanceled(t *testing.T) {
+	session := connect(t, newFakeSource())
+	run := startRun(t, session, map[string]any{"action": "sync.present"})
+	call(t, session, "read_run", map[string]any{"run": run, "wait": "5s"})
+
+	call(t, session, "cancel_run", map[string]any{"run": run})
+	result := call(t, session, "read_run", map[string]any{"run": run, "after": 1, "wait": "5s"})
+	call(t, session, "cancel_run", map[string]any{"run": run})
+
+	assertStructured(t, result, `{"notifications":[],"next":1,"done":true,"error":{"code":"canceled","message":"the run was canceled"}}`)
+}
+
+func TestRunsEndWithTheServersContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	session := connectUntil(t, ctx, newFakeSource())
+	run := startRun(t, session, map[string]any{"action": "sync.present"})
+	call(t, session, "read_run", map[string]any{"run": run, "wait": "5s"})
+
+	cancel()
+	result := call(t, session, "read_run", map[string]any{"run": run, "after": 1, "wait": "5s"})
+
+	assertStructured(t, result, `{"notifications":[],"next":1,"done":true,"error":{"code":"canceled","message":"the run was canceled"}}`)
+}
+
+func TestStartActionRefusesWhatTheAppWouldRefuseWithoutCallingIt(t *testing.T) {
+	source := newFakeSource()
+	session := connect(t, source)
+
+	unknown := callTool(t, session, "start_action", map[string]any{"action": "nope"})
+	extra := callTool(t, session, "start_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "alice", "bogus": "x"}})
+	missing := callTool(t, session, "start_action", map[string]any{"action": "account.create"})
+
+	assertError(t, unknown, "[unknown_action] no action 'nope'")
+	assertError(t, extra, "[invalid_args] unknown argument 'bogus'")
+	assertError(t, missing, "[invalid_args] missing argument 'username'")
+	if len(source.app.calls) != 0 {
+		t.Errorf("calls are %+v, want none", source.app.calls)
+	}
+}
+
+func TestStartActionAsksTheUserForMissingRequiredParams(t *testing.T) {
+	session := connectWith(t, newFakeSource(), &mcp.ClientOptions{ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"username": "carol"}}, nil
+	}})
+
+	run := startRun(t, session, map[string]any{"action": "account.create"})
+	result := readToEnd(t, session, run)
+
+	assertStructured(t, result, `{"notifications":[{"message":"Creating carol","data":{"username":"carol"}}],"next":1,"done":true,"message":"Created carol","data":{"id":7}}`)
+}
+
+func TestListRunsGivesEachRunOldestFirst(t *testing.T) {
+	session := connect(t, newFakeSource())
+	waiting := startRun(t, session, map[string]any{"action": "sync.present"})
+	call(t, session, "read_run", map[string]any{"run": waiting, "wait": "5s"})
+	readToEnd(t, session, startRun(t, session, map[string]any{"action": "account.delete"}))
+
+	result := call(t, session, "list_runs", nil)
+
+	assertStructured(t, result, `{"runs":[`+
+		`{"run":"r1","action":"sync.present","device":"emulator-5554","app":"io.mehow.quack.sample","done":false,"next":1},`+
+		`{"run":"r2","action":"account.delete","device":"emulator-5554","app":"io.mehow.quack.sample","done":true,"next":1}]}`)
+}
+
+func TestFinishedRunsPastTheCapAreGone(t *testing.T) {
+	session := connect(t, newFakeSource())
+	for range maxFinishedRuns + 1 {
+		readToEnd(t, session, startRun(t, session, map[string]any{"action": "account.delete"}))
+	}
+
+	result := callTool(t, session, "read_run", map[string]any{"run": "r1"})
+	kept := call(t, session, "read_run", map[string]any{"run": "r2"})
+
+	assertError(t, result, "no run r1")
+	if kept.IsError {
+		t.Errorf("r2 is gone: %s", text(kept))
+	}
+}
+
+func TestRunToolsFailForARunTheyDoNotHave(t *testing.T) {
+	session := connect(t, newFakeSource())
+
+	read := callTool(t, session, "read_run", map[string]any{"run": "r9"})
+	canceled := callTool(t, session, "cancel_run", map[string]any{"run": "r9"})
+
+	assertError(t, read, "no run r9")
+	assertError(t, canceled, "no run r9")
 }
 
 func TestListRecipesGivesTheParamsOfEachRecipeThatMatchesTheFilter(t *testing.T) {
@@ -474,11 +612,22 @@ func connectWith(t *testing.T, source *fakeSource, options *mcp.ClientOptions) *
 	return connectAt(t, source, options, "")
 }
 
-// "" asks for the latest protocol version.
 func connectAt(t *testing.T, source *fakeSource, options *mcp.ClientOptions, version string) *mcp.ClientSession {
 	t.Helper()
+	return connectFull(t, t.Context(), source, options, version)
+}
+
+// The server's runs end with ctx, while the session lasts as long as the test.
+func connectUntil(t *testing.T, ctx context.Context, source *fakeSource) *mcp.ClientSession {
+	t.Helper()
+	return connectFull(t, ctx, source, nil, "")
+}
+
+// "" asks for the latest protocol version.
+func connectFull(t *testing.T, ctx context.Context, source *fakeSource, options *mcp.ClientOptions, version string) *mcp.ClientSession {
+	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	serverSession, err := New(source, "test").Connect(t.Context(), serverTransport, nil)
+	serverSession, err := New(ctx, source, "test").Connect(t.Context(), serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,6 +649,24 @@ func call(t *testing.T, session *mcp.ClientSession, tool string, args map[string
 		t.Fatalf("%s failed: %s", tool, text(result))
 	}
 	return result
+}
+
+func startRun(t *testing.T, session *mcp.ClientSession, args map[string]any) string {
+	t.Helper()
+	return call(t, session, "start_action", args).StructuredContent.(map[string]any)["run"].(string)
+}
+
+// Reads until the run is done, and returns that read: from index 0, so that it holds the run's notifications.
+func readToEnd(t *testing.T, session *mcp.ClientSession, run string) *mcp.CallToolResult {
+	t.Helper()
+	for next := 0.0; ; {
+		result := call(t, session, "read_run", map[string]any{"run": run, "after": int(next), "wait": "5s"})
+		out := result.StructuredContent.(map[string]any)
+		if out["done"] == true {
+			return call(t, session, "read_run", map[string]any{"run": run})
+		}
+		next = out["next"].(float64)
+	}
 }
 
 func callTool(t *testing.T, session *mcp.ClientSession, tool string, args map[string]any) *mcp.CallToolResult {
@@ -556,7 +723,7 @@ type fakeSource struct {
 }
 
 func newFakeSource() *fakeSource {
-	return &fakeSource{app: &fakeApp{}}
+	return &fakeSource{app: &fakeApp{release: make(chan struct{})}}
 }
 
 func (s *fakeSource) Devices() ([]client.Device, error) { return s.devices, nil }
@@ -579,8 +746,11 @@ func (s *fakeSource) Recipes(pkg string) (*recipe.Script, string, error) {
 }
 
 type fakeApp struct {
+	mu     sync.Mutex
 	calls  []wire.Call
 	starts []client.StartMode
+	// Closing it lets sync.present end.
+	release chan struct{}
 }
 
 func (a *fakeApp) Target() client.Target {
@@ -605,12 +775,29 @@ func (a *fakeApp) Describe(context.Context) (wire.Hello, []wire.Action, error) {
 			{Name: "tags", Type: wire.ParamTypeStringList, Presence: wire.Default{Values: []string{"a", "b"}}},
 		}},
 		{ID: "account.delete", Description: "Delete the account"},
+		{ID: "sync.present", Description: "Show a pairing code and wait for a device to pair"},
+		{ID: "app.chatty", Description: "Notify 1002 times"},
 	}, nil
 }
 
-func (a *fakeApp) Call(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
+func (a *fakeApp) Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
+	a.mu.Lock()
 	a.calls = append(a.calls, call)
+	a.mu.Unlock()
 	switch call.Action {
+	case "sync.present":
+		notify(wire.Notification{Message: "Pairing code", Data: json.RawMessage(`{"code":"abc123"}`)})
+		select {
+		case <-a.release:
+			return wire.MessageResult{Message: "Paired"}, nil
+		case <-ctx.Done():
+			return wire.MessageResult{}, ctx.Err()
+		}
+	case "app.chatty":
+		for i := 1; i <= 1002; i++ {
+			notify(wire.Notification{Message: strconv.Itoa(i)})
+		}
+		return wire.MessageResult{Message: "Done"}, nil
 	case "account.create":
 		username := call.Args["username"][0]
 		notify(wire.Notification{Message: "Creating " + username, Data: json.RawMessage(`{"username":"` + username + `"}`)})
