@@ -8,12 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- CLI: recipe args and commands, action args and the terminal UI's params take environment variables as `${NAME}`.
-- CLI: recipe steps run commands on the device with `shell` and on this computer with `run`.
-- CLI: recipes know their app and device as `${QUACK_PACKAGE}` and `${ANDROID_SERIAL}`, which `run` commands also get in their environment.
+- CLI: use environment variables as `${NAME}` in recipes, in action args and in the terminal UI.
+- CLI: write `$${NAME}` to pass `${NAME}` unchanged, for example to a shell command that should expand it on the device.
+- CLI: a recipe fails before its first step if it uses a variable that is not set.
+- CLI: run shell commands in recipes, on the device with `shell` or on your computer with `run`.
+- CLI: use `${QUACK_PACKAGE}` and `${ANDROID_SERIAL}` in recipes for the app and device the recipe runs on.
+- MCP: recipes use environment variables. Args of `run_action` do not.
 
 ### Fixed
-- Library: apps can compile against SDK 35. 0.1.0 required 37.
+- Library: apps with `compileSdk` 35 or 36 no longer fail the build in `checkAarMetadata`.
 
 ## [0.1.0] - 2026-11-22
 
