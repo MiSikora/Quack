@@ -316,10 +316,10 @@ func (f *textField) press(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
-// matches are the hints that the text matches, fuzzily and ignoring case, best first. Empty text matches every hint in
-// the app's order.
+// matches are the hints that the words of the text match, fuzzily and ignoring case, best first. Blank text matches
+// every hint in the app's order.
 func (f *textField) matches() fuzzy.Matches {
-	text := f.input.Value()
+	text := strings.TrimSpace(f.input.Value())
 	if text == "" {
 		matches := make(fuzzy.Matches, len(f.hints))
 		for i, hint := range f.hints {
@@ -327,7 +327,7 @@ func (f *textField) matches() fuzzy.Matches {
 		}
 		return matches
 	}
-	return fuzzy.Find(text, f.hints)
+	return find(text, f.hints)
 }
 
 // pick takes the selected hint as the text.

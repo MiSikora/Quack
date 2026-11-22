@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/sahilm/fuzzy"
 
 	"quack/internal/recipe"
 	"quack/internal/wire"
@@ -51,11 +50,11 @@ func newPrompt(actions []wire.Action) prompt {
 	return prompt{input: input, actions: actions}
 }
 
-// choices are what the text matches, fuzzily and ignoring case, best first, and how many there are to match. Empty
-// text matches every action in the app's order, a lone '$' every recipe by name, and a lone '/' every command in the
-// table's order.
+// choices are what the words of the text match, fuzzily and ignoring case, best first, and how many there are to
+// match. Blank text matches every action in the app's order, a lone '$' every recipe by name, and a lone '/' every
+// command in the table's order.
 func (p *prompt) choices() ([]choice, int) {
-	text := p.input.Value()
+	text := strings.TrimSpace(p.input.Value())
 	var all []choice
 	switch {
 	case strings.HasPrefix(text, "$"):
@@ -79,7 +78,7 @@ func (p *prompt) choices() ([]choice, int) {
 		ids[i] = c.id
 	}
 	var matches []choice
-	for _, match := range fuzzy.Find(text, ids) {
+	for _, match := range find(text, ids) {
 		c := all[match.Index]
 		c.matched = match.MatchedIndexes
 		matches = append(matches, c)

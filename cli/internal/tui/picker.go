@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/sahilm/fuzzy"
 
 	"quack/internal/adb"
 	"quack/internal/client"
@@ -86,11 +85,11 @@ func (p *picker) toStep(s step) {
 	}
 }
 
-// rows are the choices of the step that the text matches, fuzzily and ignoring case, best first, and how many there are
-// to match. Empty text keeps adb's order of devices and the device's order of packages.
+// rows are the choices of the step that the words of the text match, fuzzily and ignoring case, best first, and how
+// many there are to match. Blank text keeps adb's order of devices and the device's order of packages.
 func (p *picker) rows(devices []seenDevice) ([]pickRow, int) {
 	all := p.allRows(devices)
-	text := p.input.Value()
+	text := strings.TrimSpace(p.input.Value())
 	if text == "" {
 		return all, len(all)
 	}
@@ -99,7 +98,7 @@ func (p *picker) rows(devices []seenDevice) ([]pickRow, int) {
 		labels[i] = r.label
 	}
 	var matches []pickRow
-	for _, match := range fuzzy.Find(text, labels) {
+	for _, match := range find(text, labels) {
 		r := all[match.Index]
 		r.matched = match.MatchedIndexes
 		matches = append(matches, r)
