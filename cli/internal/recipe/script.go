@@ -177,9 +177,10 @@ func (s *Script) Run(ctx context.Context, app App, name string, args map[string]
 	if err != nil {
 		return err
 	}
+	// The bundle's exports are getters, which an interrupt would panic out of, so the recipe is found first.
+	run := r.recipes[exports.Get(name)].run
 	stop := context.AfterFunc(ctx, func() { r.vm.Interrupt(canceled) })
 	defer stop()
-	run := r.recipes[exports.Get(name)].run
 	if _, err := run(goja.Undefined(), r.vm.ToValue(values)); err != nil {
 		return r.thrown(err)
 	}

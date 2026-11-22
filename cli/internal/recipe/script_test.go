@@ -437,6 +437,21 @@ export const spin = quack.recipe({ run() { while (true) {} } })`)
 	}
 }
 
+func TestCancelingBeforeTheRecipeStartsEndsItAsCanceled(t *testing.T) {
+	s := load(t, `
+import quack from "quack"
+export const spin = quack.recipe({ run() { while (true) {} } })`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := s.Run(ctx, &fakeApp{}, "spin", nil, Observer{})
+
+	var call *client.CallError
+	if !errors.As(err, &call) || err.Error() != "canceled" {
+		t.Errorf("got %v, want canceled", err)
+	}
+}
+
 func TestWaitUntilChecksUntilTheCheckPassesOrTheTimeoutEnds(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
