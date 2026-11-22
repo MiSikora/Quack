@@ -233,9 +233,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	h.waitFor("▸ tag")
 	check("box with more params")
 	h.press("esc", "esc")
-	h.typing("account.watch")
-	h.press("enter")
-	h.waitFor("account.watch · ctrl+c cancel action")
+	h.startWatch()
 	check("one run")
 	h.press("ctrl+c")
 	h.waitFor("account.watch canceling… · ctrl+c cancel")
@@ -796,9 +794,7 @@ func TestOutputKeepsItsOrder(t *testing.T) {
 func TestActionsDoNotRunWhileARunRunsButTheBoxOpens(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
-	h.typing("account.watch")
-	h.press("enter")
-	h.waitForLog("› account.watch\n  Signed out")
+	h.startWatch()
 
 	h.typing("account.delete")
 	h.press("enter")
@@ -838,9 +834,7 @@ func TestActionsDoNotRunWhileARunRunsButTheBoxOpens(t *testing.T) {
 func TestEscNeverStopsARun(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
-	h.typing("account.watch")
-	h.press("enter")
-	h.waitForLog("  Signed out")
+	h.startWatch()
 
 	h.press("esc", "esc")
 	app.signIn("alice")
@@ -857,9 +851,7 @@ func TestEscNeverStopsARun(t *testing.T) {
 func TestCtrlCStopsTheRunAndKeepsTheTextThenClearsThenAsksThenQuits(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
-	h.typing("account.watch")
-	h.press("enter")
-	h.waitFor("account.watch · ctrl+c cancel action")
+	h.startWatch()
 	h.typing("abc")
 	h.waitFor("> abc")
 
@@ -881,9 +873,7 @@ func TestCtrlCWhileTheRunStopsAsksToQuit(t *testing.T) {
 	release := app.holdStops()
 	h := start(t, app)
 	t.Cleanup(release)
-	h.typing("account.watch")
-	h.press("enter")
-	h.waitFor("account.watch · ctrl+c cancel action")
+	h.startWatch()
 	h.typing("abc")
 
 	h.press("ctrl+c")
@@ -1140,9 +1130,7 @@ import quack from "quack"
 
 export const clean = quack.recipe({ run() { quack.runAction("account.delete") } })
 `))
-	h.typing("account.watch")
-	h.press("enter")
-	h.waitForLog("› account.watch\n  Signed out")
+	h.startWatch()
 
 	h.typing("$clean")
 	h.press("enter")
@@ -1250,9 +1238,7 @@ func TestInitRecipesStartsTheRecipesOfTheAppAndListsThem(t *testing.T) {
 func TestCtrlOOpensTheAppEvenDuringARun(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
-	h.typing("account.watch")
-	h.press("enter")
-	h.waitFor("account.watch · ctrl+c cancel action")
+	h.startWatch()
 
 	h.press("ctrl+o")
 
@@ -1641,6 +1627,15 @@ func (h *harness) press(keys ...string) {
 		h.program.Send(tea.KeyPressMsg(k))
 	}
 	h.settle()
+}
+
+// startWatch runs account.watch and waits for what it says first. It says nothing more until an account signs in, so
+// that what the test does next has the log to itself.
+func (h *harness) startWatch() {
+	h.t.Helper()
+	h.typing("account.watch")
+	h.press("enter")
+	h.waitForLog("› account.watch\n  Signed out")
 }
 
 func (h *harness) typing(text string) {
