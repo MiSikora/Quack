@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,15 +14,17 @@ import (
 	"quack/internal/wire"
 )
 
-// prompt is the picker: the input, and under it the list of the actions whose id the text matches, best first, one of
-// them selected. Empty text lists every action, text that starts with '$' matches the app's recipes instead, and text
-// that starts with '/' the TUI's commands.
+// prompt is the action picker: the input, and over it, while the input has text or the user browses, the list of the
+// actions whose id the text matches, best last, one of them selected. Browsing lists every action, text that starts
+// with '$' matches the app's recipes instead, and text that starts with '/' the TUI's commands.
 type prompt struct {
 	input   textinput.Model
 	actions []wire.Action
 	// recipes are the app's recipes, sorted by name, and recipePath the file they come from.
 	recipes    []recipe.Recipe
 	recipePath string
+	// browsing is whether ↑ opened the list on empty text. It ends when the text changes.
+	browsing bool
 	// selected indexes choices().
 	selected int
 	width    int
@@ -86,9 +89,13 @@ func (p *prompt) choices() ([]choice, int) {
 	return matches, len(all)
 }
 
+// open is whether the list shows: while the input has text, or while the user browses.
+func (p *prompt) open() bool { return p.input.Value() != "" || p.browsing }
+
+// selection is the selected choice while the list shows, so that nothing the user cannot see runs.
 func (p *prompt) selection() (choice, bool) {
 	choices, _ := p.choices()
-	if len(choices) == 0 {
+	if !p.open() || len(choices) == 0 {
 		return choice{}, false
 	}
 	return choices[p.selected], true
@@ -96,15 +103,19 @@ func (p *prompt) selection() (choice, bool) {
 
 func (p *prompt) value() string { return p.input.Value() }
 
-// update moves the selection or edits the text. Down moves to the next match, away from the input, and up back toward
-// the best one. A new text selects its best match.
+// update moves the selection or edits the text. Up moves to the next match, away from the input, and down back toward
+// the best one. Up on a closed list opens it to browse. A new text selects its best match and ends browsing.
 func (p *prompt) update(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
-	case "down", "ctrl+n":
+	case "up", "ctrl+p":
+		if !p.open() {
+			p.browsing = true
+			return nil
+		}
 		choices, _ := p.choices()
 		p.selected = min(max(0, len(choices)-1), p.selected+1)
 		return nil
-	case "up", "ctrl+p":
+	case "down", "ctrl+n":
 		p.selected = max(0, p.selected-1)
 		return nil
 	}
@@ -112,7 +123,7 @@ func (p *prompt) update(msg tea.KeyPressMsg) tea.Cmd {
 	var cmd tea.Cmd
 	p.input, cmd = p.input.Update(msg)
 	if p.input.Value() != text {
-		p.selected = 0
+		p.selected, p.browsing = 0, false
 	}
 	return cmd
 }
@@ -124,11 +135,11 @@ func (p *prompt) forward(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// clear empties the text and selects the first row, and says whether there was text.
+// clear empties the text, which closes the list, and says whether the list showed.
 func (p *prompt) clear() bool {
-	had := p.input.Value() != ""
+	had := p.open()
 	p.input.SetValue("")
-	p.selected = 0
+	p.selected, p.browsing = 0, false
 	return had
 }
 
@@ -179,20 +190,32 @@ func (p *prompt) view() string {
 	return line + strings.Repeat(" ", max(1, p.width-ansi.StringWidth(line)-ansi.StringWidth(counter))) + counter
 }
 
-// list is rows lines of what the text matches, best first, over blank ones, so that the list keeps its height while
-// the user types and the best match stays next to the input. The choices scroll to keep the selection in sight. Without
-// any recipes, '$' says where to write them.
+// list is a line for each choice the text matches, up to rows of them, the best last, next to the input, or nil while
+// the list does not show. The choices scroll to keep the selection in sight. Without any recipes, '$' says where to
+// write them.
 func (p *prompt) list(rows int) []string {
+	if !p.open() {
+		return nil
+	}
 	choices, total := p.choices()
 	if len(choices) == 0 {
 		empty := "  no match"
 		if total == 0 && strings.HasPrefix(p.input.Value(), "$") {
 			empty = "  No recipes. Create " + p.recipePath
 		}
-		return append([]string{statusStyle.Render(empty)}, make([]string, rows-1)...)
+		return []string{statusStyle.Render(empty)}
 	}
 	lines := p.rows(choices, min(len(choices), rows))
-	return append(lines, make([]string, rows-len(lines))...)
+	slices.Reverse(lines)
+	return lines
+}
+
+// keys are the keys that work while the list shows, or else how to show it.
+func (p *prompt) keys() string {
+	if p.open() {
+		return "enter run · tab params · ↑↓ select · esc close · ctrl+c stop/quit"
+	}
+	return "type or ↑ to find an action · ctrl+c stop/quit"
 }
 
 // rows are count of choices, one per line, the best first, with the selection among them. The selected row is

@@ -207,12 +207,13 @@ func (p *picker) selectedIndex(rows []pickRow) int {
 	return min(0, len(rows)-1)
 }
 
-// update moves the selection over the rows that can be picked, or edits the text. A new text selects its best match.
+// update moves the selection over the rows that can be picked, or edits the text. Up moves to the next row, away from
+// the input, and down back toward the first. A new text selects its best match.
 func (p *picker) update(msg tea.KeyPressMsg, devices []seenDevice) tea.Cmd {
 	rows, _ := p.rows(devices)
 	selected := p.selectedIndex(rows)
 	switch msg.String() {
-	case "down", "ctrl+n":
+	case "up", "ctrl+p":
 		for i := selected + 1; i < len(rows); i++ {
 			if rows[i].ok {
 				p.selected = rows[i].key
@@ -220,7 +221,7 @@ func (p *picker) update(msg tea.KeyPressMsg, devices []seenDevice) tea.Cmd {
 			}
 		}
 		return nil
-	case "up", "ctrl+p":
+	case "down", "ctrl+n":
 		for i := selected - 1; i >= 0; i-- {
 			if rows[i].ok {
 				p.selected = rows[i].key
@@ -267,12 +268,12 @@ func (p *picker) view(devices []seenDevice) string {
 	return line + strings.Repeat(" ", max(1, p.width-ansi.StringWidth(line)-ansi.StringWidth(counter))) + counter
 }
 
-// list is rows lines of what the text matches over blank ones, or else a line that says what the picker waits for. The
-// rows scroll to keep the selection in sight.
+// list is a line for each row the text matches, up to height of them, the first last, next to the input, or else a
+// line that says what the picker waits for. The rows scroll to keep the selection in sight.
 func (p *picker) list(devices []seenDevice, listed bool, height int) []string {
 	rows, total := p.rows(devices)
 	if len(rows) == 0 {
-		return append([]string{statusStyle.Render("  " + p.waiting(listed, total))}, make([]string, height-1)...)
+		return []string{statusStyle.Render("  " + p.waiting(listed, total))}
 	}
 	selected := p.selectedIndex(rows)
 	count := min(len(rows), height)
@@ -295,7 +296,8 @@ func (p *picker) list(devices []seenDevice, listed bool, height int) []string {
 		}
 		lines = append(lines, ansi.Truncate(line, p.width, "…"))
 	}
-	return append(lines, make([]string, height-len(lines))...)
+	slices.Reverse(lines)
+	return lines
 }
 
 // waiting says what is missing when no row shows.

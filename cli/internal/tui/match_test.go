@@ -44,7 +44,7 @@ func TestActionsMatchTheWordsOfTheText(t *testing.T) {
 
 	h.typing("del acc")
 
-	h.waitFor("1/6", "▸ account.delete")
+	h.waitFor("▸ account.delete", "1/6")
 }
 
 func TestSpacesAloneMatchEveryAction(t *testing.T) {

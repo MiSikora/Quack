@@ -26,82 +26,170 @@ import (
 	"quack/internal/wire"
 )
 
-func TestPanelShowsTheTitleTheInputTheListAndTheKeys(t *testing.T) {
+func TestPanelShowsTheTitleTheInputAndTheKeysAtRest(t *testing.T) {
 	h := start(t, newFakeApp())
 
-	lines := h.panel()
-	want := []string{
-		"",
+	checkPanel(t, h, []string{
 		"quack · io.mehow.quack.sample 1.0 · emulator-5554",
 		strings.Repeat("─", 100),
 		"> find an action, $ for recipes, / for commands",
 		strings.Repeat("─", 100),
-		"▸ app.greet        Say hello",
-		"  app.params       Show the parsed value of each param type",
-		"  account.create   Create the account",
-		"  account.delete   Delete the account",
-		"  account.watch    Print the account each time it changes, until stopped",
-		"  app.count        Count to 50",
-		"",
-		"",
-		strings.Repeat("─", 100),
-		" enter run · tab params · ↑↓ select · ctrl+c stop/quit",
-	}
-	if len(lines) != len(want) {
-		t.Fatalf("the panel has %d lines, want %d:\n%s", len(lines), len(want), h.view())
-	}
-	for i := range want {
-		if !strings.HasPrefix(lines[i], want[i]) || want[i] == "" && lines[i] != "" {
-			t.Errorf("line %d is %q, want %q", i, lines[i], want[i])
-		}
-	}
-	if !strings.HasSuffix(lines[3], " 6/6") {
-		t.Errorf("the input line is %q, want the counter at its end", lines[3])
+		" type or ↑ to find an action · ctrl+c stop/quit",
+	})
+	if lines := h.panel(); !strings.HasSuffix(lines[2], " 6/6") {
+		t.Errorf("the input line is %q, want the counter at its end", lines[2])
 	}
 }
 
-func TestBestMatchSitsRightUnderTheInputOverBlankRows(t *testing.T) {
+func TestUpOnEmptyTextListsEveryActionBestLastOverTheTitleAndEscClosesIt(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.press("up")
+
+	checkPanel(t, h, []string{
+		"",
+		"  app.count        Count to 50",
+		"  account.watch    Print the account each time it changes, until stopped",
+		"  account.delete   Delete the account",
+		"  account.create   Create the account",
+		"  app.params       Show the parsed value of each param type",
+		"▸ app.greet        Say hello",
+		strings.Repeat("─", 100),
+		"> find an action, $ for recipes, / for commands",
+		strings.Repeat("─", 100),
+		" enter run · tab params · ↑↓ select · esc close · ctrl+c stop/quit",
+	})
+	h.press("esc")
+	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
+	h.press("down")
+	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
+}
+
+func TestEnterAndTabDoNothingWhileNoListShows(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+
+	h.press("enter", "tab")
+
+	h.waitForRunning()
+	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
+	if got := app.received(); len(got) != 0 {
+		t.Errorf("calls: got %v, want none", got)
+	}
+}
+
+func TestBackspaceToEmptyTextClosesTheList(t *testing.T) {
+	h := start(t, newFakeApp())
+
+	h.typing("a")
+	h.waitFor("▸ app.", "> a", "enter run")
+	h.press("backspace")
+	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
+	h.press("up")
+	h.waitFor("▸ app.greet", "esc close")
+	h.typing("a")
+	h.press("backspace")
+	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
+}
+
+func TestBestMatchSitsRightOverTheInputAndTheListTakesOnlyTheMatches(t *testing.T) {
 	h := start(t, newFakeApp())
 
 	h.typing("acc")
 	h.waitFor("3/6")
 
 	lines := h.panel()
-	if !strings.HasPrefix(lines[3], "> acc") {
-		t.Errorf("the fourth line is %q, want the input", lines[3])
+	if len(lines) != 8 || lines[0] != "" {
+		t.Fatalf("the panel is %q, want a blank row, the three matches and the last four rows", lines)
 	}
-	if lines[4] != strings.Repeat("─", 100) || !strings.HasPrefix(lines[5], "▸ account.") {
-		t.Errorf("the lines under the input are %q and %q, want a rule over the best match", lines[4], lines[5])
+	if !strings.HasPrefix(lines[1], "  account.") || !strings.HasPrefix(lines[2], "  account.") {
+		t.Errorf("the list is %q, want the other matches over the best", lines[1:3])
 	}
-	if !strings.HasPrefix(lines[6], "  account.") || !strings.HasPrefix(lines[7], "  account.") || lines[8] != "" || lines[9] != "" {
-		t.Errorf("the list is %q, want the matches over two blank lines", lines[5:10])
+	rule := strings.Repeat("─", 100)
+	if !strings.HasPrefix(lines[3], "▸ account.") || lines[4] != rule || !strings.HasPrefix(lines[5], "> acc") {
+		t.Errorf("the rows over the input are %q and %q, want the best match right over the rule", lines[3], lines[4])
 	}
 }
 
-func TestNoMatchShowsOnTheFirstRowOfTheList(t *testing.T) {
+func TestNoMatchIsTheOnlyRowOfTheList(t *testing.T) {
 	h := start(t, newFakeApp())
 
 	h.typing("zz")
 	h.waitFor("0/6")
 
-	if lines := h.panel(); lines[5] != "  no match" {
-		t.Errorf("the first row of the list is %q, want no match", lines[5])
+	if lines := h.panel(); len(lines) != 6 || lines[1] != "  no match" {
+		t.Errorf("the panel is %q, want no match alone over the input", lines)
 	}
 }
 
-func TestBoxReplacesTheInputAndTheListWithThePreviewLast(t *testing.T) {
+func TestBoxShowsOverTheInputWhichPreviewsTheCall(t *testing.T) {
 	h := start(t, newFakeApp())
 
-	h.press("tab")
+	h.press("up", "tab")
 	h.waitFor("▸ name")
 
 	lines := h.panel()
-	n := len(lines)
-	if !strings.HasPrefix(lines[3], "app.greet · Say hello") {
-		t.Errorf("the first line of the box is %q, want the action", lines[3])
+	if len(lines) != 8 || !strings.HasPrefix(lines[1], "app.greet · Say hello") {
+		t.Fatalf("the panel is %q, want the action over its two params", lines)
 	}
-	if !strings.HasPrefix(lines[n-3], "› app.greet") || lines[n-2] != strings.Repeat("─", 100) {
-		t.Errorf("the lines over the footer are %q and %q, want the preview over a rule", lines[n-3], lines[n-2])
+	if !strings.HasPrefix(lines[2], "▸ name") || !strings.HasPrefix(lines[3], "  times") {
+		t.Errorf("the rows of the params are %q and %q", lines[2], lines[3])
+	}
+	if lines[4] != strings.Repeat("─", 100) || lines[5] != "› app.greet" {
+		t.Errorf("the rows under the box are %q and %q, want a rule over the preview", lines[4], lines[5])
+	}
+}
+
+func TestListCoversTheBottomOfTheLogWithoutMovingIt(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.typing("app.count")
+	h.press("enter")
+	h.waitForLog("  50\nCounted · ")
+	before := strings.Split(h.view(), "\n")
+
+	h.press("up")
+	h.waitFor("▸ app.greet")
+
+	after := strings.Split(h.view(), "\n")
+	if len(after) != 30 || !reflect.DeepEqual(after[:19], before[:19]) || strings.TrimSpace(after[19]) != "" {
+		t.Errorf("the list moved the log:\n%s", h.view())
+	}
+	if !strings.HasPrefix(after[20], "  app.count") || !strings.HasPrefix(after[25], "▸ app.greet") {
+		t.Errorf("the list is not right over the input:\n%s", h.view())
+	}
+	h.program.Send(tea.MouseWheelMsg{X: 10, Y: 5, Button: tea.MouseWheelUp})
+	h.settle()
+	scrolled := strings.Split(h.view(), "\n")
+	if scrolled[0] == after[0] || !reflect.DeepEqual(scrolled[19:29], after[19:29]) {
+		t.Errorf("the wheel did not scroll the log behind the list:\n%s", h.view())
+	}
+	h.press("end", "esc")
+	h.waitFor("quack · ")
+	if got := strings.Split(h.view(), "\n"); !reflect.DeepEqual(got, before) {
+		t.Errorf("closing the list left:\n%s\nwant:\n%s", h.view(), strings.Join(before, "\n"))
+	}
+}
+
+func TestMouseOverTheListSelectsNothing(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.typing("app.count")
+	h.press("enter")
+	h.waitForLog("  50\nCounted · ")
+	h.press("up")
+	h.waitFor("▸ app.greet")
+
+	for range 2 {
+		h.mouse(tea.MouseClickMsg{X: 4, Y: 22, Button: tea.MouseLeft})
+		h.mouse(tea.MouseMotionMsg{X: 9, Y: 23, Button: tea.MouseLeft})
+		h.mouse(tea.MouseReleaseMsg{X: 9, Y: 23, Button: tea.MouseLeft})
+	}
+	h.settle()
+
+	if got := h.clipboard(); len(got) != 0 {
+		t.Errorf("copied %q, want nothing", got)
+	}
+	if got := h.reversed(); len(got) != 0 {
+		t.Errorf("the cells %v are reversed, want none", got)
 	}
 }
 
@@ -112,8 +200,8 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	h.resetHeights()
 	check := func(state string) {
 		t.Helper()
-		if got := h.panelRows(); got != 15 {
-			t.Errorf("%s: the panel takes the last %d rows, want 15:\n%s", state, got, h.view())
+		if got := h.panelRows(); got != 5 {
+			t.Errorf("%s: the panel takes the last %d rows, want 5:\n%s", state, got, h.view())
 		}
 		if got := h.lines(); got != 30 {
 			t.Errorf("%s: the view has %d rows, want the window's 30", state, got)
@@ -140,7 +228,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	h.typing("app.params")
 	h.press("tab", "tab", "tab", "tab", "tab", "tab", "tab")
 	h.waitFor("▸ tag")
-	check("box with more params than fit")
+	check("box with more params")
 	h.press("esc", "esc")
 	h.typing("account.watch")
 	h.press("enter")
@@ -151,13 +239,13 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	check("stopping")
 	releaseStops()
 	h.waitForLog("\ncanceled · ")
-	h.waitFor("enter run")
+	h.waitFor("type or ↑ to find an action")
 	h.press("ctrl+c")
 	h.waitFor("press ctrl+c again to quit")
 	check("quit prompt")
 
-	if heights := h.heights(); !reflect.DeepEqual(heights, []int{15}) {
-		t.Errorf("the panel had these heights: %v, want only 12", heights)
+	if heights := h.heights(); !reflect.DeepEqual(heights, []int{5}) {
+		t.Errorf("the panel had these heights: %v, want only 5", heights)
 	}
 }
 
@@ -209,24 +297,23 @@ func TestWheelAndPageUpScrollBackAndEndReturnsToTheNewest(t *testing.T) {
 
 	h.program.Send(tea.MouseWheelMsg{X: 10, Y: 5, Button: tea.MouseWheelUp})
 	h.wait(bottom, func(row string) bool { return row == "  48" }, "a turn of the wheel 3 rows back")
-	h.waitFor("scrolled back · end newest · enter run")
+	h.waitFor("scrolled back · end newest · type or ↑ to find an action")
 	h.press("pgup")
-	h.wait(bottom, func(row string) bool { return row == "  33" }, "pgup a page of 15 rows further back")
+	h.wait(bottom, func(row string) bool { return row == "  23" }, "pgup a page of 25 rows further back")
 
 	h.typing("account.delete")
 	h.press("enter")
 	h.waitForRunning()
-	if got := bottom(); got != "  33" {
+	if got := bottom(); got != "  23" {
 		t.Errorf("new output moved the view scrolled back to %q", got)
 	}
 
 	h.press("end")
 	h.waitForLog("› account.delete\n[rejected] there is no account · ")
-	h.waitFor(" enter run")
+	h.waitFor(" type or ↑ to find an action")
 	h.waitForNo("scrolled back")
 	h.program.Send(tea.MouseWheelMsg{X: 10, Y: 5, Button: tea.MouseWheelDown})
-	h.typing("x")
-	h.waitFor("> x")
+	h.settle()
 	if got := bottom(); !strings.HasPrefix(got, "[rejected]") {
 		t.Errorf("the wheel scrolled past the newest output to %q", got)
 	}
@@ -248,8 +335,8 @@ func TestResizeCutsTheLogAgainAtTheNewWidth(t *testing.T) {
 			t.Errorf("row wider than the window: %q", row)
 		}
 	}
-	if got := h.panelRows(); got != 15 {
-		t.Errorf("the panel takes the last %d rows, want 15", got)
+	if got := h.panelRows(); got != 5 {
+		t.Errorf("the panel takes the last %d rows, want 5", got)
 	}
 
 	h.resize(100, 30)
@@ -333,36 +420,37 @@ func TestDoubleClickCopiesTheWordAndAClickClearsTheSelection(t *testing.T) {
 	}
 }
 
-func TestEmptyQueryListsEveryActionInTheAppsOrder(t *testing.T) {
+func TestListScrollsToKeepTheSelectionInSight(t *testing.T) {
 	h := start(t, newFakeApp())
 	// A list of 5 rows, so that the 6 actions scroll.
-	h.resize(100, 24)
-	h.waitForPanelRows(12)
-
-	h.waitFor("▸ app.greet", "  app.params", "  account.create", "  account.delete", "  account.watch")
-	h.press("down", "down", "down", "down", "down", "down")
-	h.waitFor("  account.watch", "▸ app.count")
-	h.waitForNo("app.greet")
+	h.resize(100, 10)
 	h.press("up")
+	h.waitForOverlayRows(5)
+
+	h.waitFor("  account.watch", "  account.delete", "  account.create", "  app.params", "▸ app.greet")
+	h.press("up", "up", "up", "up", "up", "up")
+	h.waitFor("▸ app.count", "  account.watch")
+	h.waitForNo("app.greet")
+	h.press("down")
 	h.waitFor("▸ account.watch")
 }
 
-func TestDownMovesToTheNextMatchAndUpBackToTheBest(t *testing.T) {
+func TestUpMovesToTheNextMatchAndDownBackToTheBest(t *testing.T) {
 	h := start(t, newFakeApp())
 
 	h.typing("count")
 
-	h.waitFor("> count", "4/6", "▸ app.count", "  account.")
-	h.press("down")
-	h.waitFor("  app.count", "▸ account.")
-	h.press("ctrl+p")
+	h.waitFor("  account.", "▸ app.count", "> count", "4/6")
+	h.press("up")
+	h.waitFor("▸ account.", "  app.count")
+	h.press("ctrl+n")
 	h.waitFor("▸ app.count")
-	h.press("ctrl+n", "up", "up")
+	h.press("ctrl+p", "down", "down")
 	h.waitFor("▸ app.count")
 	h.typing("x")
-	h.waitFor("> countx", "0/6", "  no match")
+	h.waitFor("  no match", "> countx", "0/6")
 	h.press("esc")
-	h.waitFor("> find an action", "▸ app.greet")
+	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
 }
 
 func TestSlashListsTheCommands(t *testing.T) {
@@ -370,7 +458,7 @@ func TestSlashListsTheCommands(t *testing.T) {
 
 	h.typing("/")
 
-	h.waitFor("6/6", "▸ /reload", "/open-app", "/switch-device", "/switch-app", "/stop-action", "/quit")
+	h.waitFor("/quit", "/stop-action", "/switch-app", "/switch-device", "/open-app", "▸ /reload", "6/6")
 	h.waitForNo("app.greet")
 	h.typing("q")
 	h.waitFor("▸ /quit")
@@ -381,7 +469,7 @@ func TestQuestionMarkIsAnOrdinaryCharacter(t *testing.T) {
 
 	h.typing("?")
 
-	h.waitFor("> ?", "no match")
+	h.waitFor("no match", "> ?")
 }
 
 func TestEnterRunsAnActionWithoutRequiredParamsAndPrintsItsError(t *testing.T) {
@@ -392,7 +480,7 @@ func TestEnterRunsAnActionWithoutRequiredParamsAndPrintsItsError(t *testing.T) {
 	h.press("enter")
 
 	h.waitForLog("› account.delete\n[rejected] there is no account · ")
-	h.waitFor("> find an action", "▸ app.greet")
+	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
 	if got, want := app.received(), []wire.Call{{Action: "account.delete"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
@@ -415,7 +503,7 @@ func TestEnterOnAnActionWithARequiredParamOpensTheBox(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
 
-	h.press("enter")
+	h.press("up", "enter")
 
 	h.waitFor("app.greet · Say hello", "▸ name", "Required. Who to greet", "  times", "Default: 1.", "› app.greet")
 	h.typing("Bob Smith")
@@ -436,7 +524,7 @@ func TestMissingRequiredParamBlocksTheRunAndTurnsItsNoteRed(t *testing.T) {
 	h := start(t, app)
 	red := lipgloss.NewStyle().Foreground(lipgloss.Red).Render("Required. Who to greet")
 
-	h.press("enter")
+	h.press("up", "enter")
 	h.waitFor("▸ name")
 	h.press("enter")
 	h.waitFor("▸ times")
@@ -467,7 +555,7 @@ func TestEscAndCtrlCCloseTheBoxAndKeepTheQuery(t *testing.T) {
 		h.waitFor("app.params · Show")
 		h.press(key)
 
-		h.waitFor("> app.p", "▸ app.params")
+		h.waitFor("▸ app.params", "> app.p")
 	}
 	h.waitFor("enter run")
 	if got := app.received(); len(got) != 0 {
@@ -539,9 +627,10 @@ func TestBoxSendsOnlyTheParamsTheUserSet(t *testing.T) {
 func TestFocusedParamWithHintsTakesTheBoxWithTheHintsInTheAppsOrder(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
 
-	h.press("enter")
+	h.press("up", "enter")
 
-	h.waitFor("app.greet · Say hello", "▸ name", "Required. Who to greet", "3/3", "  Alice\n", "  Albert\n", "  Bob\n", "› app.greet")
+	h.waitFor("app.greet · Say hello", "  Bob\n", "  Albert\n", "  Alice\n", "▸ name", "Required. Who to greet", "3/3",
+		"› app.greet")
 	h.waitForNo("times")
 	h.press("enter")
 	h.waitFor("  name", "▸ times", "Default: 1.")
@@ -550,25 +639,25 @@ func TestFocusedParamWithHintsTakesTheBoxWithTheHintsInTheAppsOrder(t *testing.T
 
 func TestHintsNarrowToTheTextAndSayWhenNoneMatches(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
-	h.press("enter")
+	h.press("up", "enter")
 	h.waitFor("3/3")
 
 	h.typing("bo")
-	h.waitFor("1/3", "  Bob\n")
+	h.waitFor("  Bob\n", "1/3")
 	h.waitForNo("Albert")
 	h.typing("zz")
-	h.waitFor("0/3", "no match")
+	h.waitFor("no match", "0/3")
 }
 
 func TestEnterPicksTheSelectedHintOrElseKeepsTheText(t *testing.T) {
 	app := withNameHints(newFakeApp(), "Alice", "Albert", "Bob")
 	h := start(t, app)
-	h.press("enter")
+	h.press("up", "enter")
 	h.waitFor("3/3")
 
 	h.typing("Bo")
-	h.waitFor("› app.greet name=Bo\n", "↓ hints · enter next")
-	h.press("down")
+	h.waitFor("› app.greet name=Bo\n", "↑ hints · enter next")
+	h.press("up")
 	h.waitFor("▸ Bob", "enter pick · ↑↓ select · esc deselect")
 	h.press("enter")
 	h.waitFor("▸ times", "› app.greet name=Bob\n")
@@ -587,32 +676,32 @@ func TestEnterPicksTheSelectedHintOrElseKeepsTheText(t *testing.T) {
 
 func TestUpPastTheFirstHintAndTypingSelectNone(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
-	h.press("enter")
+	h.press("up", "enter")
 	h.waitFor("3/3")
 
-	h.press("down", "down", "down", "down")
+	h.press("up", "up", "up", "up")
 	h.waitFor("▸ Bob")
-	h.press("up", "up", "up")
-	h.waitFor("↓ hints · enter next")
+	h.press("down", "down", "down")
+	h.waitFor("↑ hints · enter next")
 	h.waitForNo("▸ A")
-	h.press("down")
+	h.press("up")
 	h.waitFor("▸ Alice")
 	h.typing("A")
-	h.waitFor("↓ hints · enter next")
+	h.waitFor("↑ hints · enter next")
 	h.waitForNo("▸ A")
 }
 
 func TestEscDeselectsTheHintAndThenClosesTheBox(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
-	h.press("enter")
+	h.press("up", "enter")
 	h.waitFor("3/3")
 
-	h.press("down")
+	h.press("up")
 	h.waitFor("▸ Alice")
 	h.press("esc")
-	h.waitFor("▸ name", "  Alice\n", "↓ hints · enter next")
+	h.waitFor("  Alice\n", "▸ name", "↑ hints · enter next")
 	h.press("esc")
-	h.waitFor("> find an action", "▸ app.greet")
+	h.waitFor("▸ app.greet", "> find an action")
 }
 
 func TestHintsScrollToKeepTheSelectionInSight(t *testing.T) {
@@ -621,21 +710,21 @@ func TestHintsScrollToKeepTheSelectionInSight(t *testing.T) {
 		names = append(names, "user"+strconv.Itoa(10+i))
 	}
 	h := start(t, withNameHints(newFakeApp(), names...))
-	h.press("enter")
-	h.waitFor("20/20", "  user10", "  user16")
-	h.waitForNo("user17")
+	h.press("up", "enter")
+	h.waitFor("  user17", "  user10", "20/20")
+	h.waitForNo("user18")
 
-	h.press("down", "down", "down", "down", "down", "down", "down", "down", "down", "down")
+	h.press("up", "up", "up", "up", "up", "up", "up", "up", "up", "up")
 
-	h.waitFor("  user13", "▸ user19")
-	h.waitForNo("user12")
+	h.waitFor("▸ user19", "  user12")
+	h.waitForNo("user11")
 }
 
 func TestHintsOfANonStringParamDoNotShow(t *testing.T) {
 	app := newFakeApp()
 	app.described[0].Params[1].Hints = []string{"1", "2"}
 	h := start(t, app)
-	h.press("enter", "enter")
+	h.press("up", "enter", "enter")
 
 	h.waitFor("  name", "▸ times", "enter next · shift+tab back")
 	h.waitForNo("2/2")
@@ -757,7 +846,7 @@ func TestCtrlCStopsTheRunAndKeepsTheTextThenClearsThenAsksThenQuits(t *testing.T
 	h.waitForLog("› account.watch\n  Signed out\ncanceled · ")
 	h.waitFor("> abc", "enter run")
 	h.press("ctrl+c")
-	h.waitFor("> find an action", "enter run")
+	h.waitFor("> find an action", "type or ↑ to find an action")
 	h.press("ctrl+c")
 	h.waitFor("press ctrl+c again to quit")
 	h.waitForRunning()
@@ -792,7 +881,7 @@ func TestQuitPromptEndsAfterTwoSeconds(t *testing.T) {
 	h.waitFor("press ctrl+c again to quit")
 	shown := time.Now()
 
-	h.waitFor("enter run")
+	h.waitFor("type or ↑ to find an action")
 	if waited := time.Since(shown); waited < noticeTime-200*time.Millisecond {
 		t.Errorf("the prompt went after %v, want %v", waited, noticeTime)
 	}
@@ -826,12 +915,12 @@ steps = [{ action = "account.delete" }]
 
 	h.typing("$")
 
-	h.waitFor("2/2", "▸ $delete", "  $login    Log in as the test user")
+	h.waitFor("  $login    Log in as the test user", "▸ $delete", "2/2")
 	h.waitForNo("app.greet")
 	h.typing("lg")
-	h.waitFor("1/2", "▸ $login")
+	h.waitFor("▸ $login", "1/2")
 	h.press("tab")
-	h.waitFor("> $lg", "▸ $login")
+	h.waitFor("▸ $login", "> $lg")
 }
 
 func TestDollarWithoutRecipesSaysWhereToCreateThem(t *testing.T) {
@@ -840,7 +929,7 @@ func TestDollarWithoutRecipesSaysWhereToCreateThem(t *testing.T) {
 
 	h.typing("$")
 
-	h.waitFor("0/0", "No recipes. Create "+recipe.Path("io.mehow.quack.sample"))
+	h.waitFor("No recipes. Create "+recipe.Path("io.mehow.quack.sample"), "0/0")
 }
 
 func TestBrokenRecipeFileSaysWhyAndLeavesTheActions(t *testing.T) {
@@ -848,9 +937,12 @@ func TestBrokenRecipeFileSaysWhyAndLeavesTheActions(t *testing.T) {
 	h.resize(300, 30)
 
 	h.waitForLog("switched to io.mehow.quack.sample", recipe.Path("io.mehow.quack.sample")+": recipe 'login' has no steps")
-	h.waitFor("6/6", "▸ app.greet")
+	h.waitFor("6/6")
+	h.press("up")
+	h.waitFor("▸ app.greet", "6/6")
+	h.press("esc")
 	h.typing("$")
-	h.waitFor("0/0", "No recipes. Create ")
+	h.waitFor("No recipes. Create ", "0/0")
 }
 
 func TestEnterRunsTheStepsOfARecipeEachUnderItsCommand(t *testing.T) {
@@ -872,7 +964,7 @@ steps = [
 		"\n› wait 10ms\ndone · ",
 		"\n› account.create username=alice\n  Started\n  Creating account\nCreated · ",
 		"\n› app.greet name=Bob times=2\nHello, Bob! · ")
-	h.waitFor("> find an action", "enter run")
+	h.waitFor("> find an action", "type or ↑ to find an action")
 	want := []wire.Call{
 		{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
 		{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bob"}, "times": {"2"}}},
@@ -893,7 +985,7 @@ steps = [{ action = "account.delete" }, { action = "app.count" }]
 	h.press("enter")
 
 	h.waitForLog("\n› $clean\n› account.delete\n[rejected] there is no account · ")
-	h.waitFor("enter run")
+	h.waitFor("type or ↑ to find an action")
 	if strings.Contains(h.logText(), "app.count") {
 		t.Errorf("the log runs the step after the failed one:\n%s", h.logText())
 	}
@@ -913,7 +1005,7 @@ steps = [{ action = "account.delete" }, { action = "app.greet", args = { times =
 	h.press("enter")
 
 	h.waitForLog("[invalid_args] recipe 'greet' step 2: missing argument 'name'")
-	h.waitFor("> $greet", "▸ $greet")
+	h.waitFor("▸ $greet", "> $greet")
 	if got := app.received(); got != nil {
 		t.Errorf("calls: got %v, want none", got)
 	}
@@ -933,7 +1025,7 @@ steps = [{ wait = "1ms" }, { action = "account.watch" }, { action = "app.count" 
 	h.press("ctrl+c")
 
 	h.waitForLog("\n› $watch\n› wait 1ms\ndone · ", "\n› account.watch\n  Signed out\ncanceled · ")
-	h.waitFor("enter run")
+	h.waitFor("type or ↑ to find an action")
 	if strings.Contains(h.logText(), "app.count") {
 		t.Errorf("the log runs the step after the canceled one:\n%s", h.logText())
 	}
@@ -964,36 +1056,38 @@ steps = [{ action = "account.delete" }]
 func TestReloadReadsTheRecipesAgain(t *testing.T) {
 	h := start(t, newFakeApp())
 	h.typing("$")
-	h.waitFor("0/0", "No recipes")
+	h.waitFor("No recipes", "0/0")
 
 	writeRecipes(t, "[clean]\nsteps = [{ action = \"account.delete\" }]\n")
 	h.press("ctrl+r")
 
 	h.waitForLog("reloaded 6 actions and 1 recipes")
-	h.waitFor("1/1", "▸ $clean")
+	h.waitFor("▸ $clean", "1/1")
 	writeRecipes(t, "[clean]\n")
 	h.press("ctrl+r")
 	h.waitForLog(": recipe 'clean' has no steps\nreloaded 6 actions")
-	h.waitFor("0/0", "No recipes")
+	h.waitFor("No recipes", "0/0")
 }
 
 func TestReloadKeepsTheSelectedAction(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
-	h.press("down", "down")
+	h.press("up", "up", "up")
 	h.waitFor("▸ account.create")
 
 	app.setActions(append([]wire.Action{{ID: "aaa.new", Description: "A new action"}}, app.actions()...))
 	h.press("ctrl+r")
 
 	h.waitForLog("reloaded 7 actions and 0 recipes")
-	h.waitFor("7/7", "aaa.new", "▸ account.create")
+	h.waitFor("▸ account.create", "aaa.new", "7/7")
 
 	app.setActions(append([]wire.Action{{ID: "aab.newer", Description: "A newer action"}}, app.actions()...))
 	h.typing("/reload")
 	h.press("enter")
 	h.waitForLog("reloaded 8 actions")
-	h.waitFor("8/8", "aab.newer")
+	h.waitFor("8/8")
+	h.press("up")
+	h.waitFor("▸ aab.newer", "8/8")
 }
 
 func TestFailedReloadKeepsTheActions(t *testing.T) {
@@ -1004,7 +1098,9 @@ func TestFailedReloadKeepsTheActions(t *testing.T) {
 	h.press("ctrl+r")
 
 	h.waitForLog("reload: the app is gone")
-	h.waitFor("6/6", "▸ app.greet")
+	h.waitFor("6/6")
+	h.press("up")
+	h.waitFor("▸ app.greet", "6/6")
 }
 
 func TestStatusLinesGoIntoTheLog(t *testing.T) {
@@ -1019,14 +1115,18 @@ func TestStatusLinesGoIntoTheLog(t *testing.T) {
 func TestSmallWindowsShrinkTheList(t *testing.T) {
 	h := start(t, newFakeApp())
 
-	for _, size := range []struct{ width, height, rows int }{{100, 21, 10}, {100, 18, 9}, {100, 14, 8}, {100, 8, 8}} {
+	h.press("up")
+	for _, size := range []struct{ width, height, rows int }{{100, 30, 6}, {100, 10, 5}, {100, 8, 3}} {
 		h.resize(size.width, size.height)
-		h.waitForPanelRows(size.rows)
-		h.waitFor("> find an action", "▸ app.greet", "enter run")
+		h.waitForOverlayRows(size.rows)
+		h.waitFor("▸ app.greet", "> find an action", "enter run")
+		if got := h.panelRows(); got != 5 {
+			t.Errorf("at %d rows the panel takes %d, want 5", size.height, got)
+		}
 	}
 	h.press("tab")
 	h.waitFor("▸ name", "› app.greet", "enter next")
-	h.waitForPanelRows(8)
+	h.waitForOverlayRows(3)
 }
 
 func TestTinyWindowsShowOnlyTheMessage(t *testing.T) {
@@ -1077,7 +1177,7 @@ type probe struct {
 // options change its model, and waits for the actions.
 func start(t *testing.T, app *fakeApp, options ...func(*model)) *harness {
 	h := startPicking(t, newFakeSource(app), client.Target{}, client.Wake, options...)
-	h.waitFor("enter run")
+	h.waitFor("quack · ", "type or ↑ to find an action")
 	return h
 }
 
@@ -1164,7 +1264,7 @@ func (p probe) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	p.h.mu.Lock()
 	p.h.latestRaw = raw
 	p.h.latest = ansi.Strip(raw)
-	p.h.seen[titleFromBottom(p.h.latest)] = true
+	p.h.seen[panelFromBottom(p.h.latest)] = true
 	p.h.mu.Unlock()
 	return p, cmd
 }
@@ -1193,7 +1293,7 @@ func (h *harness) reversed() map[[2]int]bool {
 	screen := uv.NewScreenBuffer(200, height)
 	uv.NewStyledString(raw).Draw(screen, screen.Bounds())
 	cells := map[[2]int]bool{}
-	for y := range height - panelHeight(height) {
+	for y := range height - panelRows {
 		for x := range 200 {
 			if cell := screen.CellAt(x, y); cell != nil && cell.Style.Attrs&uv.AttrReverse != 0 {
 				cells[[2]int{x, y}] = true
@@ -1243,13 +1343,37 @@ func (h *harness) raw() string {
 	return h.latestRaw
 }
 
-// split cuts the view into the log above the panel and the panel, the last panelHeight rows.
+// checkPanel checks that the rows of the panel start with those of want, and that the blank ones in want are blank.
+func checkPanel(t *testing.T, h *harness, want []string) {
+	t.Helper()
+	lines := h.panel()
+	if len(lines) != len(want) {
+		t.Fatalf("the panel has %d lines, want %d:\n%s", len(lines), len(want), h.view())
+	}
+	for i := range want {
+		if !strings.HasPrefix(lines[i], want[i]) || want[i] == "" && lines[i] != "" {
+			t.Errorf("line %d is %q, want %q", i, lines[i], want[i])
+		}
+	}
+}
+
+// split cuts the view into the log that shows and the panel: the last rows, from the title, or from the blank row over
+// the list or the box that covers the title.
 func (h *harness) split() (log, panel []string) {
 	h.mu.Lock()
-	lines, height := strings.Split(h.latest, "\n"), h.height
+	lines := strings.Split(h.latest, "\n")
 	h.mu.Unlock()
-	at := max(0, len(lines)-panelHeight(height))
+	at := max(0, len(lines)-panelRows)
+	if !isTitle(lines[at]) {
+		for at > 0 && strings.TrimSpace(lines[at]) != "" {
+			at--
+		}
+	}
 	return lines[:at], lines[at:]
+}
+
+func isTitle(line string) bool {
+	return strings.HasPrefix(line, "quack · ") || strings.TrimRight(line, " ") == "quack"
 }
 
 // panel is the rows of the panel without the spaces at their ends.
@@ -1277,14 +1401,17 @@ func (h *harness) logText() string {
 
 func (h *harness) lines() int { return strings.Count(h.view(), "\n") + 1 }
 
-// panelRows is how many rows the panel takes at the bottom of the view: from the blank row over its title down.
-func (h *harness) panelRows() int { return titleFromBottom(h.view()) }
+// overlayRows is how many rows the list or the box takes over the input, or 0 while none shows.
+func (h *harness) overlayRows() int { return len(h.panel()) - panelRows }
 
-// titleFromBottom is the number of rows from the row over the title down to the end of view, or 0 without a title.
-func titleFromBottom(view string) int {
+// panelRows is how many rows the panel takes at the bottom of the view: from the row over the first rule down.
+func (h *harness) panelRows() int { return panelFromBottom(h.view()) }
+
+// panelFromBottom is the number of rows from the row over the first rule down to the end of view, or 0 without a rule.
+func panelFromBottom(view string) int {
 	lines := strings.Split(view, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.HasPrefix(lines[i], "quack · ") || strings.TrimRight(lines[i], " ") == "quack" {
+	for i, line := range lines {
+		if line != "" && strings.Trim(line, "─") == "" {
 			return len(lines) - i + 1
 		}
 	}
@@ -1394,10 +1521,11 @@ func (h *harness) waitForLines(count int) {
 	h.wait(h.view, func(view string) bool { return strings.Count(view, "\n")+1 == count }, strconv.Itoa(count)+" lines")
 }
 
-// waitForPanelRows waits until the panel takes the last count rows of the view.
-func (h *harness) waitForPanelRows(count int) {
+// waitForOverlayRows waits until the list or the box takes count rows over the input.
+func (h *harness) waitForOverlayRows(count int) {
 	h.t.Helper()
-	h.wait(h.view, func(view string) bool { return titleFromBottom(view) == count }, "a panel of "+strconv.Itoa(count)+" rows")
+	rows := func() string { return strconv.Itoa(h.overlayRows()) }
+	h.wait(rows, func(rows string) bool { return rows == strconv.Itoa(count) }, "a list of "+strconv.Itoa(count)+" rows")
 }
 
 // waitForLog waits until the log the view shows holds each text, in order.

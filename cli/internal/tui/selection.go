@@ -37,7 +37,7 @@ type mouse struct {
 func (m *model) click(msg tea.MouseClickMsg) tea.Cmd {
 	m.log.marked = nil
 	m.mouse.dragging = false
-	if msg.Button != tea.MouseLeft || msg.Y >= m.logHeight() {
+	if msg.Button != tea.MouseLeft || msg.Y >= m.logShown() {
 		return nil
 	}
 	at := m.log.at(msg.X, msg.Y, m.logHeight())
@@ -56,20 +56,20 @@ func (m *model) click(msg tea.MouseClickMsg) tea.Cmd {
 	return nil
 }
 
-// drag extends the selection to the cell under the mouse. Dragging onto the log's first row or below it scrolls the
-// log a row, so that the selection can reach past what the view shows.
+// drag extends the selection to the cell under the mouse. Dragging onto the log's first row or below the rows of it
+// that show scrolls the log a row, so that the selection can reach past what the view shows.
 func (m *model) drag(msg tea.MouseMotionMsg) {
 	if !m.mouse.dragging {
 		return
 	}
-	height := m.logHeight()
+	height, shown := m.logHeight(), m.logShown()
 	switch {
 	case msg.Y <= 0:
 		m.log.scroll(1, height)
-	case msg.Y >= height:
+	case msg.Y >= shown:
 		m.log.scroll(-1, height)
 	}
-	at := m.log.at(msg.X, min(msg.Y, height-1), height)
+	at := m.log.at(msg.X, min(msg.Y, shown-1), height)
 	if at == m.mouse.anchor {
 		m.log.marked = nil
 		return

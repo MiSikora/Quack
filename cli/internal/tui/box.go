@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -14,9 +15,9 @@ import (
 	"quack/internal/wire"
 )
 
-// paramBox asks for the params of one action: a row for each param, under the action's id and over a preview of the
-// call. One row has the focus. A focused param with hints takes the box for itself, with the hints its text matches
-// under it.
+// paramBox asks for the params of one action: a row for each param under the action's id, and a preview of the call
+// on the input's row. One row has the focus. A focused param with hints takes the box for itself, with the hints its
+// text matches over it.
 type paramBox struct {
 	action  wire.Action
 	fields  []boxField
@@ -186,7 +187,7 @@ func (b *paramBox) keys() string {
 		if text.selected >= 0 {
 			return "enter pick · ↑↓ select · esc deselect"
 		}
-		return "↓ hints · enter next · shift+tab back · esc close"
+		return "↑ hints · enter next · shift+tab back · esc close"
 	}
 	if _, ok := b.fields[b.focused].field.(*choiceField); ok {
 		return "←→ choose · enter next · shift+tab back · esc close"
@@ -194,17 +195,14 @@ func (b *paramBox) keys() string {
 	return "enter next · shift+tab back · esc close"
 }
 
-// view is rows lines: the action's id and description, the params, and the call they make. The params scroll to keep
-// the focused one in sight. With room for only one param, the id goes.
+// view is the action's id and description over a row for each param, up to rows lines. The params scroll to keep the
+// focused one in sight.
 func (b *paramBox) view(rows int) []string {
 	if text, ok := b.hinted(); ok {
 		return b.hintsView(text, rows)
 	}
 	lines := []string{b.header()}
-	paramRows := rows - 2
-	if paramRows < 1 {
-		lines, paramRows = nil, rows-1
-	}
+	paramRows := min(len(b.fields), rows-1)
 	names := 0
 	for _, f := range b.fields {
 		names = max(names, ansi.StringWidth(f.param.Name))
@@ -214,7 +212,7 @@ func (b *paramBox) view(rows int) []string {
 		column = max(column, ansi.StringWidth(f.field.view()))
 	}
 	first := max(0, b.focused-paramRows+1)
-	for i := first; i < min(len(b.fields), first+paramRows); i++ {
+	for i := first; i < first+paramRows; i++ {
 		f := b.fields[i]
 		marker := "  "
 		if i == b.focused {
@@ -222,15 +220,12 @@ func (b *paramBox) view(rows int) []string {
 		}
 		lines = append(lines, marker+f.row(names, column))
 	}
-	for len(lines) < rows-1 {
-		lines = append(lines, "")
-	}
-	return append(lines, "› "+recipe.CommandLine(b.action, b.args()))
+	return lines
 }
 
-// hintsView is rows lines: the action's id and description, the focused param with how many hints match out of how
-// many there are at its right end, the hints that match, and the call. The hints scroll to keep the selection in
-// sight. Without room for a hint, the id goes.
+// hintsView is the action's id and description, the hints that the text of the focused param matches, the best last,
+// and the param with how many hints match out of how many there are at its right end, up to rows lines. The hints
+// scroll to keep the selection in sight.
 func (b *paramBox) hintsView(text *textField, rows int) []string {
 	f := b.fields[b.focused]
 	matches := text.matches()
@@ -238,29 +233,27 @@ func (b *paramBox) hintsView(text *textField, rows int) []string {
 	row := selectedStyle.Render("▸ ") + f.row(ansi.StringWidth(f.param.Name), b.fieldWidth()+1)
 	row = ansi.Truncate(row, b.width-ansi.StringWidth(counter)-1, "…")
 	row += strings.Repeat(" ", max(1, b.width-ansi.StringWidth(row)-ansi.StringWidth(counter))) + counter
-	lines := []string{b.header(), row}
-	if rows < 4 {
-		lines = lines[1:]
-	}
 	// The hints line up with the text of the param.
 	indent := strings.Repeat(" ", ansi.StringWidth(f.param.Name)+2)
-	count := max(0, rows-1-len(lines))
-	if len(matches) == 0 && count > 0 {
-		lines = append(lines, statusStyle.Render(indent+"  no match"))
+	if len(matches) == 0 {
+		return []string{b.header(), statusStyle.Render(indent + "  no match"), row}
 	}
+	count := min(len(matches), rows-2)
 	first := max(0, text.selected-count+1)
-	for i := first; i < min(len(matches), first+count); i++ {
+	var hints []string
+	for i := first; i < first+count; i++ {
 		marker, style := "  ", lipgloss.NewStyle()
 		if i == text.selected {
 			marker, style = selectedStyle.Render("▸ "), selectedStyle
 		}
-		lines = append(lines, indent+marker+highlight(matches[i].Str, matches[i].MatchedIndexes, style))
+		hints = append(hints, indent+marker+highlight(matches[i].Str, matches[i].MatchedIndexes, style))
 	}
-	for len(lines) < rows-1 {
-		lines = append(lines, "")
-	}
-	return append(lines, "› "+recipe.CommandLine(b.action, b.args()))
+	slices.Reverse(hints)
+	return append(append([]string{b.header()}, hints...), row)
 }
+
+// preview is the call that the params make, for the input's row.
+func (b *paramBox) preview() string { return "› " + recipe.CommandLine(b.action, b.args()) }
 
 func (b *paramBox) header() string {
 	header := commandStyle.Render(b.action.ID)
@@ -295,15 +288,15 @@ func (f *textField) value() wire.RawArg {
 	return wire.RawArg{text}
 }
 
-// press moves the selection over the hints that match, or edits the text. Down moves away from the text, and up back
+// press moves the selection over the hints that match, or edits the text. Up moves away from the text, and down back
 // to it, where no hint is selected. A new text selects none.
 func (f *textField) press(msg tea.KeyPressMsg) tea.Cmd {
 	if len(f.hints) > 0 {
 		switch msg.String() {
-		case "down", "ctrl+n":
+		case "up", "ctrl+p":
 			f.selected = min(len(f.matches())-1, f.selected+1)
 			return nil
-		case "up", "ctrl+p":
+		case "down", "ctrl+n":
 			f.selected = max(-1, f.selected-1)
 			return nil
 		}
