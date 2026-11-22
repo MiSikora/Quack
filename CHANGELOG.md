@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-22
+
 ### Added
 - CLI: a recipe can declare its `name`, so that it needs no export.
 - CLI: a recipe param with `env: "NAME"` takes that environment variable's value when the run leaves it out, and shows as `${NAME}`.
@@ -49,7 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release.
 
-[Unreleased]: https://github.com/MiSikora/Quack/compare/0.1.2...HEAD
+[Unreleased]: https://github.com/MiSikora/Quack/compare/0.1.3...HEAD
+[0.1.3]: https://github.com/MiSikora/Quack/releases/tag/0.1.3
 [0.1.2]: https://github.com/MiSikora/Quack/releases/tag/0.1.2
 [0.1.1]: https://github.com/MiSikora/Quack/releases/tag/0.1.1
 [0.1.0]: https://github.com/MiSikora/Quack/releases/tag/0.1.0
