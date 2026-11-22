@@ -1,0 +1,15 @@
+$ quack --json --recipe prepare
+--- exit 0
+--- stdout
+{"code":"ok","message":"ran pm clear io.mehow.quack.sample","step":1}
+{"code":"ok","message":"seeded Bob on emulator-5554","step":2}
+{"code":"ok","message":"Hello, Bob!","step":3}
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+command emulator-5554: pm clear io.mehow.quack.sample
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.greet","args":{"name":"Bob"}}

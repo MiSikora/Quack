@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"bufio"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -159,6 +160,19 @@ func (a *fakeAdb) handleService(conn net.Conn, d *fakeDevice, service string) {
 		io.WriteString(conn, a.shell(d, cmd))
 		return
 	}
+	if cmd, ok := strings.CutPrefix(service, "shell,v2,raw:"); ok {
+		okay(conn)
+		a.record("command %s: %s", d.serial, cmd)
+		// A command that starts with fail fails, and any other prints its text.
+		if strings.HasPrefix(cmd, "fail") {
+			shellPacket(conn, 2, "Error: "+cmd+"\n")
+			shellPacket(conn, 3, "\x01")
+		} else {
+			shellPacket(conn, 1, "ran "+cmd+"\n")
+			shellPacket(conn, 3, "\x00")
+		}
+		return
+	}
 	if socket, ok := strings.CutPrefix(service, "localabstract:"); ok {
 		app := a.listening(d, socket)
 		if app == nil {
@@ -170,6 +184,13 @@ func (a *fakeAdb) handleService(conn net.Conn, d *fakeDevice, service string) {
 		return
 	}
 	fail(conn, "unknown service "+service)
+}
+
+// shellPacket writes a packet of adb's shell protocol: id, the length of data in 4 little-endian bytes, and data.
+func shellPacket(conn net.Conn, id byte, data string) {
+	header := []byte{id, 0, 0, 0, 0}
+	binary.LittleEndian.PutUint32(header[1:], uint32(len(data)))
+	conn.Write(append(header, data...))
 }
 
 // shell answers the commands quack runs on d, as Android's tools would. It records each command with the device that

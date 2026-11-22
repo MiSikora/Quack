@@ -4,6 +4,7 @@ package adb
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -87,6 +88,70 @@ func (d Device) Shell(cmd string) (string, error) {
 		return "", d.Unreachable(err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// Output is what a command printed on the device, and the status it exited with.
+type Output struct {
+	Stdout string
+	Stderr string
+	Exit   int
+}
+
+// The packet ids of adb's shell protocol, which frames each packet as an id, a little-endian 32-bit length and data.
+const (
+	shellStdout = 1
+	shellStderr = 2
+	shellExit   = 3
+)
+
+// Command runs cmd on the device through adb's shell protocol, which keeps stdout apart from stderr and tells the
+// status cmd exited with. Ending ctx closes the stream, which ends cmd, and Command returns ctx's error.
+func (d Device) Command(ctx context.Context, cmd string) (Output, error) {
+	conn, err := d.Open("shell,v2,raw:" + cmd)
+	var refused *ServiceFailure
+	if errors.As(err, &refused) {
+		return Output{}, d.Unreachable(err)
+	}
+	if err != nil {
+		return Output{}, err
+	}
+	defer conn.Close()
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
+	var stdout, stderr strings.Builder
+	header := make([]byte, 5)
+	for {
+		data, err := readPacket(conn, header)
+		switch {
+		case ctx.Err() != nil:
+			return Output{}, ctx.Err()
+		case err != nil:
+			return Output{}, d.Unreachable(err)
+		}
+		switch header[0] {
+		case shellStdout:
+			stdout.Write(data)
+		case shellStderr:
+			stderr.Write(data)
+		case shellExit:
+			exit := 0
+			if len(data) > 0 {
+				exit = int(data[0])
+			}
+			return Output{stdout.String(), stderr.String(), exit}, nil
+		}
+	}
+}
+
+// readPacket reads one packet of adb's shell protocol into header and returns its data.
+func readPacket(conn net.Conn, header []byte) ([]byte, error) {
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return nil, err
+	}
+	data := make([]byte, binary.LittleEndian.Uint32(header[1:]))
+	if _, err := io.ReadFull(conn, data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // Unreachable explains a request the device failed, from the state adb reports for it.

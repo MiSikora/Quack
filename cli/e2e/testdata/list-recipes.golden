@@ -11,11 +11,24 @@ clean
     account.delete
     app.greet name=Bob
 
+fail-run
+    run echo oops >&2; exit 3
+    app.greet name=Bob
+
+fail-shell
+    shell fail now
+    app.greet name=Bob
+
 greet
     app.greet name=Bob
 
 greet-env
     app.greet name='${QUACK_NAME}'
+
+prepare
+    shell pm clear ${QUACK_PACKAGE}
+    run echo seeded ${QUACK_NAME} on $ANDROID_SERIAL
+    app.greet name=Bob
 
 setup
     Create the account and greet.

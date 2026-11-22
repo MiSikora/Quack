@@ -2,6 +2,7 @@ package recipe
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"quack/internal/adb"
 	"quack/internal/client"
 	"quack/internal/wire"
 )
@@ -46,6 +48,8 @@ steps = [
   { open-app = true },
   { wait = "2s" },
   { action = "account.login", args = { user = "foo", remember = true, count = 3, ratio = 0.5, tag = ["a", 1] } },
+  { shell = "pm clear com.example" },
+  { run = "./seed.sh ${QUACK_USER}" },
 ]
 
 [delete]
@@ -62,6 +66,8 @@ steps = [{ action = "account.delete" }]
 			Call{Action: "account.login", Args: map[string]wire.RawArg{
 				"user": {"foo"}, "remember": {"true"}, "count": {"3"}, "ratio": {"0.5"}, "tag": {"a", "1"},
 			}},
+			Shell{"pm clear com.example"},
+			Run{"./seed.sh ${QUACK_USER}"},
 		}},
 	}
 	if err != nil || !reflect.DeepEqual(recipes, want) {
@@ -84,9 +90,9 @@ steps = []`, ": recipe 'a' has no steps"},
 		{`[a]
 description = "no steps"`, ": recipe 'a' has no steps"},
 		{`[a]
-steps = [{ open-app = true }, {}]`, ": recipe 'a' step 2: it needs one of action, open-app or wait"},
+steps = [{ open-app = true }, {}]`, ": recipe 'a' step 2: it needs one of action, open-app, wait, shell or run"},
 		{`[a]
-steps = [{ open-app = true, wait = "1s" }]`, ": recipe 'a' step 1: it takes only one of action, open-app or wait"},
+steps = [{ open-app = true, wait = "1s" }]`, ": recipe 'a' step 1: it takes only one of action, open-app, wait, shell or run"},
 		{`[a]
 steps = [{ args = { x = "1" } }]`, ": recipe 'a' step 1: args needs an action"},
 		{`[a]
@@ -114,6 +120,12 @@ steps = [{ action = "x", args = { t = "${USER" } }]`, ": recipe 'a' step 1: arg 
 		{`[a]
 steps = [{ action = "x", args = { t = ["a", "${1USER}"] } }]`, ": recipe 'a' step 1: arg 't': '${1USER}' does not name an environment variable"},
 		{`[a]
+steps = [{ shell = " " }]`, ": recipe 'a' step 1: shell needs a command"},
+		{`[a]
+steps = [{ run = "echo ${HOME" }]`, ": recipe 'a' step 1: run: 'echo ${HOME' has a ${ without a closing }"},
+		{`[a]
+steps = [{ run = "true", shell = "true" }]`, ": recipe 'a' step 1: it takes only one of action, open-app, wait, shell or run"},
+		{`[a]
 steps = [{ open-app = true, nope = 1 }]`, ":2:29: unknown key 'nope'"},
 		{`[a]
 steps = [{ open-app = true }]
@@ -140,7 +152,7 @@ func TestCheckPassesCallsTheAppWouldTake(t *testing.T) {
 		call("app.params", "tag"),
 	)
 
-	if err := Check(r, actions); err != nil {
+	if err := Check(r, actions, target); err != nil {
 		t.Errorf("got %v, want no error", err)
 	}
 }
@@ -163,7 +175,7 @@ func TestCheckFailsOnACallTheAppWouldRefuse(t *testing.T) {
 		{call("app.params", "flag", "True"), invalid("'flag' expects boolean, got 'True'")},
 		{call("app.params", "theme", "blue"), invalid("'theme' expects one of light, dark, got 'blue'")},
 	} {
-		err := Check(recipeOf(OpenApp{}, c.call), actions)
+		err := Check(recipeOf(OpenApp{}, c.call), actions, target)
 
 		if !reflect.DeepEqual(err, c.want) {
 			t.Errorf("%v: got %v, want %v", c.call, err, c.want)
@@ -175,11 +187,11 @@ func TestCheckFailsOnAVariableThatIsNotSetOrGivesAValueTheAppWouldRefuse(t *test
 	t.Setenv("QUACK_COUNT", "many")
 	os.Unsetenv("QUACK_MISSING")
 
-	err := Check(recipeOf(OpenApp{}, call("app.greet", "name", "${QUACK_MISSING}")), actions)
+	err := Check(recipeOf(OpenApp{}, call("app.greet", "name", "${QUACK_MISSING}")), actions, target)
 	if err == nil || err.Error() != "recipe 'r' step 2: arg 'name': environment variable 'QUACK_MISSING' is not set" {
 		t.Errorf("unset: got %v", err)
 	}
-	err = Check(recipeOf(OpenApp{}, call("app.params", "count", "${QUACK_COUNT}")), actions)
+	err = Check(recipeOf(OpenApp{}, call("app.params", "count", "${QUACK_COUNT}")), actions, target)
 	if want := invalid("'count' expects int, got 'many'"); !reflect.DeepEqual(err, want) {
 		t.Errorf("value: got %v, want %v", err, want)
 	}
@@ -213,6 +225,89 @@ func TestDoRunsEachKindOfStep(t *testing.T) {
 	}
 }
 
+func TestDoRunsAShellCommandOnTheDeviceWithItsVariables(t *testing.T) {
+	t.Setenv("QUACK_PKG", "com.example")
+	app := &fakeApp{output: adb.Output{Stdout: "Success\n"}}
+
+	result, err := Do(context.Background(), app, Shell{"pm clear ${QUACK_PKG}"}, nil)
+
+	if err != nil || result.Message != "Success" || !reflect.DeepEqual(app.commands, []string{"pm clear com.example"}) {
+		t.Errorf("got %v, %v and commands %v", result, err, app.commands)
+	}
+}
+
+func TestDoRunsACommandOnThisComputerWithItsVariables(t *testing.T) {
+	t.Setenv("QUACK_WORD", "duck")
+
+	result, err := Do(context.Background(), &fakeApp{}, Run{"echo ${QUACK_WORD}; echo noise >&2"}, nil)
+
+	if err != nil || result.Message != "duck" {
+		t.Errorf("got %v, %v, want duck", result, err)
+	}
+}
+
+func TestACommandThatExitsWithAnotherStatusFailsWithItsOutput(t *testing.T) {
+	for _, c := range []struct {
+		step Step
+		app  *fakeApp
+		want CommandError
+	}{
+		{Run{"echo out; echo err >&2; exit 3"}, &fakeApp{}, CommandError{3, "err"}},
+		{Run{"echo out; exit 4"}, &fakeApp{}, CommandError{4, "out"}},
+		{Shell{"pm clear nope"}, &fakeApp{output: adb.Output{Stderr: "Failed\n", Exit: 1}}, CommandError{1, "Failed"}},
+	} {
+		_, err := Do(context.Background(), c.app, c.step, nil)
+
+		var failed *CommandError
+		if !errors.As(err, &failed) || *failed != c.want {
+			t.Errorf("%v: got %v, want %v", c.step, err, &c.want)
+		}
+	}
+	if got := (&CommandError{Exit: 2}).Error(); got != "the command exited with 2" {
+		t.Errorf("got %s", got)
+	}
+}
+
+func TestCancelingEndsACommandOnThisComputer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+
+	started := time.Now()
+	_, err := Do(ctx, &fakeApp{}, Run{"sleep 60"}, nil)
+
+	if err == nil || err.Error() != "canceled" || time.Since(started) > 5*time.Second {
+		t.Errorf("got %v after %v, want canceled at once", err, time.Since(started))
+	}
+}
+
+func TestTheAppAndTheDeviceAreVariablesOfEveryStepAndInTheEnvironmentOfARun(t *testing.T) {
+	t.Setenv("QUACK_PACKAGE", "com.other")
+	t.Setenv("ANDROID_SERIAL", "other-device")
+	app := &fakeApp{output: adb.Output{Stdout: "Success\n"}}
+
+	if err := Check(recipeOf(Shell{"pm clear ${QUACK_PACKAGE} on ${ANDROID_SERIAL}"}), actions, target); err != nil {
+		t.Errorf("check: got %v", err)
+	}
+	Do(context.Background(), app, Shell{"pm clear ${QUACK_PACKAGE} on ${ANDROID_SERIAL}"}, nil)
+	if want := []string{"pm clear io.mehow.quack.sample on emulator-5554"}; !reflect.DeepEqual(app.commands, want) {
+		t.Errorf("shell: got %v, want %v", app.commands, want)
+	}
+	result, err := Do(context.Background(), app, Run{`echo "$QUACK_PACKAGE $ANDROID_SERIAL"`}, nil)
+	if want := "io.mehow.quack.sample emulator-5554"; err != nil || result.Message != want {
+		t.Errorf("run: got %v, %v, want %s", result, err, want)
+	}
+}
+
+func TestCheckFailsOnAVariableOfACommandThatIsNotSet(t *testing.T) {
+	os.Unsetenv("QUACK_MISSING")
+
+	err := Check(recipeOf(Run{"echo ${QUACK_MISSING}"}), actions, target)
+
+	if err == nil || err.Error() != "recipe 'r' step 1: environment variable 'QUACK_MISSING' is not set" {
+		t.Errorf("got %v", err)
+	}
+}
+
 func TestCancelingEndsAWaitAndSkipsAStepThatHasNotStarted(t *testing.T) {
 	app := &fakeApp{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -238,6 +333,8 @@ func TestLineWritesAStepAsTheUserTypesIt(t *testing.T) {
 		{OpenApp{}, "/open-app"},
 		{Wait{1500 * time.Millisecond}, "wait 1.5s"},
 		{call("app.greet", "name", "${QUACK_NAME}"), "app.greet name='${QUACK_NAME}'"},
+		{Shell{"pm clear com.example"}, "shell pm clear com.example"},
+		{Run{"./seed.sh ${QUACK_USER}"}, "run ./seed.sh ${QUACK_USER}"},
 	} {
 		if got := Line(c.step, actions); got != c.want {
 			t.Errorf("got %s, want %s", got, c.want)
@@ -255,6 +352,8 @@ func TestShellReadsAQuotedValueBackAsTyped(t *testing.T) {
 }
 
 const pkg = "io.mehow.quack.sample"
+
+var target = client.Target{Device: "emulator-5554", Package: pkg}
 
 var actions = []wire.Action{
 	{ID: "app.greet", Params: []wire.Param{
@@ -306,7 +405,16 @@ func invalid(message string) wire.Error {
 }
 
 type fakeApp struct {
-	starts []client.StartMode
+	starts   []client.StartMode
+	commands []string
+	output   adb.Output
+}
+
+func (a *fakeApp) Target() client.Target { return target }
+
+func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
+	a.commands = append(a.commands, cmd)
+	return a.output, nil
 }
 
 func (a *fakeApp) Call(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {

@@ -2,6 +2,7 @@ package adb
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -55,6 +56,48 @@ func TestDevicesSaysHowToInstallAdbWhenNoServerRunsAndAdbIsMissing(t *testing.T)
 	var adbErr *Error
 	if !errors.As(err, &adbErr) || err.Error() != want {
 		t.Errorf("got %v, want an Error that says %s", err, want)
+	}
+}
+
+func TestCommandKeepsStdoutAndStderrApartAndTellsTheExitStatus(t *testing.T) {
+	serve(t, func(conn net.Conn, request string) {
+		if request != "host:transport:emulator-5554" {
+			fail(conn, "unknown request "+request)
+			return
+		}
+		io.WriteString(conn, "OKAY")
+		if service, _ := readLengthPrefixed(conn); service != "shell,v2,raw:pm clear app" {
+			fail(conn, "unknown service "+service)
+			return
+		}
+		io.WriteString(conn, "OKAY")
+		packet(conn, shellStdout, "Suc")
+		packet(conn, shellStderr, "warning\n")
+		packet(conn, shellStdout, "cess\n")
+		packet(conn, shellExit, "\x03")
+	})
+
+	out, err := Device("emulator-5554").Command(context.Background(), "pm clear app")
+
+	if want := (Output{"Success\n", "warning\n", 3}); err != nil || out != want {
+		t.Errorf("got %v, %v, want %v", out, err, want)
+	}
+}
+
+func TestCommandEndsWhenTheContextEnds(t *testing.T) {
+	serve(t, func(conn net.Conn, request string) {
+		io.WriteString(conn, "OKAY")
+		readLengthPrefixed(conn)
+		io.WriteString(conn, "OKAY")
+		io.Copy(io.Discard, conn)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+
+	_, err := Device("emulator-5554").Command(ctx, "sleep 60")
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("got %v, want context.Canceled", err)
 	}
 }
 
@@ -146,6 +189,13 @@ func okay(conn net.Conn, text string) {
 func fail(conn net.Conn, reason string) {
 	io.WriteString(conn, "FAIL")
 	writeLengthPrefixed(conn, reason)
+}
+
+// packet writes a packet of adb's shell protocol.
+func packet(conn net.Conn, id byte, data string) {
+	header := []byte{id, 0, 0, 0, 0}
+	binary.LittleEndian.PutUint32(header[1:], uint32(len(data)))
+	conn.Write(append(header, data...))
 }
 
 func writeLengthPrefixed(conn net.Conn, text string) {

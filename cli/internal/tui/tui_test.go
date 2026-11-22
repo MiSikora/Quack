@@ -1752,6 +1752,15 @@ func (a *fakeApp) reply(ctx context.Context, call wire.Call, notify client.Notif
 	return "", wire.Error{Code: wire.ErrorCodeUnknownAction, Message: "no action '" + call.Action + "'"}
 }
 
+func (a *fakeApp) Target() client.Target {
+	return client.Target{Device: "emulator-5554", Package: a.pkg}
+}
+
+// Command answers every command with its text.
+func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
+	return adb.Output{Stdout: "ran " + cmd + "\n"}, nil
+}
+
 func (a *fakeApp) Start(mode client.StartMode) error {
 	if mode != client.Open {
 		return errors.New("unexpected mode " + string(mode))
