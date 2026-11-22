@@ -40,6 +40,24 @@ func TestDevicesSaysWhatTheServerRefused(t *testing.T) {
 	}
 }
 
+func TestDevicesSaysHowToInstallAdbWhenNoServerRunsAndAdbIsMissing(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.Close()
+	t.Setenv("ANDROID_ADB_SERVER_PORT", strconv.Itoa(listener.Addr().(*net.TCPAddr).Port))
+	t.Setenv("PATH", t.TempDir())
+
+	_, err = Devices()
+
+	want := "the adb server is not running and adb is not on PATH. Install it with brew install --cask android-platform-tools, or add the Android SDK's platform-tools to PATH."
+	var adbErr *Error
+	if !errors.As(err, &adbErr) || err.Error() != want {
+		t.Errorf("got %v, want an Error that says %s", err, want)
+	}
+}
+
 func TestTrackSendsEachChangeUntilTheServerGoesAway(t *testing.T) {
 	serve(t, func(conn net.Conn, request string) {
 		if request != "host:track-devices" {
