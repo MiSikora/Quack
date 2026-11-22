@@ -206,6 +206,9 @@ func dialOrStartServer() (net.Conn, error) {
 	if err == nil {
 		return conn, nil
 	}
+	if _, err := exec.LookPath("adb"); err != nil {
+		return nil, &Error{"the adb server is not running and adb is not on PATH. Install it with brew install --cask android-platform-tools, or add the Android SDK's platform-tools to PATH."}
+	}
 	if out, err := exec.Command("adb", "start-server").CombinedOutput(); err != nil {
 		return nil, &Error{fmt.Sprintf("the adb server is not running and adb start-server failed: %s", strings.TrimSpace(string(out)))}
 	}
