@@ -1,6 +1,6 @@
 // Package mcpserver serves quack-enabled apps to MCP clients, such as Claude, over stdin and stdout. Its tools list the
-// devices and their apps, list an app's actions, and run one. Devices and apps come and go, so every call finds them
-// again: a tool picks the only app there is, or the one its device and app arguments name.
+// devices and their apps, list an app's actions and recipes, and run one. Devices and apps come and go, so every call
+// finds them again: a tool picks the only app there is, or the one its device and app arguments name.
 package mcpserver
 
 import (
@@ -12,6 +12,7 @@ import (
 	"io"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
@@ -30,12 +32,15 @@ type Source interface {
 	Find(device adb.Device, pkg string) (client.Target, error)
 	// Connect gets the app of target running the way mode says before each request.
 	Connect(target client.Target, mode client.StartMode) (App, error)
+	// Recipes are the recipes of pkg, as recipe.Load reads them, and the file they come from.
+	Recipes(pkg string) ([]recipe.Recipe, string, error)
 }
 
 // App is what the server needs from a quack app. client.App satisfies it.
 type App interface {
 	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
 	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
+	Start(mode client.StartMode) error
 }
 
 // Serve serves the apps that adb reaches until the client disconnects. A started app waits up to startTimeout to
@@ -64,6 +69,19 @@ func New(source Source, version string) *mcp.Server {
 		InputSchema:  runActionSchema,
 		OutputSchema: schemaFor[runActionOutput](),
 	}, s.runAction)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "list_recipes",
+		Description: "List the recipes of a quack-enabled app: named lists of steps with fixed args that the user keeps " +
+			"in a file on this computer. Each step is a call of an action as the command line writes it, /open-app, which " +
+			"shows the app's main screen, or a wait. " + targetHelp,
+	}, s.listRecipes)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "run_recipe",
+		Description: "Run a recipe of a quack-enabled app, step by step, and return what each step gave: its " +
+			"notifications, its message and its data. The recipe runs no step when one of its calls would not pass the " +
+			"app's checks, and stops at the first step that fails. Get the recipe names from list_recipes. " + targetHelp,
+		OutputSchema: schemaFor[runRecipeOutput](),
+	}, s.runRecipe)
 	return server
 }
 
@@ -124,6 +142,44 @@ type runActionInput struct {
 	Device  string                     `json:"device,omitempty"`
 	App     string                     `json:"app,omitempty"`
 	OpenApp bool                       `json:"open_app,omitempty"`
+}
+
+type listRecipesInput struct {
+	Device string `json:"device,omitempty" jsonschema:"the device's serial, as list_devices gives it"`
+	App    string `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
+	Filter string `json:"filter,omitempty" jsonschema:"a regular expression that the names of the listed recipes match"`
+}
+
+type listRecipesOutput struct {
+	Device string `json:"device"`
+	App    string `json:"app"`
+	// File is where the recipes come from, and where to write them when there are none.
+	File    string         `json:"file"`
+	Recipes []recipeOutput `json:"recipes"`
+}
+
+type recipeOutput struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Steps       []string `json:"steps"`
+}
+
+type runRecipeInput struct {
+	Recipe string `json:"recipe" jsonschema:"the name of the recipe, as list_recipes gives it"`
+	Device string `json:"device,omitempty" jsonschema:"the device's serial, as list_devices gives it"`
+	App    string `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
+}
+
+type runRecipeOutput struct {
+	Steps []stepOutput `json:"steps"`
+}
+
+// stepOutput is what a step of a recipe gave. Only a call of an action has a message and data.
+type stepOutput struct {
+	Step          string          `json:"step"`
+	Notifications []string        `json:"notifications"`
+	Message       string          `json:"message"`
+	Data          json.RawMessage `json:"data,omitempty"`
 }
 
 type runActionOutput struct {
@@ -190,17 +246,10 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 		return nil, runActionOutput{}, err
 	}
 	notifications := []string{}
-	token := req.Params.GetProgressToken()
+	report := progress(ctx, req)
 	result, err := app.Call(ctx, wire.Call{Action: in.Action, Args: args}, func(message string) {
 		notifications = append(notifications, message)
-		if token != nil {
-			// A failed progress notification only loses the notification's early copy, since the result holds it too.
-			_ = req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
-				ProgressToken: token,
-				Message:       message,
-				Progress:      float64(len(notifications)),
-			})
-		}
+		report(message)
 	})
 	if err != nil {
 		if len(notifications) > 0 {
@@ -211,13 +260,115 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 	return nil, runActionOutput{Notifications: notifications, Message: result.Message, Data: result.Data}, nil
 }
 
+func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRecipesInput) (*mcp.CallToolResult, listRecipesOutput, error) {
+	var filter *regexp.Regexp
+	if in.Filter != "" {
+		var err error
+		if filter, err = regexp.Compile(in.Filter); err != nil {
+			return nil, listRecipesOutput{}, fmt.Errorf("invalid filter: %v", err)
+		}
+	}
+	// Recipes need only the package, so the app does not start.
+	target, err := s.find(in.Device, in.App)
+	if err != nil {
+		return nil, listRecipesOutput{}, err
+	}
+	recipes, file, err := s.source.Recipes(target.Package)
+	if err != nil {
+		return nil, listRecipesOutput{}, err
+	}
+	out := listRecipesOutput{Device: string(target.Device), App: target.Package, File: file, Recipes: []recipeOutput{}}
+	for _, r := range recipes {
+		if filter != nil && !filter.MatchString(r.Name) {
+			continue
+		}
+		steps := make([]string, len(r.Steps))
+		for i, step := range r.Steps {
+			steps[i] = recipe.Line(step, nil)
+		}
+		out.Recipes = append(out.Recipes, recipeOutput{Name: r.Name, Description: r.Description, Steps: steps})
+	}
+	return nil, out, nil
+}
+
+// runRecipe runs the steps of the recipe, after checking its calls against the app's actions, so that a recipe the app
+// would refuse runs no step. Each step's line and then its notifications go out as progress notifications when the
+// client asked for them. The client canceling the request cancels the step that runs. A failed step ends the recipe
+// with an error that holds what the steps before it gave, as the command line prints them.
+func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRecipeInput) (*mcp.CallToolResult, runRecipeOutput, error) {
+	target, app, err := s.connect(in.Device, in.App, client.Wake)
+	if err != nil {
+		return nil, runRecipeOutput{}, err
+	}
+	recipes, file, err := s.source.Recipes(target.Package)
+	if err != nil {
+		return nil, runRecipeOutput{}, err
+	}
+	at := slices.IndexFunc(recipes, func(r recipe.Recipe) bool { return r.Name == in.Recipe })
+	if at < 0 {
+		return nil, runRecipeOutput{}, fmt.Errorf("no recipe named %s in %s", in.Recipe, file)
+	}
+	r := recipes[at]
+	_, actions, err := app.Describe(ctx)
+	if err != nil {
+		return nil, runRecipeOutput{}, err
+	}
+	if err := recipe.Check(r, actions); err != nil {
+		return nil, runRecipeOutput{}, err
+	}
+	report := progress(ctx, req)
+	out := runRecipeOutput{Steps: []stepOutput{}}
+	var printed []string
+	for _, step := range r.Steps {
+		done := stepOutput{Step: recipe.Line(step, actions), Notifications: []string{}}
+		printed = append(printed, "› "+done.Step)
+		report(printed[len(printed)-1])
+		result, err := recipe.Do(ctx, app, step, func(message string) {
+			done.Notifications = append(done.Notifications, message)
+			printed = append(printed, message)
+			report(message)
+		})
+		if err != nil {
+			return nil, runRecipeOutput{}, fmt.Errorf("%s\n%w", strings.Join(printed, "\n"), err)
+		}
+		if result.Message != "" {
+			printed = append(printed, result.Message)
+		}
+		done.Message, done.Data = result.Message, result.Data
+		out.Steps = append(out.Steps, done)
+	}
+	return nil, out, nil
+}
+
+func (s tools) find(device, pkg string) (client.Target, error) {
+	return s.source.Find(adb.Device(device), pkg)
+}
+
 func (s tools) connect(device, pkg string, mode client.StartMode) (client.Target, App, error) {
-	target, err := s.source.Find(adb.Device(device), pkg)
+	target, err := s.find(device, pkg)
 	if err != nil {
 		return client.Target{}, nil, err
 	}
 	app, err := s.source.Connect(target, mode)
 	return target, app, err
+}
+
+// progress sends each message as a progress notification when the client asked for them, counting them from 1.
+func progress(ctx context.Context, req *mcp.CallToolRequest) func(message string) {
+	token := req.Params.GetProgressToken()
+	sent := 0
+	return func(message string) {
+		if token == nil {
+			return
+		}
+		sent++
+		// A failed progress notification only loses the message's early copy, since the result holds it too.
+		_ = req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+			ProgressToken: token,
+			Message:       message,
+			Progress:      float64(sent),
+		})
+	}
 }
 
 func action(a wire.Action) actionOutput {
@@ -306,6 +457,11 @@ func (s clientSource) Connect(target client.Target, mode client.StartMode) (App,
 	return app, nil
 }
 
+func (clientSource) Recipes(pkg string) ([]recipe.Recipe, string, error) {
+	recipes, err := recipe.Load(pkg)
+	return recipes, recipe.Path(pkg), err
+}
+
 // runActionSchema is run_action's input schema, with the descriptions of its properties.
 var runActionSchema = func() *jsonschema.Schema {
 	schema := schemaFor[runActionInput]()
@@ -333,8 +489,9 @@ func schemaFor[T any]() *jsonschema.Schema {
 }
 
 const instructions = "quack runs debug actions in Android apps on devices that adb reaches. list_devices shows the devices " +
-	"and their quack-enabled apps, list_actions an app's actions, and run_action runs one. Devices and apps change while " +
-	"you work, so call list_devices again when a call says that a device or app is missing or that several match."
+	"and their quack-enabled apps, list_actions an app's actions, and run_action runs one. list_recipes shows the " +
+	"recipes the user keeps for an app, and run_recipe runs one. Devices and apps change while you work, so call " +
+	"list_devices again when a call says that a device or app is missing or that several match."
 
 const targetHelp = "Leave out device and app when only one quack-enabled app is reachable. When several are, the error " +
 	"lists them as --device and --app pairs: pass those values as device and app."
