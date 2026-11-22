@@ -15,7 +15,7 @@ Add the library:
 
 ```kotlin
 dependencies {
-  implementation("io.mehow.quack:quack:0.1.1")
+  implementation("io.mehow.quack:quack:0.1.2")
 }
 ```
 

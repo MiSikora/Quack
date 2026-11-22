@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-22
+
 ### Added
 - MCP: when the client can show a form, `run_action` and `run_recipe` ask the user for the required params that their args leave out.
 
@@ -37,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release.
 
-[Unreleased]: https://github.com/MiSikora/Quack/compare/0.1.1...HEAD
+[Unreleased]: https://github.com/MiSikora/Quack/compare/0.1.2...HEAD
+[0.1.2]: https://github.com/MiSikora/Quack/releases/tag/0.1.2
 [0.1.1]: https://github.com/MiSikora/Quack/releases/tag/0.1.1
 [0.1.0]: https://github.com/MiSikora/Quack/releases/tag/0.1.0
