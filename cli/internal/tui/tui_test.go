@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -20,6 +22,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
@@ -31,7 +34,7 @@ func TestPanelShowsTheTitleTheInputTheListAndTheKeys(t *testing.T) {
 		"",
 		"quack · io.mehow.quack.sample 1.0 · emulator-5554",
 		strings.Repeat("─", 100),
-		"> find an action, or / for commands",
+		"> find an action, $ for recipes, / for commands",
 		strings.Repeat("─", 100),
 		"▸ app.greet        Say hello",
 		"  app.params       Show the parsed value of each param type",
@@ -126,7 +129,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	check("no match")
 	h.press("esc")
 	h.typing("/")
-	h.waitFor("▸ /reload-actions")
+	h.waitFor("▸ /reload")
 	check("commands")
 	h.press("esc")
 	h.typing("account.create")
@@ -361,7 +364,7 @@ func TestSlashListsTheCommands(t *testing.T) {
 
 	h.typing("/")
 
-	h.waitFor("6/6", "▸ /reload-actions", "/open-app", "/switch-device", "/switch-app", "/stop-action", "/quit")
+	h.waitFor("6/6", "▸ /reload", "/open-app", "/switch-device", "/switch-app", "/stop-action", "/quit")
 	h.waitForNo("app.greet")
 	h.typing("q")
 	h.waitFor("▸ /quit")
@@ -805,6 +808,169 @@ func TestCtrlDQuitsOnlyOnAnEmptyQuery(t *testing.T) {
 	h.waitForExit()
 }
 
+func TestDollarListsTheRecipesByName(t *testing.T) {
+	h := start(t, newFakeApp(), withRecipes(t, `
+[login]
+description = "Log in as the test user"
+steps = [{ action = "app.greet", args = { name = "Bob" } }]
+
+[delete]
+steps = [{ action = "account.delete" }]
+`))
+
+	h.typing("$")
+
+	h.waitFor("2/2", "▸ $delete", "  $login    Log in as the test user")
+	h.waitForNo("app.greet")
+	h.typing("lg")
+	h.waitFor("1/2", "▸ $login")
+	h.press("tab")
+	h.waitFor("> $lg", "▸ $login")
+}
+
+func TestDollarWithoutRecipesSaysWhereToCreateThem(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.resize(300, 30)
+
+	h.typing("$")
+
+	h.waitFor("0/0", "No recipes. Create "+recipe.Path("io.mehow.quack.sample"))
+}
+
+func TestBrokenRecipeFileSaysWhyAndLeavesTheActions(t *testing.T) {
+	h := start(t, newFakeApp(), withRecipes(t, "[login]\nsteps = []\n"))
+	h.resize(300, 30)
+
+	h.waitForLog("switched to io.mehow.quack.sample", recipe.Path("io.mehow.quack.sample")+": recipe 'login' has no steps")
+	h.waitFor("6/6", "▸ app.greet")
+	h.typing("$")
+	h.waitFor("0/0", "No recipes. Create ")
+}
+
+func TestEnterRunsTheStepsOfARecipeEachUnderItsCommand(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app, withRecipes(t, `
+[setup]
+steps = [
+  { open-app = true },
+  { wait = "10ms" },
+  { action = "account.create", args = { username = "alice" } },
+  { action = "app.greet", args = { times = 2, name = "Bob" } },
+]
+`))
+
+	h.typing("$setup")
+	h.press("enter")
+
+	h.waitForLog("\n› $setup\n› /open-app\nstarting io.mehow.quack.sample…\ndone · ",
+		"\n› wait 10ms\ndone · ",
+		"\n› account.create username=alice\n  Started\n  Creating account\nCreated · ",
+		"\n› app.greet name=Bob times=2\nHello, Bob! · ")
+	h.waitFor("> find an action", "enter run")
+	want := []wire.Call{
+		{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
+		{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bob"}, "times": {"2"}}},
+	}
+	if got := app.received(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestRecipeStopsAtTheFirstStepThatFails(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app, withRecipes(t, `
+[clean]
+steps = [{ action = "account.delete" }, { action = "app.count" }]
+`))
+
+	h.typing("$clean")
+	h.press("enter")
+
+	h.waitForLog("\n› $clean\n› account.delete\n[rejected] there is no account · ")
+	h.waitFor("enter run")
+	if strings.Contains(h.logText(), "app.count") {
+		t.Errorf("the log runs the step after the failed one:\n%s", h.logText())
+	}
+	if got, want := app.received(), []wire.Call{{Action: "account.delete"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestRecipeThatTheAppWouldRefuseRunsNothing(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app, withRecipes(t, `
+[greet]
+steps = [{ action = "account.delete" }, { action = "app.greet", args = { times = "twice" } }]
+`))
+
+	h.typing("$greet")
+	h.press("enter")
+
+	h.waitForLog("[invalid_args] recipe 'greet' step 2: missing argument 'name'")
+	h.waitFor("> $greet", "▸ $greet")
+	if got := app.received(); got != nil {
+		t.Errorf("calls: got %v, want none", got)
+	}
+}
+
+func TestFooterCountsTheStepsAndCtrlCSkipsTheRest(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app, withRecipes(t, `
+[watch]
+steps = [{ wait = "1ms" }, { action = "account.watch" }, { action = "app.count" }]
+`))
+
+	h.typing("$watch")
+	h.press("enter")
+	h.waitForLog("› account.watch\n  Signed out")
+	h.waitFor("$watch · step 2/3 account.watch · ctrl+c stop action")
+	h.press("ctrl+c")
+
+	h.waitForLog("\n› $watch\n› wait 1ms\ndone · ", "\n› account.watch\n  Signed out\ncanceled · ")
+	h.waitFor("enter run")
+	if strings.Contains(h.logText(), "app.count") {
+		t.Errorf("the log runs the step after the canceled one:\n%s", h.logText())
+	}
+	if got, want := app.received(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestRecipesDoNotRunWhileARunRuns(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app, withRecipes(t, `
+[clean]
+steps = [{ action = "account.delete" }]
+`))
+	h.typing("account.watch")
+	h.press("enter")
+	h.waitForLog("› account.watch\n  Signed out")
+
+	h.typing("$clean")
+	h.press("enter")
+
+	h.waitFor("> $clean", "stop the running action first (ctrl+c)")
+	if got, want := app.received(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestReloadReadsTheRecipesAgain(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.typing("$")
+	h.waitFor("0/0", "No recipes")
+
+	writeRecipes(t, "[clean]\nsteps = [{ action = \"account.delete\" }]\n")
+	h.press("ctrl+r")
+
+	h.waitForLog("reloaded 6 actions and 1 recipes")
+	h.waitFor("1/1", "▸ $clean")
+	writeRecipes(t, "[clean]\n")
+	h.press("ctrl+r")
+	h.waitForLog(": recipe 'clean' has no steps\nreloaded 6 actions")
+	h.waitFor("0/0", "No recipes")
+}
+
 func TestReloadKeepsTheSelectedAction(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
@@ -814,11 +980,11 @@ func TestReloadKeepsTheSelectedAction(t *testing.T) {
 	app.setActions(append([]wire.Action{{ID: "aaa.new", Description: "A new action"}}, app.actions()...))
 	h.press("ctrl+r")
 
-	h.waitForLog("reloaded 7 actions")
+	h.waitForLog("reloaded 7 actions and 0 recipes")
 	h.waitFor("7/7", "aaa.new", "▸ account.create")
 
 	app.setActions(append([]wire.Action{{ID: "aab.newer", Description: "A newer action"}}, app.actions()...))
-	h.typing("/reload-actions")
+	h.typing("/reload")
 	h.press("enter")
 	h.waitForLog("reloaded 8 actions")
 	h.waitFor("8/8", "aab.newer")
@@ -910,8 +1076,10 @@ func start(t *testing.T, app *fakeApp, options ...func(*model)) *harness {
 }
 
 // startPicking runs the TUI on the devices of source, picking among those that want leaves and starting the first app
-// in mode, in a window 100 columns wide and 30 rows high, after options change its model.
+// in mode, in a window 100 columns wide and 30 rows high, after options change its model. The apps read their recipes
+// from a config dir of the test's own, which has none.
 func startPicking(t *testing.T, source *fakeSource, want client.Target, mode client.StartMode, options ...func(*model)) *harness {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	activity := newActivity(ctx)
 	h := &harness{t: t, exited: make(chan struct{}), height: 30, seen: map[int]bool{}}
@@ -941,6 +1109,24 @@ func startPicking(t *testing.T, source *fakeSource, want client.Target, mode cli
 		<-h.exited
 	})
 	return h
+}
+
+// withRecipes gives the sample app a recipe file that holds file.
+func withRecipes(t *testing.T, file string) func(*model) {
+	return func(*model) { writeRecipes(t, file) }
+}
+
+// writeRecipes writes file as the recipe file of the sample app, and returns its path.
+func writeRecipes(t *testing.T, file string) string {
+	t.Helper()
+	path := recipe.Path("io.mehow.quack.sample")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(file), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // withPollTime has an open picker ask the devices for their apps every d.

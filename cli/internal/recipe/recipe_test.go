@@ -55,7 +55,7 @@ steps = [{ action = "account.delete" }]
 	recipes, err := Load(pkg)
 
 	want := []Recipe{
-		{Name: "delete", Steps: []Step{Call{Action: "account.delete", Args: map[string]wire.RawArg{}}}},
+		{Name: "delete", Steps: []Step{Call{Action: "account.delete"}}},
 		{Name: "login", Description: "Log in as the test user", Steps: []Step{
 			OpenApp{},
 			Wait{2 * time.Second},

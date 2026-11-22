@@ -10,25 +10,32 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 
+	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
 // prompt is the picker: the input, and under it the list of the actions whose id the text matches, best first, one of
-// them selected. Empty text lists every action, and text that starts with '/' matches the TUI's commands instead.
+// them selected. Empty text lists every action, text that starts with '$' matches the app's recipes instead, and text
+// that starts with '/' the TUI's commands.
 type prompt struct {
 	input   textinput.Model
 	actions []wire.Action
+	// recipes are the app's recipes, sorted by name, and recipePath the file they come from.
+	recipes    []recipe.Recipe
+	recipePath string
 	// selected indexes choices().
 	selected int
 	width    int
 }
 
-// choice is an action or a command that the text matches, with the byte offsets of the matched characters of its id.
+// choice is an action, a recipe or a command that the text matches, with the byte offsets of the matched characters of
+// its id.
 type choice struct {
 	id          string
 	description string
 	action      wire.Action
-	// command is the chosen command, or nil for an action.
+	// recipe is the chosen recipe, and command the chosen command. Both are nil for an action.
+	recipe  *recipe.Recipe
 	command *command
 	matched []int
 }
@@ -36,7 +43,7 @@ type choice struct {
 func newPrompt(actions []wire.Action) prompt {
 	input := textinput.New()
 	input.Prompt = "> "
-	input.Placeholder = "find an action, or / for commands"
+	input.Placeholder = "find an action, $ for recipes, / for commands"
 	styles := input.Styles()
 	styles.Focused.Prompt = promptStyle
 	styles.Blurred.Prompt = promptStyle
@@ -45,20 +52,26 @@ func newPrompt(actions []wire.Action) prompt {
 }
 
 // choices are what the text matches, fuzzily and ignoring case, best first, and how many there are to match. Empty
-// text matches every action in the app's order, and a lone '/' every command in the table's order.
+// text matches every action in the app's order, a lone '$' every recipe by name, and a lone '/' every command in the
+// table's order.
 func (p *prompt) choices() ([]choice, int) {
 	text := p.input.Value()
 	var all []choice
-	if strings.HasPrefix(text, "/") {
+	switch {
+	case strings.HasPrefix(text, "$"):
+		for _, r := range p.recipes {
+			all = append(all, choice{id: "$" + r.Name, description: r.Description, recipe: &r})
+		}
+	case strings.HasPrefix(text, "/"):
 		for _, c := range commands() {
 			all = append(all, choice{id: c.name, description: c.description, command: &c})
 		}
-	} else {
+	default:
 		for _, a := range p.actions {
 			all = append(all, choice{id: a.ID, description: a.Description, action: a})
 		}
 	}
-	if text == "" || text == "/" {
+	if text == "" || text == "$" || text == "/" {
 		return all, len(all)
 	}
 	ids := make([]string, len(all))
@@ -122,8 +135,19 @@ func (p *prompt) clear() bool {
 
 // setActions replaces the actions, keeping the selected action selected while the text still matches it.
 func (p *prompt) setActions(actions []wire.Action) {
+	p.keepSelection(func() { p.actions = actions })
+}
+
+// setRecipes replaces the recipes and the file they come from, keeping the selected recipe selected while the text
+// still matches it.
+func (p *prompt) setRecipes(recipes []recipe.Recipe, path string) {
+	p.keepSelection(func() { p.recipes, p.recipePath = recipes, path })
+}
+
+// keepSelection makes change, and selects again what was selected while the text still matches it.
+func (p *prompt) keepSelection(change func()) {
 	selected, ok := p.selection()
-	p.actions = actions
+	change()
 	p.selected = 0
 	p.resize(p.width)
 	if !ok || selected.command != nil {
@@ -144,7 +168,7 @@ func (p *prompt) blur() { p.input.Blur() }
 // resize leaves room on the input's line for the counter at its widest.
 func (p *prompt) resize(width int) {
 	p.width = width
-	widest := len(strconv.Itoa(max(len(p.actions), len(commands()))))
+	widest := len(strconv.Itoa(max(len(p.actions), len(p.recipes), len(commands()))))
 	p.input.SetWidth(max(1, width-ansi.StringWidth(p.input.Prompt)-2*widest-3))
 }
 
@@ -157,11 +181,16 @@ func (p *prompt) view() string {
 }
 
 // list is rows lines of what the text matches, best first, over blank ones, so that the list keeps its height while
-// the user types and the best match stays next to the input. The choices scroll to keep the selection in sight.
+// the user types and the best match stays next to the input. The choices scroll to keep the selection in sight. Without
+// any recipes, '$' says where to write them.
 func (p *prompt) list(rows int) []string {
-	choices, _ := p.choices()
+	choices, total := p.choices()
 	if len(choices) == 0 {
-		return append([]string{statusStyle.Render("  no match")}, make([]string, rows-1)...)
+		empty := "  no match"
+		if total == 0 && strings.HasPrefix(p.input.Value(), "$") {
+			empty = "  No recipes. Create " + p.recipePath
+		}
+		return append([]string{statusStyle.Render(empty)}, make([]string, rows-1)...)
 	}
 	lines := p.rows(choices, min(len(choices), rows))
 	return append(lines, make([]string, rows-len(lines))...)

@@ -14,8 +14,8 @@ import (
 	"quack/internal/wire"
 )
 
-// runs is the action running in the app, one at a time. The run writes its lines into the log as they come, and
-// shows in the footer until it ends.
+// runs is the action or the recipe running in the app, one at a time. The run writes its lines into the log as they
+// come, and shows in the footer until it ends.
 type runs struct {
 	// active is the run, or nil while none runs. A run that is stopping stays active until it ends.
 	active  *run
@@ -24,15 +24,28 @@ type runs struct {
 	now func() time.Time
 }
 
+// run is a run of steps, one after another until one does not succeed: the one call of an action, or the steps of a
+// recipe.
 type run struct {
-	id       string
-	command  string
+	// id names the run in the footer: the action's id, or the recipe's name after '$'.
+	id string
+	// recipe is whether the steps are a recipe's, which the log heads with the recipe and the footer counts.
+	recipe bool
+	steps  []runStep
+	// step indexes the step that runs, and started is when it started.
+	step     int
 	started  time.Time
 	stopping bool
 	cancel   context.CancelFunc
 }
 
-// runEnd is how a run ended: succeeded, failed or canceled.
+// runStep is a step of a run, and command the step as the user types it, which heads its lines in the log.
+type runStep struct {
+	step    recipe.Step
+	command string
+}
+
+// runEnd is how a step ended: succeeded, failed or canceled.
 type runEnd interface{ runEnd() }
 
 type (
@@ -41,12 +54,12 @@ type (
 	canceled  struct{}
 )
 
-// runNotification is a notification of a run, and runEnded its end. Only Update touches the run.
+// runNotification is a notification of a step, and stepEnded its end. Only Update touches the run.
 type (
 	runNotification struct {
 		message string
 	}
-	runEnded struct {
+	stepEnded struct {
 		run *run
 		end runEnd
 	}
@@ -68,41 +81,51 @@ func newRuns() runs {
 	return runs{spinner: spinner.New(spinner.WithSpinner(spinner.Dot)), now: time.Now}
 }
 
-// start runs action with args in a goroutine of its own, which sends its notifications and its end to activity. It
-// returns the run's first lines: a blank one, and the command that runs it outside the TUI.
-func (r *runs) start(app App, activity activity, action wire.Action, args map[string]wire.RawArg) (string, tea.Cmd) {
+// start runs the steps of started in a goroutine of its own, which sends the notifications and the end of each step to
+// activity, and stops after a step that does not succeed. It returns the run's first lines: a blank one, the recipe's
+// name for a recipe, and the first step as the user types it.
+func (r *runs) start(app App, activity activity, started *run) (string, tea.Cmd) {
 	ctx, cancel := context.WithCancel(activity.ctx)
-	started := &run{id: action.ID, command: recipe.CommandLine(action, args), started: r.now(), cancel: cancel}
+	started.started, started.cancel = r.now(), cancel
 	r.active = started
-	call := wire.Call{Action: action.ID, Args: args}
+	steps := started.steps
 	work := func() tea.Msg {
 		defer cancel()
-		result, err := app.Call(ctx, call, func(message string) { activity.send(runNotification{message}) })
-		var end runEnd
-		switch {
-		case err == nil:
-			end = succeeded{result}
-		case ctx.Err() != nil:
-			end = canceled{}
-		default:
-			end = failed{err}
+		for _, s := range steps {
+			result, err := recipe.Do(ctx, app, s.step, func(message string) { activity.send(runNotification{message}) })
+			var end runEnd
+			switch {
+			case err == nil:
+				end = succeeded{result}
+			case ctx.Err() != nil:
+				end = canceled{}
+			default:
+				end = failed{err}
+			}
+			activity.send(stepEnded{started, end})
+			if _, ok := end.(succeeded); !ok {
+				break
+			}
 		}
-		activity.send(runEnded{started, end})
 		return nil
 	}
-	header := "\n" + commandStyle.Render("› "+started.command)
+	header := "\n"
+	if started.recipe {
+		header += commandStyle.Render("› "+started.id) + "\n"
+	}
+	header += commandStyle.Render("› " + steps[0].command)
 	return header, tea.Batch(work, r.spinner.Tick)
 }
 
-// notification is the lines of a notification.
+// notification is the lines of a notification, indented under its step.
 func (r *runs) notification(e runNotification) string {
 	return prefixed("  ", "  ", e.message)
 }
 
-// end is the lines of the run's end, with the time the run took after its message and above its data. The run no
-// longer shows.
-func (r *runs) end(e runEnded) string {
-	r.active = nil
+// end is the lines of a step's end, with the time the step took after its message and above its data. A step that
+// succeeded and has another after it goes on to that one, whose command follows. Otherwise the run ends and no longer
+// shows.
+func (r *runs) end(e stepEnded) string {
 	var text, data string
 	switch end := e.end.(type) {
 	case succeeded:
@@ -118,7 +141,14 @@ func (r *runs) end(e runEnded) string {
 	case canceled:
 		text = statusStyle.Render("canceled")
 	}
-	return text + statusStyle.Render(" · "+duration(r.now().Sub(e.run.started))) + data
+	lines := text + statusStyle.Render(" · "+duration(r.now().Sub(e.run.started))) + data
+	if _, ok := e.end.(succeeded); !ok || e.run.step == len(e.run.steps)-1 {
+		r.active = nil
+		return lines
+	}
+	e.run.step++
+	e.run.started = r.now()
+	return lines + "\n" + commandStyle.Render("› "+e.run.steps[e.run.step].command)
 }
 
 // stop cancels the run unless it is stopping already, and says whether it did.
@@ -147,11 +177,15 @@ func (r *runs) tick(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// footer names the run, for the footer while it is active.
+// footer names the run, for the footer while it is active, with the step that runs for a recipe.
 func (r *runs) footer() string {
 	// The spinner's frames end with a space of their own.
-	line := strings.TrimSpace(r.spinner.View()) + " " + r.active.id
-	if r.active.stopping {
+	a := r.active
+	line := strings.TrimSpace(r.spinner.View()) + " " + a.id
+	if a.recipe {
+		line += fmt.Sprintf(" · step %d/%d %s", a.step+1, len(a.steps), a.steps[a.step].command)
+	}
+	if a.stopping {
 		line += " stopping…"
 	}
 	return line + " · ctrl+c stop action"

@@ -136,15 +136,16 @@ func Check(r Recipe, actions []wire.Action) error {
 }
 
 // Do runs step. A Call returns the action's message and data, and the other steps an empty message. Canceling ctx
-// cancels the step, and a step that starts after ctx ended does not run.
+// cancels the step, and a step that starts after ctx ended does not get far: the app cancels a call, and the app does
+// not open.
 func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc) (wire.MessageResult, error) {
-	if ctx.Err() != nil {
-		return wire.MessageResult{}, &client.CallError{Message: "canceled"}
-	}
 	switch step := step.(type) {
 	case Call:
 		return app.Call(ctx, wire.Call(step), notify)
 	case OpenApp:
+		if ctx.Err() != nil {
+			return wire.MessageResult{}, &client.CallError{Message: "canceled"}
+		}
 		return wire.MessageResult{}, app.Start(client.Open)
 	case Wait:
 		timer := time.NewTimer(step.Duration)
@@ -250,11 +251,14 @@ func (s rawStep) parse() (Step, error) {
 		}
 		return Wait{d}, nil
 	}
-	args := map[string]wire.RawArg{}
+	var args map[string]wire.RawArg
 	for key, value := range s.Args {
 		values, ok := rawValues(value)
 		if !ok {
 			return nil, fmt.Errorf("arg '%s' must be a string, a number, a boolean, or an array of those", key)
+		}
+		if args == nil {
+			args = map[string]wire.RawArg{}
 		}
 		args[key] = values
 	}

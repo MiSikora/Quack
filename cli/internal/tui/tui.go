@@ -21,6 +21,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
@@ -113,11 +114,19 @@ type command struct {
 	run         func(*model) tea.Cmd
 }
 
-// described is the answer to a reload.
+// described is the answer to a reload: the app's actions, and the recipes its file has now.
 type described struct {
 	hello   wire.Hello
 	actions []wire.Action
 	err     error
+	recipes recipes
+}
+
+// recipes are the recipes of an app, as its file has them, or the error that reading it ended with.
+type recipes struct {
+	path string
+	list []recipe.Recipe
+	err  error
 }
 
 // opened is the end of showing the app's main screen.
@@ -147,13 +156,14 @@ type (
 	polled struct{}
 )
 
-// connected is the end of starting and describing a picked app.
+// connected is the end of starting and describing a picked app, and of reading its recipes.
 type connected struct {
 	target  client.Target
 	app     App
 	hello   wire.Hello
 	actions []wire.Action
 	err     error
+	recipes recipes
 }
 
 // clientSource finds devices through adb, and the apps on them through the client.
@@ -230,7 +240,7 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 	case runNotification:
 		m.log.add(m.runs.notification(msg))
 		return m.activity.listen()
-	case runEnded:
+	case stepEnded:
 		m.log.add(m.runs.end(msg))
 		return m.activity.listen()
 	case statusLine:
@@ -305,7 +315,7 @@ func (m *model) press(msg tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		return m.choose()
 	case "tab":
-		if c, ok := m.prompt.selection(); ok && c.command == nil && len(c.action.Params) > 0 {
+		if c, ok := m.prompt.selection(); ok && c.command == nil && c.recipe == nil && len(c.action.Params) > 0 {
 			return m.openBox(c.action)
 		}
 		return nil
@@ -401,8 +411,9 @@ func (m *model) clearInput() bool {
 	return m.prompt.clear()
 }
 
-// choose runs the selected command or action. An action with required params opens its box instead, even while
-// another runs. Any other action only says to stop the one that runs.
+// choose runs the selected command, recipe or action. An action with required params opens its box instead, even while
+// another runs. Any other action or recipe only says to stop the one that runs. A recipe whose calls the app would
+// refuse says why, and runs none of its steps.
 func (m *model) choose() tea.Cmd {
 	c, ok := m.prompt.selection()
 	switch {
@@ -411,6 +422,15 @@ func (m *model) choose() tea.Cmd {
 	case c.command != nil:
 		m.prompt.clear()
 		return c.command.run(m)
+	case c.recipe != nil && m.runs.active != nil:
+		return m.refused.show(refusedDuringRun)
+	case c.recipe != nil:
+		if err := recipe.Check(*c.recipe, m.prompt.actions); err != nil {
+			m.log.add(problemStyle.Render(err.Error()))
+			return nil
+		}
+		m.prompt.clear()
+		return m.startRecipe(*c.recipe)
 	case hasRequired(c.action):
 		return m.openBox(c.action)
 	case m.runs.active != nil:
@@ -422,7 +442,20 @@ func (m *model) choose() tea.Cmd {
 }
 
 func (m *model) start(action wire.Action, args map[string]wire.RawArg) tea.Cmd {
-	header, work := m.runs.start(m.app, m.activity, action, args)
+	step := runStep{recipe.Call{Action: action.ID, Args: args}, recipe.CommandLine(action, args)}
+	return m.startRun(&run{id: action.ID, steps: []runStep{step}})
+}
+
+func (m *model) startRecipe(r recipe.Recipe) tea.Cmd {
+	steps := make([]runStep, len(r.Steps))
+	for i, s := range r.Steps {
+		steps[i] = runStep{s, recipe.Line(s, m.prompt.actions)}
+	}
+	return m.startRun(&run{id: "$" + r.Name, recipe: true, steps: steps})
+}
+
+func (m *model) startRun(r *run) tea.Cmd {
+	header, work := m.runs.start(m.app, m.activity, r)
 	m.log.add(header)
 	return work
 }
@@ -433,12 +466,13 @@ func (m *model) openBox(action wire.Action) tea.Cmd {
 	return m.box.init()
 }
 
-// reload asks the app for its actions. The answer goes through activity, after the status lines on the way to it.
+// reload asks the app for its actions and reads its recipes again. The answer goes through activity, after the status
+// lines on the way to it.
 func (m *model) reload() tea.Cmd {
-	app, activity := m.app, m.activity
+	app, activity, pkg := m.app, m.activity, m.target.Package
 	return func() tea.Msg {
 		hello, actions, err := app.Describe(activity.ctx)
-		activity.send(described{hello, actions, err})
+		activity.send(described{hello, actions, err, loadRecipes(pkg)})
 		return nil
 	}
 }
@@ -452,15 +486,29 @@ func (m *model) open() tea.Cmd {
 	}
 }
 
-// describe takes the actions of a reload, or keeps the ones there are when it failed, and says which.
+// describe takes the recipes of a reload and its actions, or keeps the actions there are when describing failed, and
+// says which.
 func (m *model) describe(msg described) {
+	m.setRecipes(msg.recipes)
 	if msg.err != nil {
 		m.log.add(problemStyle.Render("reload: " + msg.err.Error()))
 		return
 	}
 	m.hello = msg.hello
 	m.prompt.setActions(msg.actions)
-	m.log.add(statusStyle.Render(fmt.Sprintf("reloaded %d actions", len(msg.actions))))
+	line := fmt.Sprintf("reloaded %d actions", len(msg.actions))
+	if msg.recipes.err == nil {
+		line += fmt.Sprintf(" and %d recipes", len(msg.recipes.list))
+	}
+	m.log.add(statusStyle.Render(line))
+}
+
+// setRecipes takes the recipes of the app's file. A file that does not read leaves no recipes, and says why.
+func (m *model) setRecipes(r recipes) {
+	m.prompt.setRecipes(r.list, r.path)
+	if r.err != nil {
+		m.log.add(problemStyle.Render(r.err.Error()))
+	}
 }
 
 func (m *model) openedLine(msg opened) string {
@@ -552,6 +600,7 @@ func (m *model) connect(target client.Target) tea.Cmd {
 		msg := connected{target: target, app: app, err: err}
 		if err == nil {
 			msg.hello, msg.actions, msg.err = app.Describe(activity.ctx)
+			msg.recipes = loadRecipes(target.Package)
 		}
 		activity.send(msg)
 		return nil
@@ -579,6 +628,7 @@ func (m *model) connected(msg connected) tea.Cmd {
 		where = m.devices[i].Model + " · " + where
 	}
 	m.log.add(statusStyle.Render("switched to " + msg.target.Package + " on " + where))
+	m.setRecipes(msg.recipes)
 	return m.prompt.focus()
 }
 
@@ -796,7 +846,7 @@ func (n *notice) show(text string) tea.Cmd {
 // commands are the TUI's own commands. ctrl+c and ctrl+d do more than their command, so the picker handles them itself.
 func commands() []command {
 	return []command{
-		{"/reload-actions", "ctrl+r", "Ask the app for its actions again", (*model).reload},
+		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", (*model).reload},
 		{"/open-app", "ctrl+o", "Show the app's main screen", (*model).open},
 		{"/switch-device", "", "Pick another device", (*model).switchDevice},
 		{"/switch-app", "", "Pick another app on this device", (*model).switchApp},
@@ -819,6 +869,12 @@ func (s clientSource) Connect(target client.Target, mode client.StartMode, statu
 		return nil, err
 	}
 	return app, nil
+}
+
+// loadRecipes reads the recipes of pkg.
+func loadRecipes(pkg string) recipes {
+	list, err := recipe.Load(pkg)
+	return recipes{recipe.Path(pkg), list, err}
 }
 
 func hasRequired(action wire.Action) bool {
@@ -848,7 +904,7 @@ const (
 	// pollTime is how often an open picker asks the devices for their apps, so that an app installed while it waits
 	// shows by itself.
 	pollTime = 5 * time.Second
-	// refusedDuringRun is why an action, /switch-device and /switch-app do nothing while an action runs.
+	// refusedDuringRun is why an action, a recipe, /switch-device and /switch-app do nothing while an action runs.
 	refusedDuringRun = "stop the running action first (ctrl+c)"
 	// wheelRows is how far a turn of the mouse wheel scrolls the log.
 	wheelRows = 3
