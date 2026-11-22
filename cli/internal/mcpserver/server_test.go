@@ -132,6 +132,71 @@ func TestRunActionReportsTheAppsErrorAfterTheNotifications(t *testing.T) {
 	assertError(t, result, "Deleting\n[rejected] there is no account")
 }
 
+func TestRunActionAsksTheUserForMissingRequiredParams(t *testing.T) {
+	source := newFakeSource()
+	var asked *mcp.ElicitParams
+	session := connectWith(t, source, &mcp.ClientOptions{ElicitationHandler: func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		asked = req.Params
+		return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"username": "carol"}}, nil
+	}})
+
+	call(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"age": 42}})
+
+	if want := "account.create needs username."; asked == nil || asked.Message != want {
+		t.Fatalf("asked %+v, want the message %q", asked, want)
+	}
+	schema, _ := json.Marshal(asked.RequestedSchema)
+	wantSchema := `{"type":"object","required":["username"],"properties":{"username":{"type":"string","title":"username","description":"Who signs in"}}}`
+	assertJSON(t, string(schema), wantSchema)
+	want := wire.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"carol"}, "age": {"42"}}}
+	if got := source.app.calls; !reflect.DeepEqual(got, []wire.Call{want}) {
+		t.Errorf("calls are %+v, want %+v", got, want)
+	}
+}
+
+func TestRunActionAsksClientsOnOlderProtocolsForMissingRequiredParams(t *testing.T) {
+	source := newFakeSource()
+	options := &mcp.ClientOptions{ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"username": "carol"}}, nil
+	}}
+	session := connectAt(t, source, options, "2025-06-18")
+
+	call(t, session, "run_action", map[string]any{"action": "account.create"})
+
+	want := wire.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"carol"}}}
+	if got := source.app.calls; !reflect.DeepEqual(got, []wire.Call{want}) {
+		t.Errorf("calls are %+v, want %+v", got, want)
+	}
+}
+
+func TestRunActionDoesNotAskForParamsItWasGiven(t *testing.T) {
+	asked := false
+	session := connectWith(t, newFakeSource(), &mcp.ClientOptions{ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		asked = true
+		return &mcp.ElicitResult{Action: "cancel"}, nil
+	}})
+
+	call(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "alice"}})
+
+	if asked {
+		t.Error("the user was asked, want no form")
+	}
+}
+
+func TestRunActionFailsWhenTheUserDeclinesToGiveParams(t *testing.T) {
+	source := newFakeSource()
+	session := connectWith(t, source, &mcp.ClientOptions{ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		return &mcp.ElicitResult{Action: "decline"}, nil
+	}})
+
+	result := callTool(t, session, "run_action", map[string]any{"action": "account.create"})
+
+	assertError(t, result, "the user declined to give username for account.create")
+	if len(source.app.calls) > 0 {
+		t.Errorf("the app got calls %+v, want none", source.app.calls)
+	}
+}
+
 func TestToolsReportWhyNoAppWasFound(t *testing.T) {
 	source := newFakeSource()
 	source.findErr = &client.AppError{Message: "several quack packages on emulator-5554, pick one:\n  --device emulator-5554 --app a.b\n  --device emulator-5554 --app c.d"}
@@ -310,6 +375,40 @@ export const fresh = quack.recipe({ params: { user: { type: "string", required: 
 	}
 }
 
+func TestRunRecipeAsksTheUserForMissingRequiredParams(t *testing.T) {
+	writeRecipes(t, `
+import quack from "quack"
+export const fresh = quack.recipe({
+  params: {
+    count: { type: "int", required: true },
+    rate: { type: "double", required: true },
+    admin: { type: "boolean", required: true },
+    mode: { type: "enum", choices: ["fast", "slow"], required: true },
+    tags: { type: "string_list", required: true },
+    note: { type: "string" },
+  },
+  run({ count, rate, admin, mode, tags }) { console.log(JSON.stringify([count, rate, admin, mode, tags])) },
+})`)
+	var asked *mcp.ElicitParams
+	session := connectWith(t, newFakeSource(), &mcp.ClientOptions{ElicitationHandler: func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		asked = req.Params
+		return &mcp.ElicitResult{Action: "accept", Content: map[string]any{
+			"rate": 0.5, "admin": true, "mode": "slow", "tags": "a, b\\,c",
+		}}, nil
+	}})
+
+	result := call(t, session, "run_recipe", map[string]any{"recipe": "fresh", "args": map[string]any{"count": 3}})
+
+	schema, _ := json.Marshal(asked.RequestedSchema)
+	wantSchema := `{"type":"object","required":["rate","admin","mode","tags"],"properties":{` +
+		`"rate":{"type":"number","title":"rate"},` +
+		`"admin":{"type":"boolean","title":"admin"},` +
+		`"mode":{"type":"string","title":"mode","enum":["fast","slow"]},` +
+		`"tags":{"type":"string","title":"tags","description":"Separate the values with commas."}}}`
+	assertJSON(t, string(schema), wantSchema)
+	assertStructured(t, result, `{"steps":[],"log":["[3,0.5,true,\"slow\",[\"a\",\"b,c\"]]"]}`)
+}
+
 func TestRunRecipeNamesTheFileWithoutTheRecipe(t *testing.T) {
 	path := writeRecipes(t, `export {}`)
 	session := connect(t, newFakeSource())
@@ -375,12 +474,18 @@ func connect(t *testing.T, source *fakeSource) *mcp.ClientSession {
 
 func connectWith(t *testing.T, source *fakeSource, options *mcp.ClientOptions) *mcp.ClientSession {
 	t.Helper()
+	return connectAt(t, source, options, "")
+}
+
+// connectAt connects a client that asks for the protocol version, or the latest for "".
+func connectAt(t *testing.T, source *fakeSource, options *mcp.ClientOptions, version string) *mcp.ClientSession {
+	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := New(source, "test").Connect(t.Context(), serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, options).Connect(t.Context(), clientTransport, nil)
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, options).Connect(t.Context(), clientTransport, &mcp.ClientSessionOptions{ProtocolVersion: version})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,6 +526,16 @@ func assertStructured(t *testing.T, result *mcp.CallToolResult, want string) {
 	json.Unmarshal([]byte(want), &wantValue)
 	if !reflect.DeepEqual(gotValue, wantValue) {
 		t.Errorf("the structured content is\n%s\nwant\n%s", got, want)
+	}
+}
+
+func assertJSON(t *testing.T, got, want string) {
+	t.Helper()
+	var gotValue, wantValue any
+	json.Unmarshal([]byte(got), &gotValue)
+	json.Unmarshal([]byte(want), &wantValue)
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Errorf("the JSON is\n%s\nwant\n%s", got, want)
 	}
 }
 

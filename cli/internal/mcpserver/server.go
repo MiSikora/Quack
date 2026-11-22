@@ -12,6 +12,7 @@ import (
 	"io"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,7 +69,7 @@ func New(source Source, version string) *mcp.Server {
 		Name: "run_action",
 		Description: "Run an action of a quack-enabled app and return its notifications, its message and its data. " +
 			"Get the action ids and their params from list_actions. The args reach the app as given: ${NAME} stays as " +
-			"it is. " + targetHelp,
+			"it is. " + askHelp + targetHelp,
 		InputSchema:  runActionSchema,
 		OutputSchema: schemaFor[runActionOutput](),
 	}, s.runAction)
@@ -83,7 +84,8 @@ func New(source Source, version string) *mcp.Server {
 		Description: "Run a recipe of a quack-enabled app with args for its params, and return what each of its steps " +
 			"gave, a call of an action, /open-app, a wait, or a shell or run command: its notifications, and its message and " +
 			"its data or the error it failed with, and the lines the recipe logged. The message of a command is what it " +
-			"printed. A step that fails ends the recipe unless the recipe catches it. Get the recipe names and params from list_recipes. " + targetHelp,
+			"printed. A step that fails ends the recipe unless the recipe catches it. Get the recipe names and params from list_recipes. " +
+			askHelp + targetHelp,
 		InputSchema:  schemaFor[runRecipeInput](),
 		OutputSchema: schemaFor[runRecipeOutput](),
 	}, s.runRecipe)
@@ -263,6 +265,19 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 	if err != nil {
 		return nil, runActionOutput{}, err
 	}
+	if canElicit(req.Session) {
+		_, actions, err := app.Describe(ctx)
+		if err != nil {
+			return nil, runActionOutput{}, err
+		}
+		for _, a := range actions {
+			if a.ID == in.Action {
+				if form, err := askForParams(req, in.Action, a.Params, args); form != nil || err != nil {
+					return form, runActionOutput{}, err
+				}
+			}
+		}
+	}
 	notifications := []string{}
 	report := progress(ctx, req)
 	result, err := app.Call(ctx, wire.Call{Action: in.Action, Args: args}, func(message string) {
@@ -331,6 +346,15 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
+	if canElicit(req.Session) {
+		for _, r := range script.Recipes {
+			if r.Name == in.Recipe {
+				if form, err := askForParams(req, "recipe "+in.Recipe, r.Params, args); form != nil || err != nil {
+					return form, runRecipeOutput{}, err
+				}
+			}
+		}
+	}
 	report := progress(ctx, req)
 	out := runRecipeOutput{Steps: []stepOutput{}, Log: []string{}}
 	var printed []string
@@ -388,6 +412,94 @@ func stepError(err error) *errorOutput {
 		return &errorOutput{"no_reply", err.Error()}
 	}
 	return &errorOutput{"error", err.Error()}
+}
+
+// canElicit is whether the client of session can show the user a form, as the SDK's Elicit decides it.
+func canElicit(session *mcp.ServerSession) bool {
+	init := session.InitializeParams()
+	if init == nil || init.Capabilities == nil || init.Capabilities.Elicitation == nil {
+		return false
+	}
+	caps := init.Capabilities.Elicitation
+	return caps.Form != nil || caps.URL == nil
+}
+
+// paramsForm is the key of the form that asks the user for params, in the input requests of a result and in the input
+// responses of the call that retries it.
+const paramsForm = "params"
+
+// askForParams gets the user to give the required params that args leave out. A first call returns the form that asks
+// for them, which the handler returns instead of running, and the client shows it and retries the call with the values.
+// The retry adds them to args, or fails when the user declined or canceled the form, so that it does not run without
+// them. what names the action or recipe that needs them.
+func askForParams(req *mcp.CallToolRequest, what string, params []wire.Param, args map[string]wire.RawArg) (*mcp.CallToolResult, error) {
+	schema := &jsonschema.Schema{Type: "object", Properties: map[string]*jsonschema.Schema{}}
+	missing := map[string]wire.Param{}
+	for _, p := range params {
+		if _, required := p.Presence.(wire.Required); required && len(args[p.Name]) == 0 {
+			schema.Properties[p.Name] = fieldSchema(p)
+			schema.Required = append(schema.Required, p.Name)
+			missing[p.Name] = p
+		}
+	}
+	if len(missing) == 0 {
+		return nil, nil
+	}
+	names := strings.Join(schema.Required, ", ")
+	response, retried := req.Params.InputResponses[paramsForm].(*mcp.ElicitResult)
+	if !retried {
+		return &mcp.CallToolResult{InputRequests: mcp.InputRequestMap{paramsForm: &mcp.ElicitParams{
+			Message:         fmt.Sprintf("%s needs %s.", what, names),
+			RequestedSchema: schema,
+		}}}, nil
+	}
+	switch response.Action {
+	case "accept":
+	case "decline":
+		return nil, fmt.Errorf("the user declined to give %s for %s", names, what)
+	default:
+		return nil, fmt.Errorf("the user canceled giving %s for %s", names, what)
+	}
+	for name, value := range response.Content {
+		p, ok := missing[name]
+		if !ok {
+			continue
+		}
+		switch v := value.(type) {
+		case string:
+			if p.Type.IsList() {
+				args[name] = wire.SplitList(v)
+			} else {
+				args[name] = wire.RawArg{v}
+			}
+		case float64:
+			args[name] = wire.RawArg{strconv.FormatFloat(v, 'f', -1, 64)}
+		case bool:
+			args[name] = wire.RawArg{strconv.FormatBool(v)}
+		}
+	}
+	return nil, nil
+}
+
+// fieldSchema is the form field of p. A long takes an integer, which loses precision beyond 2^53 as the args of
+// run_action do, and a string_list takes its values separated by commas, since a form's arrays only pick from choices.
+func fieldSchema(p wire.Param) *jsonschema.Schema {
+	field := &jsonschema.Schema{Title: p.Name, Description: p.Description, Type: "string"}
+	switch p.Type {
+	case wire.ParamTypeInt, wire.ParamTypeLong:
+		field.Type = "integer"
+	case wire.ParamTypeDouble:
+		field.Type = "number"
+	case wire.ParamTypeBoolean:
+		field.Type = "boolean"
+	case wire.ParamTypeEnum:
+		for _, c := range p.Choices {
+			field.Enum = append(field.Enum, c)
+		}
+	case wire.ParamTypeStringList:
+		field.Description = strings.TrimSpace(p.Description + " Separate the values with commas.")
+	}
+	return field
 }
 
 func (s tools) find(device, pkg string) (client.Target, error) {
@@ -542,6 +654,9 @@ const instructions = "quack runs debug actions in Android apps on devices that a
 	"and their quack-enabled apps, list_actions an app's actions, and run_action runs one. list_recipes shows the " +
 	"recipes the user keeps for an app, and run_recipe runs one. Devices and apps change while you work, so call " +
 	"list_devices again when a call says that a device or app is missing or that several match."
+
+const askHelp = "When the client can show the user a form, the user is asked for the required params that args leave " +
+	"out, so leave out the ones that only the user knows. A user who declines or cancels fails the call. "
 
 const targetHelp = "Leave out device and app when only one quack-enabled app is reachable. When several are, the error " +
 	"lists them as --device and --app pairs: pass those values as device and app."

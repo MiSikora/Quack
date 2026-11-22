@@ -286,7 +286,7 @@ func (f *textField) value() wire.RawArg {
 	}
 	switch {
 	case f.list:
-		return split(text)
+		return wire.SplitList(text)
 	case text == "":
 		return nil
 	}
@@ -405,30 +405,4 @@ func describe(p wire.Param) string {
 		text = append(text, p.Description)
 	}
 	return strings.Join(text, " ")
-}
-
-// split splits the text of a string_list on commas into its values, with spaces around them trimmed and empty ones
-// dropped. \, is a comma inside a value.
-func split(text string) wire.RawArg {
-	var values wire.RawArg
-	var value strings.Builder
-	add := func() {
-		if v := strings.TrimSpace(value.String()); v != "" {
-			values = append(values, v)
-		}
-		value.Reset()
-	}
-	for i := 0; i < len(text); i++ {
-		switch {
-		case strings.HasPrefix(text[i:], `\,`):
-			value.WriteByte(',')
-			i++
-		case text[i] == ',':
-			add()
-		default:
-			value.WriteByte(text[i])
-		}
-	}
-	add()
-	return values
 }
