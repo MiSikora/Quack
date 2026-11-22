@@ -23,7 +23,7 @@ type paramBox struct {
 type boxField struct {
 	param wire.Param
 	field field
-	// missing is whether the user tried to run the action while this required param was empty. It turns the hint red
+	// missing is whether the user tried to run the action while this required param was empty. It turns the note red
 	// until the param is set.
 	missing bool
 }
@@ -186,11 +186,11 @@ func (b *paramBox) view(rows int) []string {
 		name := f.param.Name + strings.Repeat(" ", names-ansi.StringWidth(f.param.Name))
 		value := f.field.view()
 		value += strings.Repeat(" ", column-ansi.StringWidth(value))
-		hint := statusStyle.Render(describe(f.param))
+		note := statusStyle.Render(describe(f.param))
 		if f.missing {
-			hint = problemStyle.Render(describe(f.param))
+			note = problemStyle.Render(describe(f.param))
 		}
-		lines = append(lines, marker+name+"  "+value+"  "+hint)
+		lines = append(lines, marker+name+"  "+value+"  "+note)
 	}
 	for len(lines) < rows-1 {
 		lines = append(lines, "")

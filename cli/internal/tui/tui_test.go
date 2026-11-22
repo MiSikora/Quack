@@ -417,7 +417,7 @@ func TestEnterOnAnActionWithARequiredParamOpensTheBox(t *testing.T) {
 	}
 }
 
-func TestMissingRequiredParamBlocksTheRunAndTurnsItsHintRed(t *testing.T) {
+func TestMissingRequiredParamBlocksTheRunAndTurnsItsNoteRed(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
 	red := lipgloss.NewStyle().Foreground(lipgloss.Red).Render("Required. Who to greet")
@@ -430,12 +430,12 @@ func TestMissingRequiredParamBlocksTheRunAndTurnsItsHintRed(t *testing.T) {
 
 	h.waitFor("▸ name")
 	if !strings.Contains(h.raw(), red) {
-		t.Errorf("the hint of the missing param is not red:\n%q", h.raw())
+		t.Errorf("the note of the missing param is not red:\n%q", h.raw())
 	}
 	h.typing("x")
 	h.waitFor("› app.greet name=x")
 	if strings.Contains(h.raw(), red) {
-		t.Errorf("the hint stayed red after the param was set")
+		t.Errorf("the note stayed red after the param was set")
 	}
 	if got := app.received(); len(got) != 0 {
 		t.Errorf("calls: got %v, want none", got)

@@ -50,12 +50,12 @@ type seenDevice struct {
 	inspected bool
 }
 
-// pickRow is a device or a package the picker lists. A row that is not ok shows dimmed and cannot be picked, and hint
+// pickRow is a device or a package the picker lists. A row that is not ok shows dimmed and cannot be picked, and note
 // says why.
 type pickRow struct {
 	key     string
 	label   string
-	hint    string
+	note    string
 	ok      bool
 	device  adb.Device
 	pkg     string
@@ -132,19 +132,19 @@ func (p *picker) allRows(devices []seenDevice) []pickRow {
 		}
 		switch {
 		case d.State == "unauthorized":
-			row.hint = "unauthorized · accept the USB debugging prompt"
+			row.note = "unauthorized · accept the USB debugging prompt"
 		case d.State == "offline":
-			row.hint = "offline · wait for adb to see it again, or reconnect it"
+			row.note = "offline · wait for adb to see it again, or reconnect it"
 		case d.State != adb.Ready:
-			row.hint = d.State
+			row.note = d.State
 		case !d.inspected:
-			row.hint = "looking for packages…"
+			row.note = "looking for packages…"
 		case count == 0:
-			row.hint = "no quack package"
+			row.note = "no quack package"
 		case count == 1:
-			row.hint, row.ok = "1 package", true
+			row.note, row.ok = "1 package", true
 		default:
-			row.hint, row.ok = strconv.Itoa(count)+" packages", true
+			row.note, row.ok = strconv.Itoa(count)+" packages", true
 		}
 		rows = append(rows, row)
 	}
@@ -288,11 +288,11 @@ func (p *picker) list(devices []seenDevice, listed bool, height int) []string {
 		var line string
 		switch {
 		case !r.ok:
-			line = statusStyle.Render("  " + r.label + padding + r.hint)
+			line = statusStyle.Render("  " + r.label + padding + r.note)
 		case first+i == selected:
-			line = selectedStyle.Render("▸ ") + highlight(r.label, r.matched, selectedStyle) + padding + statusStyle.Render(r.hint)
+			line = selectedStyle.Render("▸ ") + highlight(r.label, r.matched, selectedStyle) + padding + statusStyle.Render(r.note)
 		default:
-			line = "  " + highlight(r.label, r.matched, lipgloss.NewStyle()) + padding + statusStyle.Render(r.hint)
+			line = "  " + highlight(r.label, r.matched, lipgloss.NewStyle()) + padding + statusStyle.Render(r.note)
 		}
 		lines = append(lines, ansi.Truncate(line, p.width, "…"))
 	}
