@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonElement
 
 internal class Endpoint(
   actions: List<QuackAction>,
@@ -46,6 +47,8 @@ internal class Endpoint(
       }
     return try {
       execute(action, args, send)
+    } catch (e: InvalidJson) {
+      Frame.Error(ErrorCode.Failed, e.message)
     } catch (e: CancellationException) {
       // Only a canceled request ends the coroutine. An action's own timeout is its failure.
       currentCoroutineContext().ensureActive()
@@ -83,22 +86,36 @@ internal class Endpoint(
     return ParsedArgs.Valid(QuackAction.Args(action, values))
   }
 
-  private suspend fun execute(action: QuackAction, args: QuackAction.Args, send: suspend (Frame) -> Unit): Frame =
-    when (val outcome = withContext(actionDispatcher) { action.execute(args) { message -> send(Frame.Notification(message)) } }) {
+  private suspend fun execute(action: QuackAction, args: QuackAction.Args, send: suspend (Frame) -> Unit): Frame {
+    val terminal =
+      object : QuackAction.Terminal {
+        override suspend fun send(message: String, json: String?) {
+          val data = json?.let { parseData(action, it, verb = "sent") ?: throw InvalidJson("the action sent json that does not parse") }
+          send(Frame.Notification(message, data))
+        }
+      }
+    return when (val outcome = withContext(actionDispatcher) { action.execute(args, terminal) }) {
       is QuackAction.Outcome.Ok -> result(action, outcome)
       is QuackAction.Outcome.Error -> Frame.Error(ErrorCode.Rejected, outcome.message)
     }
+  }
 
   private fun result(action: QuackAction, ok: QuackAction.Outcome.Ok): Frame {
     val text = ok.json ?: return Frame.Result.Message(ok.message, data = null)
-    val data = codec.parseJson(text)
-    if (data == null) {
-      logger.log(QuackLogger.Level.Error, "Action '${action.id}' returned json that does not parse: $text", throwable = null)
-      return Frame.Error(ErrorCode.Failed, "the action returned json that does not parse")
-    }
+    val data =
+      parseData(action, text, verb = "returned") ?: return Frame.Error(ErrorCode.Failed, "the action returned json that does not parse")
     return Frame.Result.Message(ok.message, data)
   }
+
+  private fun parseData(action: QuackAction, text: String, verb: String): JsonElement? {
+    val data = codec.parseJson(text)
+    if (data == null) logger.log(QuackLogger.Level.Error, "Action '${action.id}' $verb json that does not parse: $text", throwable = null)
+    return data
+  }
 }
+
+// Ends the action from Terminal.send. call() catches it before failed(), which would log the bad json a second time.
+private class InvalidJson(override val message: String) : Exception(message)
 
 private sealed interface ParsedArgs {
   class Valid(val args: QuackAction.Args) : ParsedArgs

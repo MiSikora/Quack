@@ -6,6 +6,9 @@ $ quack --recipe setup
 › account.create username=alice
 Started
 Creating account
+{
+  "username": "alice"
+}
 Created
 › app.params count=3 flag=true tag=a tag='b c'
 tag=[a b c]

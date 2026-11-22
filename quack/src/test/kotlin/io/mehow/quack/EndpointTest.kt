@@ -513,6 +513,51 @@ class EndpointTest {
   }
 
   @Test
+  fun `send the data of a notification as json`() = runTest {
+    val action =
+      FakeAction(
+        execute = { _, terminal ->
+          terminal.send("Pairing code ready", json = """{"code": "abc123"}""")
+          Outcome.Ok("Paired")
+        },
+      )
+
+    endpoint(action).call("test.action") shouldReply
+      listOf(
+        """
+        {
+          "notification": {
+            "message": "Pairing code ready",
+            "data": {
+              "code": "abc123"
+            }
+          }
+        }
+        """,
+        result("Paired"),
+      )
+  }
+
+  @Test
+  fun `fail an action that sends json that does not parse`() = runTest {
+    val action =
+      FakeAction(
+        execute = { _, terminal ->
+          terminal.send("Pairing code ready", json = "{code: abc123")
+          Outcome.Ok("Paired")
+        },
+      )
+    val logger = RecordingLogger()
+
+    endpoint(action, logger = logger).call("test.action") shouldReply failed("the action sent json that does not parse")
+
+    logger.entries shouldContainExactly
+      listOf(
+        RecordingLogger.Entry(QuackLogger.Level.Error, "Action 'test.action' sent json that does not parse: {code: abc123", null),
+      )
+  }
+
+  @Test
   fun `fail an action that returns json that does not parse`() = runTest {
     val action = FakeAction(execute = { _, _ -> Outcome.Ok("Signed in", json = "{username: alice") })
     val logger = RecordingLogger()

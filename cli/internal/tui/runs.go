@@ -40,7 +40,7 @@ type (
 		command string
 	}
 	runNotification struct {
-		message string
+		notification wire.Notification
 	}
 	stepEnded struct {
 		run    *run
@@ -79,7 +79,7 @@ func (r *runs) start(activity activity, started *run, actions []wire.Action, wor
 	r.active = started
 	observer := recipe.Observer{
 		Started:  func(step recipe.Step) { activity.send(stepStarted{started, recipe.Line(step, actions)}) },
-		Notified: func(message string) { activity.send(runNotification{message}) },
+		Notified: func(notification wire.Notification) { activity.send(runNotification{notification}) },
 		Ended:    func(_ recipe.Step, result wire.MessageResult) { activity.send(stepEnded{started, result}) },
 		Failed:   func(_ recipe.Step, err error) { activity.send(stepFailed{started, err}) },
 		Logged:   func(text string) { activity.send(logged{text}) },
@@ -223,6 +223,14 @@ func duration(d time.Duration) string {
 	}
 	d = d.Round(time.Second)
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+}
+
+// Indented under the step, with its data below it like a result's.
+func notificationLines(n wire.Notification) string {
+	if n.Data == nil {
+		return indent(n.Message)
+	}
+	return indent(n.Message + "\n" + indent(n.IndentedData()))
 }
 
 func indent(text string) string { return "  " + strings.ReplaceAll(text, "\n", "\n  ") }

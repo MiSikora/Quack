@@ -49,7 +49,7 @@ func sampleReply(request map[string]any, write func(string)) {
 		write(fmt.Sprintf(`{"result":{"message":"tag=%v"}}`, args["tag"]))
 	case "account.create":
 		write(`{"notification":{"message":"Started"}}`)
-		write(`{"notification":{"message":"Creating account"}}`)
+		write(`{"notification":{"message":"Creating account","data":{"username":"alice"}}}`)
 		write(`{"result":{"message":"Created"}}`)
 	case "account.show":
 		write(`{"result":{"message":"Signed in as alice","data":{"username":"alice","tags":["a","b"]}}}`)

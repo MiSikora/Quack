@@ -3,6 +3,9 @@ $ quack account.create username=alice
 --- stdout
 Started
 Creating account
+{
+  "username": "alice"
+}
 Created
 --- stderr
 --- device

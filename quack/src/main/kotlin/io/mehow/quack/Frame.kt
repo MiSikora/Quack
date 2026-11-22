@@ -5,7 +5,7 @@ import kotlinx.serialization.json.JsonElement
 internal sealed interface Frame {
   data class Hello(val packageName: String, val version: String?) : Frame
 
-  data class Notification(val message: String) : Frame
+  data class Notification(val message: String, val data: JsonElement?) : Frame
 
   sealed interface Result : Frame {
     data class Actions(val actions: List<QuackAction>) : Result

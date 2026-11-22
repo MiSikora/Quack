@@ -35,6 +35,8 @@ class GreetAction : QuackAction {
 }
 ```
 
+While it runs, an action can report progress with `terminal.send("Syncing")`, and hand over data as JSON with `terminal.send("Pairing code", json = """{"code": "$code"}""")`. `Outcome.Ok` takes `json` the same way.
+
 Start Quack when your app starts:
 
 ```kotlin

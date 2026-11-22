@@ -10,13 +10,14 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/wire"
 )
 
 func TestDoRunsEachKindOfStep(t *testing.T) {
 	app := &fakeApp{}
 	var notified []string
 
-	result, err := Do(context.Background(), app, call("app.greet", "name", "Bob"), func(m string) { notified = append(notified, m) })
+	result, err := Do(context.Background(), app, call("app.greet", "name", "Bob"), func(n wire.Notification) { notified = append(notified, n.Message) })
 	if err != nil || result.Message != "Hello, Bob!" || !reflect.DeepEqual(notified, []string{"greeting"}) {
 		t.Errorf("call: got %v, %v and notifications %v", result, err, notified)
 	}

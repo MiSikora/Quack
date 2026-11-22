@@ -44,9 +44,9 @@ internal class Codec {
     val (key, body) =
       when (frame) {
         is Frame.Hello -> "hello" to json.encodeToJsonElement(helloBody(frame))
-        is Frame.Notification -> "notification" to json.encodeToJsonElement(MessageBody(frame.message))
+        is Frame.Notification -> "notification" to json.encodeToJsonElement(MessageBody(frame.message, frame.data))
         is Frame.Result.Actions -> "result" to json.encodeToJsonElement(ActionsBody(frame.actions.map(::actionBody)))
-        is Frame.Result.Message -> "result" to json.encodeToJsonElement(ResultBody(frame.message, frame.data))
+        is Frame.Result.Message -> "result" to json.encodeToJsonElement(MessageBody(frame.message, frame.data))
         is Frame.Error -> "error" to json.encodeToJsonElement(ErrorBody(frame.code.wireName, frame.message))
       }
     return JsonObject(mapOf(key to body)).toString()
@@ -121,11 +121,6 @@ private class AppBody(
 
 @Serializable
 private class MessageBody(
-  val message: String,
-)
-
-@Serializable
-private class ResultBody(
   val message: String,
   val data: JsonElement?,
 )

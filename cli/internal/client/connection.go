@@ -86,7 +86,7 @@ func (c *connection) exchange(request []byte, notify NotificationFunc) (wire.Fra
 		if len(line) > 0 {
 			last = wire.DecodeFrame(bytes.TrimSuffix(line, []byte("\n")))
 			if notification, ok := last.(wire.Notification); ok {
-				notify(notification.Message)
+				notify(notification)
 			}
 		}
 		if err != nil {

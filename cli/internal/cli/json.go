@@ -15,9 +15,10 @@ import (
 
 // Step numbers the recipe's step from 1, and is absent outside a recipe.
 type notificationJSON struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Step    int    `json:"step,omitempty"`
+	Code    string          `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
+	Step    int             `json:"step,omitempty"`
 }
 
 // Step numbers the recipe's step from 1. A failed step's outcome is its last, unless the recipe caught the

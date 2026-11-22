@@ -261,7 +261,7 @@ export const r = quack.recipe({
   run() {
     quack.openApp()
     const greeting = quack.runAction("app.greet", { name: "Bob", times: 2, loud: true, tag: ["a", "b"] })
-    console.log("got", greeting.message, greeting.notifications.length)
+    console.log("got", greeting.message, greeting.notifications[0].message, greeting.notifications[0].data.name)
     quack.shell("pm clear " + quack.shell("echo"))
     console.log(quack.run("echo duck"))
     quack.wait("10ms")
@@ -271,7 +271,7 @@ export const r = quack.recipe({
 	var events []string
 	observer := Observer{
 		Started:  func(step Step) { events = append(events, "› "+Line(step, nil)) },
-		Notified: func(message string) { events = append(events, "notified "+message) },
+		Notified: func(n wire.Notification) { events = append(events, "notified "+n.Message) },
 		Ended:    func(_ Step, result wire.MessageResult) { events = append(events, "ended "+result.Message) },
 		Logged:   func(text string) { events = append(events, "logged "+text) },
 	}
@@ -281,7 +281,7 @@ export const r = quack.recipe({
 	want := []string{
 		"› /open-app", "ended ",
 		"› app.greet loud=true name=Bob tag=a tag=b times=2", "notified greeting", "ended Hello, Bob!",
-		"logged got Hello, Bob! 1",
+		"logged got Hello, Bob! greeting Bob",
 		"› shell echo", "ended Success",
 		"› shell pm clear Success", "ended Success",
 		"› run echo duck", "ended duck", "logged duck",
@@ -680,7 +680,7 @@ func (a *fakeApp) Call(_ context.Context, call wire.Call, notify client.Notifica
 	case a.data[call.Action] != "":
 		return wire.MessageResult{Message: call.Action, Data: json.RawMessage(a.data[call.Action])}, nil
 	}
-	notify("greeting")
+	notify(wire.Notification{Message: "greeting", Data: json.RawMessage(`{"name":"` + call.Args["name"][0] + `"}`)})
 	return wire.MessageResult{Message: "Hello, " + call.Args["name"][0] + "!"}, nil
 }
 

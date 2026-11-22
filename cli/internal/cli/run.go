@@ -304,11 +304,14 @@ func parseArgs(words []string) (map[string]wire.RawArg, error) {
 
 // step is 0 outside a recipe.
 func printNotifications(terminal Terminal, json bool, step int) client.NotificationFunc {
-	return func(message string) {
+	return func(notification wire.Notification) {
 		if json {
-			printJSON(terminal.Out, notificationJSON{codeNotification, message, step})
-		} else {
-			fmt.Fprintln(terminal.Out, message)
+			printJSON(terminal.Out, notificationJSON{Code: codeNotification, Message: notification.Message, Data: notification.Data, Step: step})
+			return
+		}
+		fmt.Fprintln(terminal.Out, notification.Message)
+		if notification.Data != nil {
+			fmt.Fprintln(terminal.Out, notification.IndentedData())
 		}
 	}
 }

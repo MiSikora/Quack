@@ -19,7 +19,12 @@ func TestDecodeFrame(t *testing.T) {
 		{
 			name: "notification",
 			line: `{"notification":{"message":"Started"}}`,
-			want: Notification{"Started"},
+			want: Notification{Message: "Started"},
+		},
+		{
+			name: "notification with null data",
+			line: `{"notification":{"message":"Started","data":null}}`,
+			want: Notification{Message: "Started"},
 		},
 		{
 			name: "call result",

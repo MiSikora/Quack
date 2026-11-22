@@ -18,8 +18,10 @@ type Hello struct {
 	Version  string
 }
 
+// Data is compacted JSON, or nil when the action sent none.
 type Notification struct {
 	Message string
+	Data    json.RawMessage
 }
 
 // Data is compacted JSON, or nil when the action returned none.
@@ -48,10 +50,14 @@ func (ActionsResult) frame() {}
 func (Error) frame()         {}
 func (Malformed) frame()     {}
 
-func (r MessageResult) IndentedData() string {
+func (n Notification) IndentedData() string { return indent(n.Data) }
+
+func (r MessageResult) IndentedData() string { return indent(r.Data) }
+
+func indent(data json.RawMessage) string {
 	var out bytes.Buffer
-	// Data is valid JSON, since DecodeFrame compacted it.
-	json.Indent(&out, r.Data, "", "  ")
+	// data is valid JSON, since DecodeFrame compacted it.
+	json.Indent(&out, data, "", "  ")
 	return out.String()
 }
 

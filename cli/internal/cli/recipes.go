@@ -48,7 +48,7 @@ func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wi
 				fmt.Fprintln(terminal.Out, "› "+recipe.Line(started, actions))
 			}
 		},
-		Notified: func(message string) { printNotifications(terminal, json, step)(message) },
+		Notified: func(notification wire.Notification) { printNotifications(terminal, json, step)(notification) },
 		Ended: func(ended recipe.Step, result wire.MessageResult) {
 			if json || hasMessage(ended) {
 				printResult(terminal, json, result, step)
@@ -58,7 +58,7 @@ func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wi
 		Logged: func(text string) {
 			caught()
 			if json {
-				printJSON(terminal.Out, notificationJSON{codeLog, text, step})
+				printJSON(terminal.Out, notificationJSON{Code: codeLog, Message: text, Step: step})
 			} else {
 				fmt.Fprintln(terminal.Out, text)
 			}

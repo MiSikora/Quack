@@ -108,7 +108,7 @@ func TestRunActionGivesTheNotificationsTheMessageAndTheData(t *testing.T) {
 
 	result := call(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "alice"}})
 
-	assertStructured(t, result, `{"notifications":["Creating alice"],"message":"Created alice","data":{"id":7}}`)
+	assertStructured(t, result, `{"notifications":[{"message":"Creating alice","data":{"username":"alice"}}],"message":"Created alice","data":{"id":7}}`)
 }
 
 func TestRunActionSendsNotificationsAsProgressWhenAskedTo(t *testing.T) {
@@ -284,7 +284,7 @@ export const fresh = quack.recipe({
 	result := call(t, session, "run_recipe", map[string]any{"recipe": "fresh", "args": map[string]any{"user": "alice"}})
 
 	assertStructured(t, result, `{"steps":[`+
-		`{"step":"account.create username=alice","notifications":["Creating alice"],"message":"Created alice","data":{"id":7}},`+
+		`{"step":"account.create username=alice","notifications":[{"message":"Creating alice","data":{"username":"alice"}}],"message":"Created alice","data":{"id":7}},`+
 		`{"step":"/open-app","notifications":[],"message":""},`+
 		`{"step":"wait 1ms","notifications":[],"message":""},`+
 		`{"step":"shell pm clear com.example","notifications":[],"message":"ran pm clear com.example"},`+
@@ -356,8 +356,8 @@ export const careful = quack.recipe({
 	result := call(t, session, "run_recipe", map[string]any{"recipe": "careful"})
 
 	assertStructured(t, result, `{"steps":[`+
-		`{"step":"account.delete","notifications":["Deleting"],"message":"","error":{"code":"rejected","message":"there is no account"}},`+
-		`{"step":"account.create username=alice","notifications":["Creating alice"],"message":"Created alice","data":{"id":7}}],"log":[]}`)
+		`{"step":"account.delete","notifications":[{"message":"Deleting"}],"message":"","error":{"code":"rejected","message":"there is no account"}},`+
+		`{"step":"account.create username=alice","notifications":[{"message":"Creating alice","data":{"username":"alice"}}],"message":"Created alice","data":{"id":7}}],"log":[]}`)
 }
 
 func TestRunRecipeRefusesArgsItsParamsRefuse(t *testing.T) {
@@ -613,10 +613,10 @@ func (a *fakeApp) Call(_ context.Context, call wire.Call, notify client.Notifica
 	switch call.Action {
 	case "account.create":
 		username := call.Args["username"][0]
-		notify("Creating " + username)
+		notify(wire.Notification{Message: "Creating " + username, Data: json.RawMessage(`{"username":"` + username + `"}`)})
 		return wire.MessageResult{Message: "Created " + username, Data: json.RawMessage(`{"id":7}`)}, nil
 	case "account.delete":
-		notify("Deleting")
+		notify(wire.Notification{Message: "Deleting"})
 		return wire.MessageResult{}, wire.Error{Code: wire.ErrorCodeRejected, Message: "there is no account"}
 	default:
 		return wire.MessageResult{}, errors.New("unknown action")

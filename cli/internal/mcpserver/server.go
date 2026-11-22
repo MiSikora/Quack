@@ -54,9 +54,9 @@ func New(source Source, version string) *mcp.Server {
 	}, s.listActions)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "run_action",
-		Description: "Run an action of a quack-enabled app and return its notifications, its message and its data. " +
-			"Get the action ids and their params from list_actions. The args reach the app as given: ${NAME} stays as " +
-			"it is. " + askHelp + targetHelp,
+		Description: "Run an action of a quack-enabled app and return its notifications, each a message with optional " +
+			"data, and its message and its data. Get the action ids and their params from list_actions. The args reach " +
+			"the app as given: ${NAME} stays as it is. " + askHelp + targetHelp,
 		InputSchema:  schemaFor[runActionInput](),
 		OutputSchema: schemaFor[runActionOutput](),
 	}, s.runAction)
@@ -172,11 +172,11 @@ type runRecipeOutput struct {
 
 // A failed step has an error instead, which the recipe caught when it went on.
 type stepOutput struct {
-	Step          string          `json:"step"`
-	Notifications []string        `json:"notifications"`
-	Message       string          `json:"message"`
-	Data          json.RawMessage `json:"data,omitempty"`
-	Error         *errorOutput    `json:"error,omitempty"`
+	Step          string               `json:"step"`
+	Notifications []notificationOutput `json:"notifications"`
+	Message       string               `json:"message"`
+	Data          json.RawMessage      `json:"data,omitempty"`
+	Error         *errorOutput         `json:"error,omitempty"`
 }
 
 // The app's error code, command for a command that exited with another status than 0, no_reply for a call that
@@ -187,9 +187,14 @@ type errorOutput struct {
 }
 
 type runActionOutput struct {
-	Notifications []string        `json:"notifications"`
-	Message       string          `json:"message"`
-	Data          json.RawMessage `json:"data,omitempty"`
+	Notifications []notificationOutput `json:"notifications"`
+	Message       string               `json:"message"`
+	Data          json.RawMessage      `json:"data,omitempty"`
+}
+
+type notificationOutput struct {
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
 }
 
 func (s tools) listDevices(context.Context, *mcp.CallToolRequest, listDevicesInput) (*mcp.CallToolResult, listDevicesOutput, error) {
@@ -258,15 +263,17 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 			}
 		}
 	}
-	notifications := []string{}
+	notifications := []notificationOutput{}
+	var messages []string
 	report := progress(ctx, req)
-	result, err := app.Call(ctx, wire.Call{Action: in.Action, Args: args}, func(message string) {
-		notifications = append(notifications, message)
-		report(message)
+	result, err := app.Call(ctx, wire.Call{Action: in.Action, Args: args}, func(notification wire.Notification) {
+		notifications = append(notifications, notificationOutput(notification))
+		messages = append(messages, notification.Message)
+		report(notification.Message)
 	})
 	if err != nil {
-		if len(notifications) > 0 {
-			err = fmt.Errorf("%s\n%w", strings.Join(notifications, "\n"), err)
+		if len(messages) > 0 {
+			err = fmt.Errorf("%s\n%w", strings.Join(messages, "\n"), err)
 		}
 		return nil, runActionOutput{}, err
 	}
@@ -340,12 +347,12 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	var done stepOutput
 	err = script.Run(ctx, app, in.Recipe, args, recipe.Observer{
 		Started: func(step recipe.Step) {
-			done = stepOutput{Step: recipe.Line(step, actions), Notifications: []string{}}
+			done = stepOutput{Step: recipe.Line(step, actions), Notifications: []notificationOutput{}}
 			print("› " + done.Step)
 		},
-		Notified: func(message string) {
-			done.Notifications = append(done.Notifications, message)
-			print(message)
+		Notified: func(notification wire.Notification) {
+			done.Notifications = append(done.Notifications, notificationOutput(notification))
+			print(notification.Message)
 		},
 		Ended: func(_ recipe.Step, result wire.MessageResult) {
 			if result.Message != "" {

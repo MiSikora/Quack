@@ -197,7 +197,7 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 		m.log.add(m.runs.stepStarted(msg))
 		return m.activity.listen()
 	case runNotification:
-		m.log.add(indent(msg.message))
+		m.log.add(notificationLines(msg.notification))
 		return m.activity.listen()
 	case stepEnded:
 		m.log.add(m.runs.stepEnded(msg))

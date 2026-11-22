@@ -28,11 +28,11 @@ func DecodeFrame(line []byte) Frame {
 	case body.Hello != nil:
 		return Hello{Protocol: body.Hello.Protocol, Package: body.Hello.App.Package, Version: body.Hello.App.Version}
 	case body.Notification != nil:
-		return Notification{body.Notification.Message}
+		return Notification{body.Notification.Message, compact(body.Notification.Data)}
 	case body.Result != nil && body.Result.Actions != nil:
 		return actionsResult(*body.Result.Actions)
 	case body.Result != nil && body.Result.Message != nil:
-		return messageResult(*body.Result.Message, body.Result.Data)
+		return MessageResult{*body.Result.Message, compact(body.Result.Data)}
 	case body.Result != nil:
 		return Malformed{"a result without a message or actions"}
 	case body.Error != nil:
@@ -42,14 +42,15 @@ func DecodeFrame(line []byte) Frame {
 	}
 }
 
-func messageResult(message string, data json.RawMessage) Frame {
+// Nil for absent or null data.
+func compact(data json.RawMessage) json.RawMessage {
 	if len(data) == 0 || string(data) == "null" {
-		return MessageResult{Message: message}
+		return nil
 	}
-	var compact bytes.Buffer
+	var out bytes.Buffer
 	// The whole line parsed, so data is valid JSON.
-	json.Compact(&compact, data)
-	return MessageResult{Message: message, Data: compact.Bytes()}
+	json.Compact(&out, data)
+	return out.Bytes()
 }
 
 func actionsResult(bodies []actionBody) Frame {
@@ -108,7 +109,8 @@ type helloBody struct {
 }
 
 type messageBody struct {
-	Message string `json:"message"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
 }
 
 type resultBody struct {

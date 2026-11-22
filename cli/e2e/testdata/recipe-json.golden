@@ -4,7 +4,7 @@ $ quack --json --recipe setup
 {"code":"ok","message":"","step":1}
 {"code":"ok","message":"","step":2}
 {"code":"notification","message":"Started","step":3}
-{"code":"notification","message":"Creating account","step":3}
+{"code":"notification","message":"Creating account","data":{"username":"alice"},"step":3}
 {"code":"ok","message":"Created","step":3}
 {"code":"ok","message":"tag=[a b c]","step":4}
 --- stderr

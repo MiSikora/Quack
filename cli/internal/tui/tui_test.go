@@ -778,6 +778,20 @@ func TestNotificationsOfARunPrintUnderItsCommand(t *testing.T) {
 	h.waitForLog("\n› account.create username=alice\n  Started\n  Creating account\nCreated · ")
 }
 
+func TestDataOfANotificationPrintsIndentedUnderIt(t *testing.T) {
+	app := newFakeApp()
+	app.setActions(append(app.actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	h := start(t, app)
+
+	h.typing("sync.pair")
+	h.press("enter")
+
+	h.waitForLog("\n› sync.pair\n  Pairing code\n" +
+		"    {\n" +
+		"      \"code\": \"abc123\"\n" +
+		"    }\nPaired · ")
+}
+
 func TestOutputKeepsItsOrder(t *testing.T) {
 	h := start(t, newFakeApp())
 	var want []string
@@ -1793,7 +1807,7 @@ type fakeApp struct {
 	mu            sync.Mutex
 	described     []wire.Action
 	calls         []wire.Call
-	watchers      []func(string)
+	watchers      []client.NotificationFunc
 	watchCanceled []chan struct{}
 	stopsHeld     chan struct{}
 }
@@ -1839,8 +1853,12 @@ func (a *fakeApp) Describe(context.Context) (wire.Hello, []wire.Action, error) {
 }
 
 func (a *fakeApp) Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
-	if call.Action == "account.show" {
+	switch call.Action {
+	case "account.show":
 		return wire.MessageResult{Message: "Signed in as alice", Data: json.RawMessage(`{"username":"alice","tags":["a"]}`)}, nil
+	case "sync.pair":
+		notify(wire.Notification{Message: "Pairing code", Data: json.RawMessage(`{"code":"abc123"}`)})
+		return wire.MessageResult{Message: "Paired"}, nil
 	}
 	message, err := a.reply(ctx, call, notify)
 	return wire.MessageResult{Message: message}, err
@@ -1856,20 +1874,20 @@ func (a *fakeApp) reply(ctx context.Context, call wire.Call, notify client.Notif
 	case "app.params":
 		return strings.Join(call.Args["text"], ""), nil
 	case "account.create":
-		notify("Started")
-		notify("Creating account")
+		notify(wire.Notification{Message: "Started"})
+		notify(wire.Notification{Message: "Creating account"})
 		a.mu.Lock()
 		for _, watch := range a.watchers {
 			if watch == nil {
 				continue
 			}
-			watch("Signed in as " + call.Args["username"][0])
+			watch(wire.Notification{Message: "Signed in as " + call.Args["username"][0]})
 		}
 		a.mu.Unlock()
 		return "Created", nil
 	case "app.count":
 		for i := 1; i <= 50; i++ {
-			notify(strconv.Itoa(i))
+			notify(wire.Notification{Message: strconv.Itoa(i)})
 		}
 		return "Counted", nil
 	case "account.delete":
@@ -1882,7 +1900,7 @@ func (a *fakeApp) reply(ctx context.Context, call wire.Call, notify client.Notif
 		a.watchCanceled = append(a.watchCanceled, done)
 		held := a.stopsHeld
 		a.mu.Unlock()
-		notify("Signed out")
+		notify(wire.Notification{Message: "Signed out"})
 		<-ctx.Done()
 		a.mu.Lock()
 		a.watchers[watcher] = nil
@@ -1925,7 +1943,7 @@ func (a *fakeApp) signIn(username string) {
 	defer a.mu.Unlock()
 	for _, watch := range a.watchers {
 		if watch != nil {
-			watch("Signed in as " + username)
+			watch(wire.Notification{Message: "Signed in as " + username})
 		}
 	}
 }

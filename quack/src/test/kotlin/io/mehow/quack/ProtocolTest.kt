@@ -22,7 +22,14 @@ class ProtocolTest {
 
   @Test
   fun `encode a notification`() {
-    codec.encode(Frame.Notification("Started")) shouldEqualJson golden("frames/notification.json")
+    codec.encode(Frame.Notification("Started", data = null)) shouldEqualJson golden("frames/notification.json")
+  }
+
+  @Test
+  fun `encode a notification with data`() {
+    val data = codec.parseJson("""{"code": "abc123"}""")
+
+    codec.encode(Frame.Notification("Pairing code ready", data)) shouldEqualJson golden("frames/notification-with-data.json")
   }
 
   @Test

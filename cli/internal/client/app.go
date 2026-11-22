@@ -36,7 +36,7 @@ type CallError struct {
 
 func (e *CallError) Error() string { return e.Message }
 
-type NotificationFunc func(message string)
+type NotificationFunc func(notification wire.Notification)
 
 // The package goes into shell commands, so it must be a valid package name.
 type Target struct {
@@ -159,7 +159,7 @@ func Inspect(listing adb.Listing) (Device, error) {
 
 // Sorted by id, whatever order the app declares them in.
 func (a App) Describe(ctx context.Context) (wire.Hello, []wire.Action, error) {
-	hello, result, err := a.send(ctx, wire.EncodeDescribe(), func(string) {})
+	hello, result, err := a.send(ctx, wire.EncodeDescribe(), func(wire.Notification) {})
 	if err != nil {
 		return wire.Hello{}, nil, err
 	}

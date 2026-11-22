@@ -18,8 +18,14 @@ export type Arg = string | number | boolean | string[]
 export interface ActionResult<T = JsonValue> {
   message: string
   data: T
-  /** The messages of the notifications the app posted during the call. */
-  notifications: string[]
+  /** The notifications the app sent during the call. */
+  notifications: Notification[]
+}
+
+/** What an action sent while it ran. data is the notification's JSON data, or null without any. */
+export interface Notification {
+  message: string
+  data: JsonValue
 }
 
 interface ParamTypes {

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Library: `Terminal.send` takes optional `json`, data that the CLI prints after the notification's message, MCP returns with it, and recipes read. JSON that does not parse fails the call.
+
+### Changed
+- Library: `QuackAction.Terminal` is a plain interface, so a test builds one with an `object` expression instead of a lambda.
+- CLI: a recipe's `ActionResult.notifications` holds `{ message, data }` objects instead of strings.
+- MCP: `run_action` and `run_recipe` return each notification as `{ message, data }` instead of a string.
+
 ## [0.1.3] - 2026-11-22
 
 ### Added

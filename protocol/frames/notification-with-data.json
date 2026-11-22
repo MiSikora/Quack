@@ -1,0 +1,8 @@
+{
+  "notification": {
+    "message": "Pairing code ready",
+    "data": {
+      "code": "abc123"
+    }
+  }
+}

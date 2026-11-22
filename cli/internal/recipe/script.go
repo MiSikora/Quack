@@ -3,6 +3,7 @@ package recipe
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -32,7 +33,7 @@ type Script struct {
 // may be nil.
 type Observer struct {
 	Started  func(step Step)
-	Notified func(message string)
+	Notified func(notification wire.Notification)
 	Ended    func(step Step, result wire.MessageResult)
 	Failed   func(step Step, err error)
 	Logged   func(text string)
@@ -381,9 +382,14 @@ func joinTypes() string {
 }
 
 type actionResult struct {
-	Message       string     `json:"message"`
-	Data          goja.Value `json:"data"`
-	Notifications []string   `json:"notifications"`
+	Message       string         `json:"message"`
+	Data          goja.Value     `json:"data"`
+	Notifications []notification `json:"notifications"`
+}
+
+type notification struct {
+	Message string     `json:"message"`
+	Data    goja.Value `json:"data"`
 }
 
 func (r *runtime) runAction(id string, args map[string]any) actionResult {
@@ -398,18 +404,24 @@ func (r *runtime) runAction(id string, args map[string]any) actionResult {
 		}
 		call.Args[key] = values
 	}
-	notifications := []string{}
-	result := r.do(call, func(message string) { notifications = append(notifications, message) })
-	out := actionResult{Message: result.Message, Data: goja.Null(), Notifications: notifications}
-	if result.Data != nil {
-		// JSON.parse keeps the keys in the app's order, which Go maps do not. The app sends valid JSON.
-		parse, _ := goja.AssertFunction(r.vm.Get("JSON").ToObject(r.vm).Get("parse"))
-		out.Data, _ = parse(goja.Undefined(), r.vm.ToValue(string(result.Data)))
-	}
-	return out
+	notifications := []notification{}
+	result := r.do(call, func(n wire.Notification) {
+		notifications = append(notifications, notification{Message: n.Message, Data: r.parse(n.Data)})
+	})
+	return actionResult{Message: result.Message, Data: r.parse(result.Data), Notifications: notifications}
 }
 
-func (r *runtime) do(step Step, collect func(string)) wire.MessageResult {
+// null for nil data. JSON.parse keeps the keys in the app's order, which Go maps do not. The app sends valid JSON.
+func (r *runtime) parse(data json.RawMessage) goja.Value {
+	if data == nil {
+		return goja.Null()
+	}
+	parse, _ := goja.AssertFunction(r.vm.Get("JSON").ToObject(r.vm).Get("parse"))
+	value, _ := parse(goja.Undefined(), r.vm.ToValue(string(data)))
+	return value
+}
+
+func (r *runtime) do(step Step, collect func(wire.Notification)) wire.MessageResult {
 	if r.app == nil {
 		panic(r.vm.NewTypeError("the \"quack\" module runs steps only inside a recipe's run"))
 	}
@@ -417,12 +429,12 @@ func (r *runtime) do(step Step, collect func(string)) wire.MessageResult {
 	if r.observer.Started != nil {
 		r.observer.Started(shown)
 	}
-	result, err := Do(r.ctx, r.app, step, func(message string) {
+	result, err := Do(r.ctx, r.app, step, func(notification wire.Notification) {
 		if collect != nil {
-			collect(message)
+			collect(notification)
 		}
 		if r.observer.Notified != nil {
-			r.observer.Notified(message)
+			r.observer.Notified(notification)
 		}
 	})
 	if err != nil {

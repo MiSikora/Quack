@@ -66,8 +66,14 @@ class DirectExecutionTest {
         },
       )
     val notifications = mutableListOf<String>()
+    val terminal =
+      object : Terminal {
+        override suspend fun send(message: String, json: String?) {
+          notifications += message
+        }
+      }
 
-    val outcome = greeting.execute(greeting.args().with(name, "Bob"), Terminal { notifications += it })
+    val outcome = greeting.execute(greeting.args().with(name, "Bob"), terminal)
 
     outcome shouldBe Outcome.Ok("Hello Bob x2")
     notifications shouldContainExactly listOf("Greeting Bob")

@@ -139,8 +139,9 @@ public interface QuackAction {
     }
   }
 
-  public fun interface Terminal {
-    public suspend fun send(message: String)
+  public interface Terminal {
+    /** The CLI prints [json] after [message]. A [json] that does not parse fails the call. */
+    public suspend fun send(message: String, json: String? = null)
   }
 
   public sealed interface Outcome {
