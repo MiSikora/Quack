@@ -352,12 +352,15 @@ func (m *model) pressPicker(msg tea.KeyPressMsg) tea.Cmd {
 	return p.update(msg, m.devices)
 }
 
-// pressBox handles a key while the param box is open. Esc closes it, and the picker comes back as it was. ctrl+c
-// stops the action that runs, and closes the box when none does. The box runs its action only while none runs.
+// pressBox handles a key while the param box is open. Esc drops a selected hint, or else closes the box, and the
+// picker comes back as it was. ctrl+c stops the action that runs, and closes the box when none does. The box runs its
+// action only while none runs.
 func (m *model) pressBox(msg tea.KeyPressMsg) tea.Cmd {
 	switch key := msg.String(); {
 	case key == "ctrl+c" && m.runs.active != nil:
 		return m.interrupt()
+	case key == "esc" && m.box.deselect():
+		return nil
 	case key == "esc", key == "ctrl+c":
 		m.box = nil
 		return m.prompt.focus()

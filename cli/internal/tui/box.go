@@ -1,17 +1,21 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/sahilm/fuzzy"
 
 	"quack/internal/wire"
 )
 
 // paramBox asks for the params of one action: a row for each param, under the action's id and over a preview of the
-// call. One row has the focus.
+// call. One row has the focus. A focused param with hints takes the box for itself, with the hints its text matches
+// under it.
 type paramBox struct {
 	action  wire.Action
 	fields  []boxField
@@ -40,10 +44,14 @@ type field interface {
 	blur()
 }
 
-// textField is one line of text, for a string or a number, or for the comma-separated values of a string_list.
+// textField is one line of text, for a string or a number, or for the comma-separated values of a string_list. A
+// string can have hints to pick from.
 type textField struct {
 	input textinput.Model
 	list  bool
+	hints []string
+	// selected indexes matches(), or is -1 while no hint is selected, so that enter keeps the text as typed.
+	selected int
 }
 
 // choiceField picks one of options with ← and →. An empty option is the choice to leave the param unset.
@@ -85,7 +93,11 @@ func newField(p wire.Param) field {
 	if p.Type.IsList() {
 		input.Placeholder = "comma-separated"
 	}
-	return &textField{input: input, list: p.Type.IsList()}
+	f := &textField{input: input, list: p.Type.IsList(), selected: -1}
+	if p.Type == wire.ParamTypeString {
+		f.hints = p.Hints
+	}
+	return f
 }
 
 // args are the params the user set, as a call sends them.
@@ -106,6 +118,9 @@ func (b *paramBox) init() tea.Cmd { return b.fields[0].field.focus() }
 func (b *paramBox) press(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
+		if text, ok := b.fields[b.focused].field.(*textField); ok {
+			text.pick()
+		}
 		if b.focused < len(b.fields)-1 {
 			return false, b.focus(b.focused + 1)
 		}
@@ -132,6 +147,22 @@ func (b *paramBox) press(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 
 func (b *paramBox) forward(msg tea.Msg) tea.Cmd { return b.fields[b.focused].field.forward(msg) }
 
+// deselect drops the selected hint of the focused param, and says whether there was one.
+func (b *paramBox) deselect() bool {
+	text, ok := b.fields[b.focused].field.(*textField)
+	if !ok || text.selected < 0 {
+		return false
+	}
+	text.selected = -1
+	return true
+}
+
+// hinted is the focused param while it has hints.
+func (b *paramBox) hinted() (*textField, bool) {
+	text, ok := b.fields[b.focused].field.(*textField)
+	return text, ok && len(text.hints) > 0
+}
+
 func (b *paramBox) focus(i int) tea.Cmd {
 	b.fields[b.focused].field.blur()
 	b.focused = i
@@ -150,6 +181,12 @@ func (b *paramBox) resize(width int) {
 
 // keys are the keys that work in the box.
 func (b *paramBox) keys() string {
+	if text, ok := b.hinted(); ok {
+		if text.selected >= 0 {
+			return "enter pick · ↑↓ select · esc deselect"
+		}
+		return "↓ hints · enter next · shift+tab back · esc close"
+	}
 	if _, ok := b.fields[b.focused].field.(*choiceField); ok {
 		return "←→ choose · enter next · shift+tab back · esc close"
 	}
@@ -159,11 +196,10 @@ func (b *paramBox) keys() string {
 // view is rows lines: the action's id and description, the params, and the call they make. The params scroll to keep
 // the focused one in sight. With room for only one param, the id goes.
 func (b *paramBox) view(rows int) []string {
-	header := commandStyle.Render(b.action.ID)
-	if description := firstLine(b.action.Description); description != "" {
-		header += statusStyle.Render(" · " + description)
+	if text, ok := b.hinted(); ok {
+		return b.hintsView(text, rows)
 	}
-	lines := []string{header}
+	lines := []string{b.header()}
 	paramRows := rows - 2
 	if paramRows < 1 {
 		lines, paramRows = nil, rows-1
@@ -183,19 +219,66 @@ func (b *paramBox) view(rows int) []string {
 		if i == b.focused {
 			marker = selectedStyle.Render("▸ ")
 		}
-		name := f.param.Name + strings.Repeat(" ", names-ansi.StringWidth(f.param.Name))
-		value := f.field.view()
-		value += strings.Repeat(" ", column-ansi.StringWidth(value))
-		note := statusStyle.Render(describe(f.param))
-		if f.missing {
-			note = problemStyle.Render(describe(f.param))
-		}
-		lines = append(lines, marker+name+"  "+value+"  "+note)
+		lines = append(lines, marker+f.row(names, column))
 	}
 	for len(lines) < rows-1 {
 		lines = append(lines, "")
 	}
 	return append(lines, "› "+commandLine(b.action, b.args()))
+}
+
+// hintsView is rows lines: the action's id and description, the focused param with how many hints match out of how
+// many there are at its right end, the hints that match, and the call. The hints scroll to keep the selection in
+// sight. Without room for a hint, the id goes.
+func (b *paramBox) hintsView(text *textField, rows int) []string {
+	f := b.fields[b.focused]
+	matches := text.matches()
+	counter := statusStyle.Render(strconv.Itoa(len(matches)) + "/" + strconv.Itoa(len(text.hints)))
+	row := selectedStyle.Render("▸ ") + f.row(ansi.StringWidth(f.param.Name), b.fieldWidth()+1)
+	row = ansi.Truncate(row, b.width-ansi.StringWidth(counter)-1, "…")
+	row += strings.Repeat(" ", max(1, b.width-ansi.StringWidth(row)-ansi.StringWidth(counter))) + counter
+	lines := []string{b.header(), row}
+	if rows < 4 {
+		lines = lines[1:]
+	}
+	// The hints line up with the text of the param.
+	indent := strings.Repeat(" ", ansi.StringWidth(f.param.Name)+2)
+	count := max(0, rows-1-len(lines))
+	if len(matches) == 0 && count > 0 {
+		lines = append(lines, statusStyle.Render(indent+"  no match"))
+	}
+	first := max(0, text.selected-count+1)
+	for i := first; i < min(len(matches), first+count); i++ {
+		marker, style := "  ", lipgloss.NewStyle()
+		if i == text.selected {
+			marker, style = selectedStyle.Render("▸ "), selectedStyle
+		}
+		lines = append(lines, indent+marker+highlight(matches[i].Str, matches[i].MatchedIndexes, style))
+	}
+	for len(lines) < rows-1 {
+		lines = append(lines, "")
+	}
+	return append(lines, "› "+commandLine(b.action, b.args()))
+}
+
+func (b *paramBox) header() string {
+	header := commandStyle.Render(b.action.ID)
+	if description := firstLine(b.action.Description); description != "" {
+		header += statusStyle.Render(" · " + description)
+	}
+	return header
+}
+
+// row is the param's name padded to names, its field padded to column, and its note, which a missing value turns red.
+func (f boxField) row(names, column int) string {
+	name := f.param.Name + strings.Repeat(" ", names-ansi.StringWidth(f.param.Name))
+	value := f.field.view()
+	value += strings.Repeat(" ", column-ansi.StringWidth(value))
+	note := statusStyle.Render(describe(f.param))
+	if f.missing {
+		note = problemStyle.Render(describe(f.param))
+	}
+	return name + "  " + value + "  " + note
 }
 
 func (b *paramBox) fieldWidth() int { return min(max(b.width/3, 10), 40) }
@@ -211,7 +294,50 @@ func (f *textField) value() wire.RawArg {
 	return wire.RawArg{text}
 }
 
-func (f *textField) press(msg tea.KeyPressMsg) tea.Cmd { return f.forward(msg) }
+// press moves the selection over the hints that match, or edits the text. Down moves away from the text, and up back
+// to it, where no hint is selected. A new text selects none.
+func (f *textField) press(msg tea.KeyPressMsg) tea.Cmd {
+	if len(f.hints) > 0 {
+		switch msg.String() {
+		case "down", "ctrl+n":
+			f.selected = min(len(f.matches())-1, f.selected+1)
+			return nil
+		case "up", "ctrl+p":
+			f.selected = max(-1, f.selected-1)
+			return nil
+		}
+	}
+	text := f.input.Value()
+	cmd := f.forward(msg)
+	if f.input.Value() != text {
+		f.selected = -1
+	}
+	return cmd
+}
+
+// matches are the hints that the text matches, fuzzily and ignoring case, best first. Empty text matches every hint in
+// the app's order.
+func (f *textField) matches() fuzzy.Matches {
+	text := f.input.Value()
+	if text == "" {
+		matches := make(fuzzy.Matches, len(f.hints))
+		for i, hint := range f.hints {
+			matches[i] = fuzzy.Match{Str: hint, Index: i}
+		}
+		return matches
+	}
+	return fuzzy.Find(text, f.hints)
+}
+
+// pick takes the selected hint as the text.
+func (f *textField) pick() {
+	if f.selected < 0 {
+		return
+	}
+	f.input.SetValue(f.matches()[f.selected].Str)
+	f.input.CursorEnd()
+	f.selected = -1
+}
 
 func (f *textField) forward(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
@@ -223,7 +349,10 @@ func (f *textField) view() string { return f.input.View() }
 
 func (f *textField) focus() tea.Cmd { return f.input.Focus() }
 
-func (f *textField) blur() { f.input.Blur() }
+func (f *textField) blur() {
+	f.input.Blur()
+	f.selected = -1
+}
 
 func (f *choiceField) value() wire.RawArg {
 	if f.options[f.chosen] == "" {

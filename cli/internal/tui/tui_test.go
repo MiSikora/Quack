@@ -528,6 +528,111 @@ func TestBoxSendsOnlyTheParamsTheUserSet(t *testing.T) {
 	}
 }
 
+func TestFocusedParamWithHintsTakesTheBoxWithTheHintsInTheAppsOrder(t *testing.T) {
+	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
+
+	h.press("enter")
+
+	h.waitFor("app.greet · Say hello", "▸ name", "Required. Who to greet", "3/3", "  Alice\n", "  Albert\n", "  Bob\n", "› app.greet")
+	h.waitForNo("times")
+	h.press("enter")
+	h.waitFor("  name", "▸ times", "Default: 1.")
+	h.waitForNo("Albert")
+}
+
+func TestHintsNarrowToTheTextAndSayWhenNoneMatches(t *testing.T) {
+	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
+	h.press("enter")
+	h.waitFor("3/3")
+
+	h.typing("bo")
+	h.waitFor("1/3", "  Bob\n")
+	h.waitForNo("Albert")
+	h.typing("zz")
+	h.waitFor("0/3", "no match")
+}
+
+func TestEnterPicksTheSelectedHintOrElseKeepsTheText(t *testing.T) {
+	app := withNameHints(newFakeApp(), "Alice", "Albert", "Bob")
+	h := start(t, app)
+	h.press("enter")
+	h.waitFor("3/3")
+
+	h.typing("Bo")
+	h.waitFor("› app.greet name=Bo\n", "↓ hints · enter next")
+	h.press("down")
+	h.waitFor("▸ Bob", "enter pick · ↑↓ select · esc deselect")
+	h.press("enter")
+	h.waitFor("▸ times", "› app.greet name=Bob\n")
+	h.press("shift+tab")
+	h.waitFor("▸ name", "1/3")
+	h.typing("x")
+	h.press("enter")
+	h.waitFor("▸ times", "› app.greet name=Bobx\n")
+	h.press("enter")
+	h.waitForLog("› app.greet name=Bobx\nHello, Bobx! · ")
+	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bobx"}}}}
+	if got := app.received(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestUpPastTheFirstHintAndTypingSelectNone(t *testing.T) {
+	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
+	h.press("enter")
+	h.waitFor("3/3")
+
+	h.press("down", "down", "down", "down")
+	h.waitFor("▸ Bob")
+	h.press("up", "up", "up")
+	h.waitFor("↓ hints · enter next")
+	h.waitForNo("▸ A")
+	h.press("down")
+	h.waitFor("▸ Alice")
+	h.typing("A")
+	h.waitFor("↓ hints · enter next")
+	h.waitForNo("▸ A")
+}
+
+func TestEscDeselectsTheHintAndThenClosesTheBox(t *testing.T) {
+	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
+	h.press("enter")
+	h.waitFor("3/3")
+
+	h.press("down")
+	h.waitFor("▸ Alice")
+	h.press("esc")
+	h.waitFor("▸ name", "  Alice\n", "↓ hints · enter next")
+	h.press("esc")
+	h.waitFor("> find an action", "▸ app.greet")
+}
+
+func TestHintsScrollToKeepTheSelectionInSight(t *testing.T) {
+	var names []string
+	for i := range 20 {
+		names = append(names, "user"+strconv.Itoa(10+i))
+	}
+	h := start(t, withNameHints(newFakeApp(), names...))
+	h.press("enter")
+	h.waitFor("20/20", "  user10", "  user16")
+	h.waitForNo("user17")
+
+	h.press("down", "down", "down", "down", "down", "down", "down", "down", "down", "down")
+
+	h.waitFor("  user13", "▸ user19")
+	h.waitForNo("user12")
+}
+
+func TestHintsOfANonStringParamDoNotShow(t *testing.T) {
+	app := newFakeApp()
+	app.described[0].Params[1].Hints = []string{"1", "2"}
+	h := start(t, app)
+	h.press("enter", "enter")
+
+	h.waitFor("  name", "▸ times", "enter next · shift+tab back")
+	h.waitForNo("2/2")
+}
+
 func TestDataOfARunPrintsIndentedUnderItsMessage(t *testing.T) {
 	app := newFakeApp()
 	app.setActions(append(app.actions(), wire.Action{ID: "account.show", Description: "Show the account"}))
@@ -1165,6 +1270,12 @@ type fakeApp struct {
 	watchCanceled []chan struct{}
 	// stopsHeld, while not nil, keeps canceled watches from ending until it closes.
 	stopsHeld chan struct{}
+}
+
+// withNameHints gives the name of app.greet hints.
+func withNameHints(app *fakeApp, hints ...string) *fakeApp {
+	app.described[0].Params[0].Hints = hints
+	return app
 }
 
 func newFakeApp() *fakeApp {
