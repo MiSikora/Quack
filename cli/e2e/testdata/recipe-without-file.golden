@@ -1,0 +1,7 @@
+$ quack --recipe setup
+--- exit 2
+--- stdout
+--- stderr
+quack: no recipe named setup in $XDG_CONFIG_HOME/quack/recipes/io.mehow.quack.sample.toml
+--- device
+shell emulator-5554: query-receivers

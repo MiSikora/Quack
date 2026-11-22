@@ -1,0 +1,6 @@
+$ quack --recipe setup app.greet name=Bob
+--- exit 2
+--- stdout
+--- stderr
+quack: --recipe takes no action or key=value, the recipe fixes them
+--- device

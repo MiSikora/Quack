@@ -1,0 +1,13 @@
+$ quack --open-app --recipe greet
+--- exit 0
+--- stdout
+› app.greet name=Bob
+Hello, Bob!
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: open io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: open io.mehow.quack.sample
+request: {"method":"call","action":"app.greet","args":{"name":"Bob"}}

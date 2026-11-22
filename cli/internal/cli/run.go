@@ -17,6 +17,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/recipe"
 	"quack/internal/tui"
 	"quack/internal/wire"
 )
@@ -32,7 +33,12 @@ func Run(args []string, terminal Terminal) int {
 	}
 	code, message, exit := failure(err)
 	if opts.json {
-		printJSON(terminal.Out, outcomeJSON{Code: code, Message: message})
+		outcome := outcomeJSON{Code: code, Message: message}
+		var step *stepError
+		if errors.As(err, &step) {
+			outcome.Step = step.step
+		}
+		printJSON(terminal.Out, outcome)
 	} else {
 		fmt.Fprintln(terminal.Err, "quack:", err)
 	}
@@ -45,16 +51,20 @@ type options struct {
 	json        bool
 	listActions bool
 	// interactive opens the TUI, which quack without an action does when a person sits at the terminal.
-	interactive  bool
-	listDevices  bool
-	openApp      bool
+	interactive bool
+	listDevices bool
+	listRecipes bool
+	openApp     bool
+	// recipe is the name of the recipe to run, or "" for none.
+	recipe       string
 	startTimeout time.Duration
 	// help asks for usage, which holds quack's own help.
 	help    bool
 	version bool
 	usage   string
 	action  string
-	// filter keeps the actions whose id it matches when listActions has a pattern, and is nil otherwise.
+	// filter keeps the actions whose id, or the recipes whose name, it matches when listActions or listRecipes has a
+	// pattern, and is nil otherwise.
 	filter *regexp.Regexp
 	args   map[string]wire.RawArg
 }
@@ -71,7 +81,9 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	boolFlag(fs, &opts.json, "json", "j", "print JSON lines: each notification, then the outcome with its code")
 	boolFlag(fs, &opts.listActions, "list-actions", "l", "list the app's actions, or only those whose id matches regex")
 	boolFlag(fs, &opts.listDevices, "list-devices", "", "list the devices and the quack-enabled apps on each")
+	boolFlag(fs, &opts.listRecipes, "list-recipes", "", "list the app's recipes, or only those whose name matches regex")
 	boolFlag(fs, &opts.openApp, "open-app", "", "show the app's main screen first, instead of starting it in the background")
+	fs.StringVar(&opts.recipe, "recipe", "", "run the steps of the app's recipe `name` in order")
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
 	boolFlag(fs, &opts.version, "version", "", "show quack's version")
 	boolFlag(fs, &opts.help, "help", "h", "show this help")
@@ -82,11 +94,25 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		"run them with quack <action>, and add --json for output to parse.\n\n" +
 		"usage: quack [options]                           open the terminal UI\n" +
 		"       quack [options] <action> [key=value]...   run an action\n" +
+		"       quack [options] --recipe <name>           run the steps of a recipe\n" +
 		"       quack [options] --list-actions [regex]    list the app's actions and their params\n" +
+		"       quack [options] --list-recipes [regex]    list the app's recipes and their steps\n" +
 		"       quack [options] --list-devices            list the devices and their quack-enabled apps\n\n" +
 		"arguments:\n" +
 		"  key=value   a param of the action. Repeat the key for a list: tag=a tag=b\n\n" +
 		"options:\n" + fs.FlagUsages() + "\n" +
+		"recipes:\n" +
+		"  A recipe runs steps in order with fixed args, and stops at the first that fails: a call of an action, open-app\n" +
+		"  to show the app's main screen, or wait for a duration. The terminal UI runs a recipe as $<name>. The recipes\n" +
+		"  of an app are in $XDG_CONFIG_HOME/quack/recipes/<package>.toml, or in ~/.config/quack/recipes/<package>.toml\n" +
+		"  when XDG_CONFIG_HOME is unset or empty:\n\n" +
+		"    [login]\n" +
+		"    description = \"Log in as the test user\"\n" +
+		"    steps = [\n" +
+		"      { open-app = true },\n" +
+		"      { wait = \"2s\" },\n" +
+		"      { action = \"account.login\", args = { user = \"foo\", remember = true, count = 3, tag = [\"a\", \"b\"] } },\n" +
+		"    ]\n\n" +
 		"exit codes:\n" +
 		"  0  done\n" +
 		"  1  the action rejected the call, failed, or ended without an answer\n" +
@@ -105,24 +131,29 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		return opts, usageErrorf("%q is not a package name", opts.pkg)
 	}
 	rest := fs.Args()
+	var err error
 	switch {
+	case opts.recipe != "":
+		if opts.listActions || opts.listDevices || opts.listRecipes {
+			return opts, usageErrorf("--recipe takes no --list-actions, --list-devices or --list-recipes")
+		}
+		if len(rest) > 0 {
+			return opts, usageErrorf("--recipe takes no action or key=value, the recipe fixes them")
+		}
 	case opts.listDevices:
-		if len(rest) > 0 || opts.listActions {
-			return opts, usageErrorf("--list-devices takes no action or --list-actions")
+		if len(rest) > 0 || opts.listActions || opts.listRecipes {
+			return opts, usageErrorf("--list-devices takes no action, --list-actions or --list-recipes")
 		}
+	case opts.listActions && opts.listRecipes:
+		return opts, usageErrorf("--list-actions and --list-recipes go one at a time")
 	case opts.listActions:
-		if len(rest) > 1 {
-			return opts, usageErrorf("--list-actions takes at most one regex")
-		}
-		if len(rest) == 1 {
-			filter, err := regexp.Compile(rest[0])
-			if err != nil {
-				return opts, usageErrorf("invalid --list-actions pattern: %v", err)
-			}
-			opts.filter = filter
-		}
+		opts.filter, err = parseFilter(rest, "--list-actions")
+		return opts, err
+	case opts.listRecipes:
+		opts.filter, err = parseFilter(rest, "--list-recipes")
+		return opts, err
 	case len(rest) == 0 && opts.json:
-		return opts, usageErrorf("--json needs an action, --list-actions or --list-devices")
+		return opts, usageErrorf("--json needs an action, --recipe, --list-actions, --list-recipes or --list-devices")
 	case len(rest) == 0:
 		opts.interactive, opts.help = terminal.TUI, !terminal.TUI
 	default:
@@ -158,6 +189,15 @@ func run(opts options, terminal Terminal) error {
 	if err != nil {
 		return err
 	}
+	if opts.listRecipes {
+		return printRecipes(terminal.Out, target.Package, opts.filter, opts.json)
+	}
+	var r recipe.Recipe
+	if opts.recipe != "" {
+		if r, err = findRecipe(target.Package, opts.recipe); err != nil {
+			return err
+		}
+	}
 	app, err := client.Resolve(client.Options{
 		Target:       target,
 		Mode:         mode,
@@ -182,20 +222,44 @@ func run(opts options, terminal Terminal) error {
 		}
 		return nil
 	}
+	if opts.recipe != "" {
+		return runRecipe(app, r, terminal, opts.json)
+	}
 	call := wire.Call{Action: opts.action, Args: opts.args}
-	result, err := app.Call(context.Background(), call, printNotifications(terminal, opts.json))
+	result, err := app.Call(context.Background(), call, printNotifications(terminal, opts.json, 0))
 	if err != nil {
 		return err
 	}
-	if opts.json {
-		printJSON(terminal.Out, outcomeJSON{Code: codeOK, Message: result.Message, Data: result.Data})
-		return nil
+	printResult(terminal, opts.json, result, 0)
+	return nil
+}
+
+// printResult prints the message and the data of a call, or with json its outcomeJSON for step, which is 0 outside a
+// recipe.
+func printResult(terminal Terminal, json bool, result wire.MessageResult, step int) {
+	if json {
+		printJSON(terminal.Out, outcomeJSON{Code: codeOK, Message: result.Message, Data: result.Data, Step: step})
+		return
 	}
 	fmt.Fprintln(terminal.Out, result.Message)
 	if result.Data != nil {
 		fmt.Fprintln(terminal.Out, result.IndentedData())
 	}
-	return nil
+}
+
+// parseFilter reads the one regex that flag may take, or nil without one.
+func parseFilter(rest []string, flag string) (*regexp.Regexp, error) {
+	switch len(rest) {
+	case 0:
+		return nil, nil
+	case 1:
+		filter, err := regexp.Compile(rest[0])
+		if err != nil {
+			return nil, usageErrorf("invalid %s pattern: %v", flag, err)
+		}
+		return filter, nil
+	}
+	return nil, usageErrorf("%s takes at most one regex", flag)
 }
 
 // boolFlag declares an on/off flag that sets *p. pflag prints [=true|false] after every bool flag in help, and
@@ -224,11 +288,12 @@ func parseArgs(words []string) (map[string]wire.RawArg, error) {
 	return args, nil
 }
 
-// printNotifications prints the message of each notification, or with json each notification as a notificationJSON.
-func printNotifications(terminal Terminal, json bool) client.NotificationFunc {
+// printNotifications prints the message of each notification, or with json each notification as a notificationJSON of
+// step, which is 0 outside a recipe.
+func printNotifications(terminal Terminal, json bool, step int) client.NotificationFunc {
 	return func(message string) {
 		if json {
-			printJSON(terminal.Out, notificationJSON{codeNotification, message})
+			printJSON(terminal.Out, notificationJSON{codeNotification, message, step})
 		} else {
 			fmt.Fprintln(terminal.Out, message)
 		}

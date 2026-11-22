@@ -1,0 +1,6 @@
+$ quack --list-recipes --list-actions
+--- exit 2
+--- stdout
+--- stderr
+quack: --list-actions and --list-recipes go one at a time
+--- device

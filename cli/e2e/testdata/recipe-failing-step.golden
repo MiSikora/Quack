@@ -1,0 +1,13 @@
+$ quack --recipe clean
+--- exit 1
+--- stdout
+› account.delete
+--- stderr
+quack: [rejected] there is no account
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"account.delete"}

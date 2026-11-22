@@ -1,0 +1,20 @@
+$ quack --json --recipe setup
+--- exit 0
+--- stdout
+{"code":"ok","message":"","step":1}
+{"code":"ok","message":"","step":2}
+{"code":"notification","message":"Started","step":3}
+{"code":"notification","message":"Creating account","step":3}
+{"code":"ok","message":"Created","step":3}
+{"code":"ok","message":"tag=[a b c]","step":4}
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: open io.mehow.quack.sample
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"account.create","args":{"username":"alice"}}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.params","args":{"count":"3","flag":"true","tag":["a","b c"]}}

@@ -1,0 +1,26 @@
+$ quack --list-recipes
+--- exit 0
+--- stdout
+broken
+    app.greet name=Bob
+    app.params count=many
+
+clean
+    Delete the account, then greet.
+
+    account.delete
+    app.greet name=Bob
+
+greet
+    app.greet name=Bob
+
+setup
+    Create the account and greet.
+
+    /open-app
+    wait 10ms
+    account.create username=alice
+    app.params count=3 flag=true tag=a tag='b c'
+--- stderr
+--- device
+shell emulator-5554: query-receivers

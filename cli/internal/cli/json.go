@@ -12,18 +12,28 @@ import (
 )
 
 // notificationJSON is a notification as --json prints it, on a line before the outcome: codeNotification and the
-// notification's message.
+// notification's message. Step numbers the recipe's step from 1, and is absent outside a recipe.
 type notificationJSON struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	Step    int    `json:"step,omitempty"`
 }
 
 // outcomeJSON is how a command ended, as --json prints it on its last line: codeOK with the action's message and data,
-// or the code of a failure and what went wrong.
+// or the code of a failure and what went wrong. A recipe prints one for each step, which Step numbers from 1, and the
+// one of a failed step is its last.
 type outcomeJSON struct {
 	Code    string          `json:"code"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data,omitempty"`
+	Step    int             `json:"step,omitempty"`
+}
+
+// recipeJSON is a recipe as quack --list-recipes --json prints it. Each step is as a user types it.
+type recipeJSON struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Steps       []string `json:"steps"`
 }
 
 // actionJSON is an action as quack --list-actions --json prints it.

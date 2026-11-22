@@ -42,6 +42,8 @@ type scenario struct {
 	device func(*fakeDevice)
 	// others are devices connected besides the default one.
 	others func() []*fakeDevice
+	// recipes is the sample app's recipe file, which is missing when recipes is empty.
+	recipes string
 }
 
 var scenarios = []scenario{
@@ -153,7 +155,51 @@ var scenarios = []scenario{
 
 	// Without an action, quack prints its help instead of opening the TUI, since stdin is not a terminal here.
 	{name: "no-action-from-dev-null", stdinDevNull: true},
+
+	// Recipes.
+	{name: "recipe", args: []string{"--recipe", "setup"}, recipes: sampleRecipes},
+	{name: "recipe-json", args: []string{"--json", "--recipe", "setup"}, recipes: sampleRecipes},
+	{name: "recipe-open-app-flag", args: []string{"--open-app", "--recipe", "greet"}, recipes: sampleRecipes},
+	{name: "recipe-failing-step", args: []string{"--recipe", "clean"}, recipes: sampleRecipes},
+	{name: "recipe-failing-step-json", args: []string{"--json", "--recipe", "clean"}, recipes: sampleRecipes},
+	{name: "recipe-check-fails", args: []string{"--recipe", "broken"}, recipes: sampleRecipes},
+	{name: "recipe-check-fails-json", args: []string{"--json", "--recipe", "broken"}, recipes: sampleRecipes},
+	{name: "recipe-unknown", args: []string{"--recipe", "nope"}, recipes: sampleRecipes},
+	{name: "recipe-without-file", args: []string{"--recipe", "setup"}},
+	{name: "recipe-broken-file", args: []string{"--recipe", "setup"}, recipes: "[setup]\nsteps = [{ wait = \"soon\" }]\n"},
+	{name: "recipe-with-action", args: []string{"--recipe", "setup", "app.greet", "name=Bob"}, recipes: sampleRecipes},
+	{name: "recipe-with-list-actions", args: []string{"--recipe", "setup", "--list-actions"}, recipes: sampleRecipes},
+	{name: "list-recipes", args: []string{"--list-recipes"}, recipes: sampleRecipes},
+	{name: "list-recipes-filter", args: []string{"--list-recipes", "^s"}, recipes: sampleRecipes},
+	{name: "list-recipes-no-match", args: []string{"--list-recipes", "nope"}, recipes: sampleRecipes},
+	{name: "list-recipes-json", args: []string{"--json", "--list-recipes"}, recipes: sampleRecipes},
+	{name: "list-recipes-none", args: []string{"--list-recipes"}},
+	{name: "list-recipes-none-json", args: []string{"--json", "--list-recipes"}},
+	{name: "list-recipes-broken-file", args: []string{"--list-recipes"}, recipes: "[setup]\nsteps = [{ wait = \"soon\" }]\n"},
+	{name: "list-recipes-with-list-actions", args: []string{"--list-recipes", "--list-actions"}},
 }
+
+// sampleRecipes is a recipe file for the sample app.
+const sampleRecipes = `
+[setup]
+description = "Create the account and greet"
+steps = [
+  { open-app = true },
+  { wait = "10ms" },
+  { action = "account.create", args = { username = "alice" } },
+  { action = "app.params", args = { tag = ["a", "b c"], count = 3, flag = true } },
+]
+
+[greet]
+steps = [{ action = "app.greet", args = { name = "Bob" } }]
+
+[clean]
+description = "Delete the account, then greet"
+steps = [{ action = "account.delete" }, { action = "app.greet", args = { name = "Bob" } }]
+
+[broken]
+steps = [{ action = "app.greet", args = { name = "Bob" } }, { action = "app.params", args = { count = "many" } }]
+`
 
 func TestScenarios(t *testing.T) {
 	for _, s := range scenarios {
@@ -188,8 +234,18 @@ func TestScenarios(t *testing.T) {
 
 // run runs quack for s and describes everything it did: its exit code, its output and what reached the device.
 func run(t *testing.T, adb *fakeAdb, s scenario) string {
+	config := t.TempDir()
+	if s.recipes != "" {
+		dir := filepath.Join(config, "quack", "recipes")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "io.mehow.quack.sample.toml"), []byte(s.recipes), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cmd := exec.Command(os.Args[0], s.args...)
-	cmd.Env = append(cleanEnv(), runAsQuack+"=1", "ANDROID_ADB_SERVER_PORT="+adb.port())
+	cmd.Env = append(cleanEnv(), runAsQuack+"=1", "ANDROID_ADB_SERVER_PORT="+adb.port(), "XDG_CONFIG_HOME="+config)
 	cmd.Env = append(cmd.Env, s.env...)
 	cmd.Stdin = strings.NewReader("")
 	if s.stdinDevNull {
@@ -216,8 +272,10 @@ func run(t *testing.T, adb *fakeAdb, s scenario) string {
 		fmt.Fprintf(&out, "--- stdin from %s\n", os.DevNull)
 	}
 	fmt.Fprintf(&out, "--- exit %d\n", code)
-	fmt.Fprintf(&out, "--- stdout\n%s", ensureNewline(stdout.String()))
-	fmt.Fprintf(&out, "--- stderr\n%s", ensureNewline(stderr.String()))
+	// The config dir differs on each run, so the output names it as the variable that points to it.
+	hideConfig := strings.NewReplacer(config, "$XDG_CONFIG_HOME")
+	fmt.Fprintf(&out, "--- stdout\n%s", ensureNewline(hideConfig.Replace(stdout.String())))
+	fmt.Fprintf(&out, "--- stderr\n%s", ensureNewline(hideConfig.Replace(stderr.String())))
 	out.WriteString("--- device\n")
 	for _, entry := range adb.recorded() {
 		out.WriteString(entry + "\n")
@@ -231,7 +289,7 @@ func cleanEnv() []string {
 	for _, kv := range os.Environ() {
 		key, _, _ := strings.Cut(kv, "=")
 		switch key {
-		case "ANDROID_SERIAL", "ANDROID_ADB_SERVER_PORT", "NO_COLOR":
+		case "ANDROID_SERIAL", "ANDROID_ADB_SERVER_PORT", "NO_COLOR", "XDG_CONFIG_HOME":
 			continue
 		}
 		env = append(env, kv)

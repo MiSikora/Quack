@@ -1,0 +1,10 @@
+$ quack --json --recipe broken
+--- exit 2
+--- stdout
+{"code":"invalid_args","message":"recipe 'broken' step 2: 'count' expects int, got 'many'"}
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}

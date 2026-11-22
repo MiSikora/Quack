@@ -1,0 +1,7 @@
+$ quack --json --list-recipes
+--- exit 0
+--- stdout
+[]
+--- stderr
+--- device
+shell emulator-5554: query-receivers

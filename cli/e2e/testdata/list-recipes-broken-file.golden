@@ -1,0 +1,7 @@
+$ quack --list-recipes
+--- exit 2
+--- stdout
+--- stderr
+quack: $XDG_CONFIG_HOME/quack/recipes/io.mehow.quack.sample.toml: recipe 'setup' step 1: wait 'soon' is not a duration above zero, such as 2s or 500ms
+--- device
+shell emulator-5554: query-receivers

@@ -1,0 +1,22 @@
+$ quack --recipe setup
+--- exit 0
+--- stdout
+› /open-app
+› wait 10ms
+› account.create username=alice
+Started
+Creating account
+Created
+› app.params count=3 flag=true tag=a tag='b c'
+tag=[a b c]
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: open io.mehow.quack.sample
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"account.create","args":{"username":"alice"}}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.params","args":{"count":"3","flag":"true","tag":["a","b c"]}}

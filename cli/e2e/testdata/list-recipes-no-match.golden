@@ -1,0 +1,7 @@
+$ quack --list-recipes nope
+--- exit 2
+--- stdout
+--- stderr
+quack: no recipe matches 'nope'
+--- device
+shell emulator-5554: query-receivers

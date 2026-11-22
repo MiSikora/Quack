@@ -2,5 +2,5 @@ $ quack --list-devices --list-actions
 --- exit 2
 --- stdout
 --- stderr
-quack: --list-devices takes no action or --list-actions
+quack: --list-devices takes no action, --list-actions or --list-recipes
 --- device
