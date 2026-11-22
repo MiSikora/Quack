@@ -2,7 +2,7 @@ $ quack --device 3A251FDH2000XY app.greet
 --- exit 3
 --- stdout
 --- stderr
-quack: several quack packages on 3A251FDH2000XY, pick one:
+quack: several quack-enabled apps on 3A251FDH2000XY, pick one:
   --device 3A251FDH2000XY --app io.mehow.quack.sample
   --device 3A251FDH2000XY --app com.duckduckgo.mobile
 --- device

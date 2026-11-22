@@ -81,7 +81,7 @@ func (p *picker) toStep(s step) {
 	p.selected = ""
 	p.input.Placeholder = "pick a device"
 	if s == packageStep {
-		p.input.Placeholder = "pick a package"
+		p.input.Placeholder = "pick an app"
 	}
 }
 
@@ -137,13 +137,13 @@ func (p *picker) allRows(devices []seenDevice) []pickRow {
 		case d.State != adb.Ready:
 			row.note = d.State
 		case !d.inspected:
-			row.note = "looking for packages…"
+			row.note = "looking for apps…"
 		case count == 0:
-			row.note = "no quack package"
+			row.note = "no quack-enabled app"
 		case count == 1:
-			row.note, row.ok = "1 package", true
+			row.note, row.ok = "1 app", true
 		default:
-			row.note, row.ok = strconv.Itoa(count)+" packages", true
+			row.note, row.ok = strconv.Itoa(count)+" apps", true
 		}
 		rows = append(rows, row)
 	}
@@ -310,7 +310,7 @@ func (p *picker) waiting(listed bool, total int) string {
 	case p.step == packageStep && p.want.Package != "":
 		return "waiting for " + p.want.Package + " on " + string(p.device)
 	case p.step == packageStep:
-		return "no quack package on " + string(p.device) + " · waiting for one"
+		return "no quack-enabled app on " + string(p.device) + " · waiting for one"
 	case p.want.Device != "" && p.want.Package != "":
 		return "waiting for " + p.want.Package + " on " + string(p.want.Device)
 	case p.want.Package != "":

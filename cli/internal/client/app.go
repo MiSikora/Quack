@@ -320,7 +320,7 @@ func ambiguity(targets []Target) string {
 	if len(devices) == 1 {
 		where = string(targets[0].Device)
 	}
-	return fmt.Sprintf("several quack packages on %s, pick one:\n  %s", where, strings.Join(flags, "\n  "))
+	return fmt.Sprintf("several quack-enabled apps on %s, pick one:\n  %s", where, strings.Join(flags, "\n  "))
 }
 
 var packagePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)

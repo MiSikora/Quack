@@ -2,7 +2,7 @@ $ quack app.greet
 --- exit 3
 --- stdout
 --- stderr
-quack: several quack packages on 2 devices, pick one:
+quack: several quack-enabled apps on 2 devices, pick one:
   --device emulator-5554 --app io.mehow.quack.sample
   --device 3A251FDH2000XY --app io.mehow.quack.sample
   --device 3A251FDH2000XY --app com.duckduckgo.mobile
