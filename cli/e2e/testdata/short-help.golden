@@ -1,10 +1,20 @@
 $ quack -h
 --- exit 0
 --- stdout
-usage: quack [options]
-       quack [options] <action> [key=value]...
-       quack [options] --list-actions [regex]
-       quack [options] --list-devices
+quack runs the debug actions of a quack-enabled Android app over adb.
+
+With no action, quack opens a terminal UI to pick a device and an app, then find and run actions. It prints
+this help instead when stdin or stdout is not a terminal, AI_AGENT is set, or CI is set. With an action,
+quack runs it once, prints the outcome and exits. Scripts and agents: list the actions with --list-actions,
+run them with quack <action>, and add --json for output to parse.
+
+usage: quack [options]                           open the terminal UI
+       quack [options] <action> [key=value]...   run an action
+       quack [options] --list-actions [regex]    list the app's actions and their params
+       quack [options] --list-devices            list the devices and their quack-enabled apps
+
+arguments:
+  key=value   a param of the action. Repeat the key for a list: tag=a tag=b
 
 options:
   -a, --app package              the app, by its package (default: the only quack-enabled app on the device)
@@ -16,5 +26,11 @@ options:
       --start-timeout duration   how long to wait for the app to answer (default 15s)
       --version                  show quack's version
   -h, --help                     show this help
+
+exit codes:
+  0  done
+  1  the action rejected the call, failed, or ended without an answer
+  2  bad usage, an unknown action, or invalid args
+  3  no device or app to reach
 --- stderr
 --- device

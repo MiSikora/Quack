@@ -75,11 +75,23 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
 	boolFlag(fs, &opts.version, "version", "", "show quack's version")
 	boolFlag(fs, &opts.help, "help", "h", "show this help")
-	opts.usage = "usage: quack [options]\n" +
-		"       quack [options] <action> [key=value]...\n" +
-		"       quack [options] --list-actions [regex]\n" +
-		"       quack [options] --list-devices\n\n" +
-		"options:\n" + fs.FlagUsages()
+	opts.usage = "quack runs the debug actions of a quack-enabled Android app over adb.\n\n" +
+		"With no action, quack opens a terminal UI to pick a device and an app, then find and run actions. It prints\n" +
+		"this help instead when stdin or stdout is not a terminal, AI_AGENT is set, or CI is set. With an action,\n" +
+		"quack runs it once, prints the outcome and exits. Scripts and agents: list the actions with --list-actions,\n" +
+		"run them with quack <action>, and add --json for output to parse.\n\n" +
+		"usage: quack [options]                           open the terminal UI\n" +
+		"       quack [options] <action> [key=value]...   run an action\n" +
+		"       quack [options] --list-actions [regex]    list the app's actions and their params\n" +
+		"       quack [options] --list-devices            list the devices and their quack-enabled apps\n\n" +
+		"arguments:\n" +
+		"  key=value   a param of the action. Repeat the key for a list: tag=a tag=b\n\n" +
+		"options:\n" + fs.FlagUsages() + "\n" +
+		"exit codes:\n" +
+		"  0  done\n" +
+		"  1  the action rejected the call, failed, or ended without an answer\n" +
+		"  2  bad usage, an unknown action, or invalid args\n" +
+		"  3  no device or app to reach\n"
 	if err := fs.Parse(argv); err != nil {
 		return opts, usageErrorf("%v. See quack --help.", err)
 	}
