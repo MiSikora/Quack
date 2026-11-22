@@ -1,0 +1,16 @@
+$ quack --json --recipe careful
+--- exit 0
+--- stdout
+{"code":"rejected","message":"there is no account","step":1}
+{"code":"log","message":"kept going: [rejected] there is no account","step":1}
+{"code":"ok","message":"Hello, Bob!","step":2}
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"account.delete"}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.greet","args":{"name":"Bob"}}

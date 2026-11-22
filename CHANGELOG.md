@@ -8,8 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- CLI: recipes are TypeScript or JavaScript scripts that can take params, branch on what actions return, and share code. `quack --init-recipes --app <package>` and `/init-recipes` in the terminal UI start an app's recipes file and set up editors to check it.
 - CLI: the terminal UI commands `/quit`, `/stop-action`, `/switch-app` and `/switch-device` are now `/exit`, `/cancel`, `/pick-app` and `/pick-device`.
 - CLI: the terminal UI and the CLI's messages say app where they said package, except for the package name itself.
+- MCP: `list_recipes` gives each recipe's params instead of its steps, and `run_recipe` takes `args` and returns what the recipe logged and the error of each step that failed.
 - CLI: `/clear` in the terminal UI keeps the duck at the top of the log.
 - CLI and MCP: actions, recipes and terminal UI commands are listed sorted by name, not in the order the app declares actions.
 

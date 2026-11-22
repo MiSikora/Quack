@@ -21,8 +21,8 @@ type notificationJSON struct {
 }
 
 // outcomeJSON is how a command ended, as --json prints it on its last line: codeOK with the action's message and data,
-// or the code of a failure and what went wrong. A recipe prints one for each step, which Step numbers from 1, and the
-// one of a failed step is its last.
+// or the code of a failure and what went wrong. A recipe prints one for each step, which Step numbers from 1. The one
+// of a failed step is its last, unless the recipe caught the failure and went on.
 type outcomeJSON struct {
 	Code    string          `json:"code"`
 	Message string          `json:"message"`
@@ -30,11 +30,11 @@ type outcomeJSON struct {
 	Step    int             `json:"step,omitempty"`
 }
 
-// recipeJSON is a recipe as quack --list-recipes --json prints it. Each step is as a user types it.
+// recipeJSON is a recipe as quack --list-recipes --json prints it.
 type recipeJSON struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Steps       []string `json:"steps"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Params      []paramJSON `json:"params"`
 }
 
 // actionJSON is an action as quack --list-actions --json prints it.
@@ -71,7 +71,13 @@ func failure(err error) (code, message string, exit int) {
 		if !ok {
 			exit = exitAction
 		}
-		return string(refused.Code), refused.Message, exit
+		message := refused.Message
+		// A recipe that ended on the app's error says where it was.
+		var thrown *recipe.ScriptError
+		if errors.As(err, &thrown) {
+			message = (&recipe.ScriptError{Err: errors.New(message), Stack: thrown.Stack}).Error()
+		}
+		return string(refused.Code), message, exit
 	case errors.As(err, &usage):
 		return "usage", err.Error(), exitUsage
 	case errors.As(err, &device):
@@ -90,23 +96,27 @@ func failure(err error) (code, message string, exit int) {
 func printActionsJSON(w io.Writer, actions []wire.Action) {
 	out := make([]actionJSON, len(actions))
 	for i, a := range actions {
-		params := make([]paramJSON, len(a.Params))
-		for j, p := range a.Params {
-			params[j] = paramJSON{Name: p.Name, Type: string(p.Type), Description: p.Description, Choices: p.Choices}
-			switch presence := p.Presence.(type) {
-			case wire.Required:
-				params[j].Required = true
-			case wire.Default:
-				if p.Type.IsList() {
-					params[j].Default = presence.Values
-				} else if len(presence.Values) > 0 {
-					params[j].Default = presence.Values[0]
-				}
-			}
-		}
-		out[i] = actionJSON{ID: a.ID, Description: a.Description, Params: params}
+		out[i] = actionJSON{ID: a.ID, Description: a.Description, Params: paramsJSON(a.Params)}
 	}
 	printJSON(w, out)
+}
+
+func paramsJSON(params []wire.Param) []paramJSON {
+	out := make([]paramJSON, len(params))
+	for i, p := range params {
+		out[i] = paramJSON{Name: p.Name, Type: string(p.Type), Description: p.Description, Choices: p.Choices}
+		switch presence := p.Presence.(type) {
+		case wire.Required:
+			out[i].Required = true
+		case wire.Default:
+			if p.Type.IsList() {
+				out[i].Default = presence.Values
+			} else if len(presence.Values) > 0 {
+				out[i].Default = presence.Values[0]
+			}
+		}
+	}
+	return out
 }
 
 func printJSON(w io.Writer, value any) {
@@ -115,8 +125,10 @@ func printJSON(w io.Writer, value any) {
 	fmt.Fprintln(w, string(line))
 }
 
-// codeOK is the --json code of a command that succeeded, and codeNotification of a notification before its outcome.
+// codeOK is the --json code of a command that succeeded, codeNotification of a notification before its outcome, and
+// codeLog of a line that a recipe logged.
 const (
 	codeOK           = "ok"
 	codeNotification = "notification"
+	codeLog          = "log"
 )

@@ -1,8 +1,8 @@
-$ quack --recipe greet-env
+$ quack --json --recipe greet name=a name=b
 --- exit 2
 --- stdout
+{"code":"invalid_args","message":"recipe 'greet': 'name' given more than once"}
 --- stderr
-quack: recipe 'greet-env' step 1: arg 'name': environment variable 'QUACK_NAME' is not set
 --- device
 shell emulator-5554: query-receivers
 shell emulator-5554: get-current-user

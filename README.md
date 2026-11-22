@@ -67,24 +67,37 @@ quack app.greet name=Duck
 
 Run `quack --help` to see everything else.
 
-## Save steps as recipes
+## Script your setups as recipes
 
-A recipe runs several steps in a row, so you can repeat a setup with one command. Recipes are kept on your computer, one file per app, in `~/.config/quack/recipes/<app package>.toml`:
+A recipe is a small TypeScript or JavaScript function that runs actions and commands, and decides what to do with what they return. Recipes are kept on your computer, one file per app, in `~/.config/quack/recipes/<app package>.ts`. To start the file of an app, along with what your editor needs to autocomplete and check it, run:
 
-```toml
-[greet-and-go-back]
-description = "Open the app, say hello, then press back"
-steps = [
-  { open-app = true },
-  { wait = "1s" },
-  { action = "app.greet", args = { name = "Duck" } },
-  { shell = "input keyevent KEYCODE_BACK" },
-]
+```
+quack --init-recipes --app <app package>
 ```
 
-A step can run an action, open the app, wait, or run a command on the phone (`shell`) or on your computer (`run`). Quack stops at the first step that fails.
+or type `/init-recipes` in `quack`.
 
-Run it with `quack --recipe greet-and-go-back`, or type `$greet-and-go-back` in `quack`.
+Each exported recipe gets its name from its export:
+
+```ts
+import quack from "quack"
+
+export const greetAndGoBack = quack.recipe({
+  description: "Open the app, say hello, then press back",
+  params: { name: { type: "string", default: "Duck", hints: ["Duck", "Goose"] } },
+  run({ name }) {
+    quack.openApp()
+    quack.wait("1s")
+    const greeting = quack.runAction("app.greet", { name })
+    console.log(greeting.message)
+    quack.shell("input keyevent KEYCODE_BACK")
+  },
+})
+```
+
+A recipe can run actions (`quack.runAction`), open the app (`quack.openApp`), wait (`quack.wait`, `quack.waitUntil`), and run commands on the phone (`quack.shell`) or on your computer (`quack.run`). A step that fails throws, so the recipe stops unless it catches the error. Recipes can import your own files, but not npm packages.
+
+Run it with `quack --recipe greetAndGoBack name=Goose`, or type `$greetAndGoBack` in `quack`.
 
 ## Use it with AI agents
 

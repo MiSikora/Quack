@@ -12,7 +12,6 @@ import (
 	"io"
 	"reflect"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -32,8 +31,9 @@ type Source interface {
 	Find(device adb.Device, pkg string) (client.Target, error)
 	// Connect gets the app of target running the way mode says before each request.
 	Connect(target client.Target, mode client.StartMode) (App, error)
-	// Recipes are the recipes of pkg, as recipe.Load reads them, and the file they come from.
-	Recipes(pkg string) ([]recipe.Recipe, string, error)
+	// Recipes are the recipes of pkg, as recipe.Load reads them, or nil without a recipes file, and the file they come
+	// from.
+	Recipes(pkg string) (*recipe.Script, string, error)
 }
 
 // App is what the server needs from a quack app. client.App satisfies it.
@@ -68,25 +68,23 @@ func New(source Source, version string) *mcp.Server {
 		Name: "run_action",
 		Description: "Run an action of a quack-enabled app and return its notifications, its message and its data. " +
 			"Get the action ids and their params from list_actions. The args reach the app as given: ${NAME} stays as " +
-			"it is, since only the steps of a recipe take environment variables. " + targetHelp,
+			"it is. " + targetHelp,
 		InputSchema:  runActionSchema,
 		OutputSchema: schemaFor[runActionOutput](),
 	}, s.runAction)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "list_recipes",
-		Description: "List the recipes of a quack-enabled app: named lists of steps with fixed args that the user keeps " +
-			"in a file on this computer. Each step is a call of an action as the command line writes it, /open-app, which " +
-			"shows the app's main screen, a wait, shell with a command that runs on the device, or run with a command that " +
-			"runs on this computer. An arg or a command written ${NAME} takes the environment variable NAME of quack-mcp, " +
-			"except ${QUACK_PACKAGE} and ${ANDROID_SERIAL}, which are the app and the device the recipe runs against. " +
-			targetHelp,
+		Description: "List the recipes of a quack-enabled app with their params: scripts that the user keeps in a file " +
+			"on this computer, which run the app's actions, commands on the device or on this computer, and waits, and " +
+			"decide what to do with what they return. " + targetHelp,
 	}, s.listRecipes)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "run_recipe",
-		Description: "Run a recipe of a quack-enabled app, step by step, and return what each step gave: its " +
-			"notifications, its message and its data. The message of a command is what it printed. The recipe runs no " +
-			"step when one of its calls would not pass the app's checks, and stops at the first step that fails. Get the " +
-			"recipe names from list_recipes. " + targetHelp,
+		Description: "Run a recipe of a quack-enabled app with args for its params, and return what each of its steps " +
+			"gave, a call of an action, /open-app, a wait, or a shell or run command: its notifications, and its message and " +
+			"its data or the error it failed with, and the lines the recipe logged. The message of a command is what it " +
+			"printed. A step that fails ends the recipe unless the recipe catches it. Get the recipe names and params from list_recipes. " + targetHelp,
+		InputSchema:  schemaFor[runRecipeInput](),
 		OutputSchema: schemaFor[runRecipeOutput](),
 	}, s.runRecipe)
 	return server
@@ -166,27 +164,40 @@ type listRecipesOutput struct {
 }
 
 type recipeOutput struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Steps       []string `json:"steps"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Params      []paramOutput `json:"params"`
 }
 
 type runRecipeInput struct {
 	Recipe string `json:"recipe" jsonschema:"the name of the recipe, as list_recipes gives it"`
-	Device string `json:"device,omitempty" jsonschema:"the device's serial, as list_devices gives it"`
-	App    string `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
+	// Args are JSON values, as the args of run_action are.
+	Args   map[string]json.RawMessage `json:"args,omitempty" jsonschema:"the recipe's params by name, as the args of run_action"`
+	Device string                     `json:"device,omitempty" jsonschema:"the device's serial, as list_devices gives it"`
+	App    string                     `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
 }
 
 type runRecipeOutput struct {
 	Steps []stepOutput `json:"steps"`
+	// Log is what the recipe logged with console.log, in order.
+	Log []string `json:"log"`
 }
 
-// stepOutput is what a step of a recipe gave. Only a call of an action has a message and data.
+// stepOutput is what a step of a recipe gave. Only a call of an action or a command has a message, and only a call
+// data. A step that failed has an error instead, which the recipe caught when it went on.
 type stepOutput struct {
 	Step          string          `json:"step"`
 	Notifications []string        `json:"notifications"`
 	Message       string          `json:"message"`
 	Data          json.RawMessage `json:"data,omitempty"`
+	Error         *errorOutput    `json:"error,omitempty"`
+}
+
+// errorOutput is why a step failed: the app's error code, or command for a command that exited with another status
+// than 0, no_reply for a call that ended without the app's answer, and error for anything else.
+type errorOutput struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 type runActionOutput struct {
@@ -246,7 +257,7 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 	}
 	mode := client.Wake
 	if in.OpenApp {
-		mode = client.Open
+		mode = client.OpenApp
 	}
 	_, app, err := s.connect(in.Device, in.App, mode)
 	if err != nil {
@@ -280,71 +291,103 @@ func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRec
 	if err != nil {
 		return nil, listRecipesOutput{}, err
 	}
-	recipes, file, err := s.source.Recipes(target.Package)
+	script, file, err := s.source.Recipes(target.Package)
 	if err != nil {
 		return nil, listRecipesOutput{}, err
 	}
 	out := listRecipesOutput{Device: string(target.Device), App: target.Package, File: file, Recipes: []recipeOutput{}}
-	for _, r := range recipes {
-		if filter != nil && !filter.MatchString(r.Name) {
-			continue
+	if script == nil {
+		return nil, out, nil
+	}
+	for _, r := range script.Recipes {
+		if filter == nil || filter.MatchString(r.Name) {
+			params := action(wire.Action{Params: r.Params}).Params
+			out.Recipes = append(out.Recipes, recipeOutput{Name: r.Name, Description: r.Description, Params: params})
 		}
-		steps := make([]string, len(r.Steps))
-		for i, step := range r.Steps {
-			steps[i] = recipe.Line(step, nil)
-		}
-		out.Recipes = append(out.Recipes, recipeOutput{Name: r.Name, Description: r.Description, Steps: steps})
 	}
 	return nil, out, nil
 }
 
-// runRecipe runs the steps of the recipe, after checking its calls against the app's actions, so that a recipe the app
-// would refuse runs no step. Each step's line and then its notifications go out as progress notifications when the
-// client asked for them. The client canceling the request cancels the step that runs. A failed step ends the recipe
-// with an error that holds what the steps before it gave, as the command line prints them.
+// runRecipe runs the recipe with args. Each step's line and then its notifications go out as progress notifications
+// when the client asked for them, and so do the lines the recipe logs. The client canceling the request interrupts the
+// recipe. A recipe that fails ends with an error that holds what came before it, as the command line prints it.
 func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRecipeInput) (*mcp.CallToolResult, runRecipeOutput, error) {
+	args, err := rawArgs(in.Args)
+	if err != nil {
+		return nil, runRecipeOutput{}, err
+	}
 	target, app, err := s.connect(in.Device, in.App, client.Wake)
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	recipes, file, err := s.source.Recipes(target.Package)
+	script, file, err := s.source.Recipes(target.Package)
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	at := slices.IndexFunc(recipes, func(r recipe.Recipe) bool { return r.Name == in.Recipe })
-	if at < 0 {
+	if script == nil {
 		return nil, runRecipeOutput{}, fmt.Errorf("no recipe named %s in %s", in.Recipe, file)
 	}
-	r := recipes[at]
 	_, actions, err := app.Describe(ctx)
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	if err := recipe.Check(r, actions, app.Target()); err != nil {
+	report := progress(ctx, req)
+	out := runRecipeOutput{Steps: []stepOutput{}, Log: []string{}}
+	var printed []string
+	print := func(line string) {
+		printed = append(printed, line)
+		report(line)
+	}
+	var done stepOutput
+	err = script.Run(ctx, app, in.Recipe, args, recipe.Observer{
+		Started: func(step recipe.Step) {
+			done = stepOutput{Step: recipe.Line(step, actions), Notifications: []string{}}
+			print("› " + done.Step)
+		},
+		Notified: func(message string) {
+			done.Notifications = append(done.Notifications, message)
+			print(message)
+		},
+		Ended: func(_ recipe.Step, result wire.MessageResult) {
+			if result.Message != "" {
+				printed = append(printed, result.Message)
+			}
+			done.Message, done.Data = result.Message, result.Data
+			out.Steps = append(out.Steps, done)
+		},
+		Failed: func(_ recipe.Step, err error) {
+			report(err.Error())
+			done.Error = stepError(err)
+			out.Steps = append(out.Steps, done)
+		},
+		Logged: func(text string) {
+			out.Log = append(out.Log, text)
+			print(text)
+		},
+	})
+	if err != nil {
+		if len(printed) > 0 {
+			err = fmt.Errorf("%s\n%w", strings.Join(printed, "\n"), err)
+		}
 		return nil, runRecipeOutput{}, err
 	}
-	report := progress(ctx, req)
-	out := runRecipeOutput{Steps: []stepOutput{}}
-	var printed []string
-	for _, step := range r.Steps {
-		done := stepOutput{Step: recipe.Line(step, actions), Notifications: []string{}}
-		printed = append(printed, "› "+done.Step)
-		report(printed[len(printed)-1])
-		result, err := recipe.Do(ctx, app, step, func(message string) {
-			done.Notifications = append(done.Notifications, message)
-			printed = append(printed, message)
-			report(message)
-		})
-		if err != nil {
-			return nil, runRecipeOutput{}, fmt.Errorf("%s\n%w", strings.Join(printed, "\n"), err)
-		}
-		if result.Message != "" {
-			printed = append(printed, result.Message)
-		}
-		done.Message, done.Data = result.Message, result.Data
-		out.Steps = append(out.Steps, done)
-	}
 	return nil, out, nil
+}
+
+// stepError is the errorOutput of err, which failed a step.
+func stepError(err error) *errorOutput {
+	var refused wire.Error
+	var command *recipe.CommandError
+	var call *client.CallError
+	switch {
+	case errors.As(err, &refused):
+		return &errorOutput{string(refused.Code), refused.Message}
+	case errors.As(err, &command):
+		return &errorOutput{"command", err.Error()}
+	case errors.As(err, &call):
+		return &errorOutput{"no_reply", err.Error()}
+	}
+	return &errorOutput{"error", err.Error()}
 }
 
 func (s tools) find(device, pkg string) (client.Target, error) {
@@ -464,9 +507,9 @@ func (s clientSource) Connect(target client.Target, mode client.StartMode) (App,
 	return app, nil
 }
 
-func (clientSource) Recipes(pkg string) ([]recipe.Recipe, string, error) {
-	recipes, err := recipe.Load(pkg)
-	return recipes, recipe.Path(pkg), err
+func (clientSource) Recipes(pkg string) (*recipe.Script, string, error) {
+	script, err := recipe.Load(pkg)
+	return script, recipe.Path(pkg), err
 }
 
 // runActionSchema is run_action's input schema, with the descriptions of its properties.

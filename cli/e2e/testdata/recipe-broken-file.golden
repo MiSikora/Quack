@@ -2,6 +2,6 @@ $ quack --recipe setup
 --- exit 2
 --- stdout
 --- stderr
-quack: $XDG_CONFIG_HOME/quack/recipes/io.mehow.quack.sample.toml: recipe 'setup' step 1: wait 'soon' is not a duration above zero, such as 2s or 500ms
+quack: $XDG_CONFIG_HOME/quack/recipes/io.mehow.quack.sample.ts:2:1: Unexpected end of file
 --- device
 shell emulator-5554: query-receivers

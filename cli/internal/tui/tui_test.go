@@ -146,6 +146,8 @@ func TestListCoversTheBottomOfTheLogWithoutMovingIt(t *testing.T) {
 	h.typing("app.count")
 	h.press("enter")
 	h.waitForLog("  50\nCounted · ")
+	// The run ends after its step does, which puts the footer back at rest.
+	h.waitFor("type or ↑ to find an action")
 	before := strings.Split(h.view(), "\n")
 
 	h.press("up")
@@ -459,7 +461,7 @@ func TestSlashListsTheCommands(t *testing.T) {
 
 	h.typing("/")
 
-	h.waitFor("/reload", "/pick-device", "/pick-app", "/open-app", "/exit", "/clear", "▸ /cancel", "7/7")
+	h.waitFor("/reload", "/pick-device", "/pick-app", "/open-app", "/init-recipes", "/exit", "/clear", "▸ /cancel", "8/8")
 	h.waitForNo("app.greet")
 	h.typing("x")
 	h.waitFor("▸ /exit")
@@ -488,7 +490,7 @@ func TestEnterRunsAnActionWithoutRequiredParamsAndPrintsItsError(t *testing.T) {
 }
 
 func TestRunPrintsABlankLineBeforeItsHeaderAndItsDurationAfterItsEnd(t *testing.T) {
-	h := start(t, newFakeApp(), withClock(0, 1234*time.Millisecond, 0, 65*time.Second))
+	h := start(t, newFakeApp(), withClock(0, 0, 1234*time.Millisecond, 0, 0, 65*time.Second))
 
 	h.typing("account.delete")
 	h.press("enter")
@@ -752,7 +754,7 @@ func TestHintsOfANonStringParamDoNotShow(t *testing.T) {
 func TestDataOfARunPrintsIndentedUnderItsMessage(t *testing.T) {
 	app := newFakeApp()
 	app.setActions(append(app.actions(), wire.Action{ID: "account.show", Description: "Show the account"}))
-	h := start(t, app, withClock(0, 1234*time.Millisecond))
+	h := start(t, app, withClock(0, 0, 1234*time.Millisecond))
 
 	h.typing("account.show")
 	h.press("enter")
@@ -924,17 +926,18 @@ func TestCtrlDQuitsOnlyOnAnEmptyQuery(t *testing.T) {
 
 func TestDollarListsTheRecipesByName(t *testing.T) {
 	h := start(t, newFakeApp(), withRecipes(t, `
-[login]
-description = "Log in as the test user"
-steps = [{ action = "app.greet", args = { name = "Bob" } }]
+import quack from "quack"
 
-[delete]
-steps = [{ action = "account.delete" }]
+export const login = quack.recipe({
+  description: "Log in as the test user",
+  run() { quack.runAction("app.greet", { name: "Bob" }) },
+})
+export const clean = quack.recipe({ run() { quack.runAction("account.delete") } })
 `))
 
 	h.typing("$")
 
-	h.waitFor("  $login    Log in as the test user", "▸ $delete", "2/2")
+	h.waitFor("  $login   Log in as the test user", "▸ $clean", "2/2")
 	h.waitForNo("app.greet")
 	h.typing("lg")
 	h.waitFor("▸ $login", "1/2")
@@ -942,38 +945,43 @@ steps = [{ action = "account.delete" }]
 	h.waitFor("▸ $login", "> $lg")
 }
 
-func TestDollarWithoutRecipesSaysWhereToCreateThem(t *testing.T) {
+func TestDollarWithoutRecipesSaysWhereToWriteThem(t *testing.T) {
 	h := start(t, newFakeApp())
 	h.resize(300, 30)
 
 	h.typing("$")
 
-	h.waitFor("No recipes. Create "+recipe.Path("io.mehow.quack.sample"), "0/0")
+	h.waitFor("  No recipes. Create "+recipe.Path("io.mehow.quack.sample"), "0/0")
 }
 
 func TestBrokenRecipeFileSaysWhyAndLeavesTheActions(t *testing.T) {
-	h := start(t, newFakeApp(), withRecipes(t, "[login]\nsteps = []\n"))
+	h := start(t, newFakeApp(), withRecipes(t, "export const a = ("))
 	h.resize(300, 30)
 
-	h.waitForLog("switched to io.mehow.quack.sample", recipe.Path("io.mehow.quack.sample")+": recipe 'login' has no steps")
+	h.waitForLog("switched to io.mehow.quack.sample", "io.mehow.quack.sample.ts:1:19: Unexpected end of file")
 	h.waitFor("6/6")
 	h.press("up")
 	h.waitFor("▸ app.greet", "6/6")
 	h.press("esc")
 	h.typing("$")
-	h.waitFor("No recipes. Create ", "0/0")
+	h.waitFor("No recipes. Create "+recipe.Path("io.mehow.quack.sample"), "0/0")
 }
 
-func TestEnterRunsTheStepsOfARecipeEachUnderItsCommand(t *testing.T) {
+func TestEnterRunsARecipeWritingEachStepUnderItsCommandAndWhatItLogs(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app, withRecipes(t, `
-[setup]
-steps = [
-  { open-app = true },
-  { wait = "10ms" },
-  { action = "account.create", args = { username = "alice" } },
-  { action = "app.greet", args = { times = 2, name = "Bob" } },
-]
+import quack from "quack"
+
+export const setup = quack.recipe({
+  run() {
+    quack.openApp()
+    quack.wait("10ms")
+    quack.runAction("account.create", { username: "alice" })
+    console.log("created", 1)
+    quack.runAction("app.greet", { times: 2, name: "Bob" })
+    quack.shell("echo hi")
+  },
+})
 `))
 
 	h.typing("$setup")
@@ -982,7 +990,8 @@ steps = [
 	h.waitForLog("\n› $setup\n› /open-app\nstarting io.mehow.quack.sample…\ndone · ",
 		"\n› wait 10ms\ndone · ",
 		"\n› account.create username=alice\n  Started\n  Creating account\nCreated · ",
-		"\n› app.greet name=Bob times=2\nHello, Bob! · ")
+		"\ncreated 1\n› app.greet name=Bob times=2\nHello, Bob! · ",
+		"\n› shell echo hi\nran echo hi · ")
 	h.waitFor("> find an action", "type or ↑ to find an action")
 	want := []wire.Call{
 		{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
@@ -993,54 +1002,109 @@ steps = [
 	}
 }
 
-func TestRecipeStopsAtTheFirstStepThatFails(t *testing.T) {
+func TestEnterOnARecipeWithARequiredParamOpensTheBoxWithItsHintsAndRunsWithTheArgs(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app, withRecipes(t, `
-[clean]
-steps = [{ action = "account.delete" }, { action = "app.count" }]
+import quack from "quack"
+
+export const login = quack.recipe({
+  description: "Log in",
+  params: {
+    user: { type: "string", required: true, hints: ["alice", "bob"] },
+    times: { type: "int", default: 1 },
+  },
+  run({ user, times }) { quack.runAction("app.greet", { name: user, times }) },
+})
+`))
+
+	h.typing("$login")
+	h.press("enter")
+	h.waitFor("$login · Log in", "bob", "alice", "▸ user", "2/2", "› $login\n")
+	h.typing("bo")
+	h.waitFor("    bob", "▸ user  bo", "1/2", "› $login user=bo\n")
+	h.press("up")
+	h.waitFor("› $login user=bob\n")
+	h.press("enter")
+	h.waitFor("▸ times", "› $login user=bob\n")
+	h.press("enter")
+
+	h.waitForLog("\n› $login\n› app.greet name=bob times=1\nHello, bob! · ")
+	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"bob"}, "times": {"1"}}}}
+	if got := app.received(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestFailedRecipeEndsWithTheErrorAndWhereItThrew(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app, withRecipes(t, `
+import quack from "quack"
+
+export const clean = quack.recipe({
+  run() {
+    quack.runAction("account.delete")
+    quack.runAction("app.count")
+  },
+})
 `))
 
 	h.typing("$clean")
 	h.press("enter")
 
-	h.waitForLog("\n› $clean\n› account.delete\n[rejected] there is no account · ")
+	h.waitForLog("\n› $clean\n› account.delete\n[rejected] there is no account · ", "\n    at run (io.mehow.quack.sample.ts:6:20)\n")
 	h.waitFor("type or ↑ to find an action")
-	if strings.Contains(h.logText(), "app.count") {
-		t.Errorf("the log runs the step after the failed one:\n%s", h.logText())
-	}
 	if got, want := app.received(), []wire.Call{{Action: "account.delete"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
-}
-
-func TestRecipeThatTheAppWouldRefuseRunsNothing(t *testing.T) {
-	app := newFakeApp()
-	h := start(t, app, withRecipes(t, `
-[greet]
-steps = [{ action = "account.delete" }, { action = "app.greet", args = { times = "twice" } }]
-`))
-
-	h.typing("$greet")
-	h.press("enter")
-
-	h.waitForLog("[invalid_args] recipe 'greet' step 2: missing argument 'name'")
-	h.waitFor("▸ $greet", "> $greet")
-	if got := app.received(); got != nil {
-		t.Errorf("calls: got %v, want none", got)
+	if got := strings.Count(h.logText(), "there is no account"); got != 1 {
+		t.Errorf("the error shows %d times, want once:\n%s", got, h.logText())
 	}
 }
 
-func TestFooterCountsTheStepsAndCtrlCSkipsTheRest(t *testing.T) {
+func TestARecipeThatCatchesAFailedStepGoesOn(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app, withRecipes(t, `
-[watch]
-steps = [{ wait = "1ms" }, { action = "account.watch" }, { action = "app.count" }]
+import quack from "quack"
+
+export const careful = quack.recipe({
+  run() {
+    try {
+      quack.runAction("account.delete")
+    } catch (e) {
+      console.log("kept going")
+    }
+    quack.wait("1m")
+  },
+})
+`))
+
+	h.typing("$careful")
+	h.press("enter")
+
+	h.waitForLog("\n› $careful\n› account.delete\n[rejected] there is no account · ", "\nkept going\n› wait 1m0s\n")
+	h.waitFor("$careful · wait 1m0s")
+	h.press("ctrl+c")
+	h.waitForLog("\ncanceled · ")
+}
+
+func TestFooterNamesTheRecipeAndItsStepAndCtrlCStopsTheRecipe(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app, withRecipes(t, `
+import quack from "quack"
+
+export const watch = quack.recipe({
+  run() {
+    quack.wait("1ms")
+    quack.runAction("account.watch")
+    quack.runAction("app.count")
+  },
+})
 `))
 
 	h.typing("$watch")
 	h.press("enter")
 	h.waitForLog("› account.watch\n  Signed out")
-	h.waitFor("$watch · step 2/3 account.watch · ctrl+c cancel action")
+	h.waitFor("$watch · account.watch · ctrl+c cancel action")
 	h.press("ctrl+c")
 
 	h.waitForLog("\n› $watch\n› wait 1ms\ndone · ", "\n› account.watch\n  Signed out\ncanceled · ")
@@ -1053,11 +1117,28 @@ steps = [{ wait = "1ms" }, { action = "account.watch" }, { action = "app.count" 
 	}
 }
 
+func TestCtrlCStopsARecipeBetweenSteps(t *testing.T) {
+	h := start(t, newFakeApp(), withRecipes(t, `
+import quack from "quack"
+
+export const spin = quack.recipe({ run() { while (true) {} } })
+`))
+
+	h.typing("$spin")
+	h.press("enter")
+	h.waitFor("$spin · ctrl+c cancel action")
+	h.press("ctrl+c")
+
+	h.waitForLog("\n› $spin\ncanceled · ")
+	h.waitFor("type or ↑ to find an action")
+}
+
 func TestRecipesDoNotRunWhileARunRuns(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app, withRecipes(t, `
-[clean]
-steps = [{ action = "account.delete" }]
+import quack from "quack"
+
+export const clean = quack.recipe({ run() { quack.runAction("account.delete") } })
 `))
 	h.typing("account.watch")
 	h.press("enter")
@@ -1074,17 +1155,19 @@ steps = [{ action = "account.delete" }]
 
 func TestReloadReadsTheRecipesAgain(t *testing.T) {
 	h := start(t, newFakeApp())
+	h.resize(300, 30)
 	h.typing("$")
 	h.waitFor("No recipes", "0/0")
 
-	writeRecipes(t, "[clean]\nsteps = [{ action = \"account.delete\" }]\n")
+	writeRecipes(t, `import quack from "quack"
+export const clean = quack.recipe({ run() {} })`)
 	h.press("ctrl+r")
 
 	h.waitForLog("reloaded 6 actions and 1 recipes")
 	h.waitFor("▸ $clean", "1/1")
-	path := writeRecipes(t, "[clean]\n")
+	writeRecipes(t, "export const a = (")
 	h.press("ctrl+r")
-	h.waitForLog(wrapped(path+": recipe 'clean' has no steps", 100) + "\nreloaded 6 actions")
+	h.waitForLog("io.mehow.quack.sample.ts:1:19: Unexpected end of file\nreloaded 6 actions\n")
 	h.waitFor("No recipes", "0/0")
 }
 
@@ -1141,9 +1224,27 @@ func TestStatusLinesGoIntoTheLog(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
 
-	h.press("ctrl+o")
+	h.typing("/open-app")
+	h.press("enter")
 
 	h.waitForLog("starting io.mehow.quack.sample…\nshowed the app's main screen")
+}
+
+func TestInitRecipesStartsTheRecipesOfTheAppAndListsThem(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.resize(300, 30)
+
+	h.typing("/init-recipes")
+	h.press("enter")
+
+	path := recipe.Path("io.mehow.quack.sample")
+	h.waitForLog("wrote "+filepath.Join(recipe.Dir(), "quack.d.ts"), "wrote "+filepath.Join(recipe.Dir(), "tsconfig.json"), "wrote "+path)
+	h.typing("$")
+	h.waitFor("▸ $open", "Show the app's main screen", "1/1")
+	h.press("esc")
+	h.typing("/init-recipes")
+	h.press("enter")
+	h.waitForLog("the recipes of io.mehow.quack.sample are set up already in " + path)
 }
 
 func TestCtrlOOpensTheAppEvenDuringARun(t *testing.T) {
@@ -1776,7 +1877,7 @@ func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
 }
 
 func (a *fakeApp) Start(mode client.StartMode) error {
-	if mode != client.Open {
+	if mode != client.OpenApp {
 		return errors.New("unexpected mode " + string(mode))
 	}
 	io.WriteString(a.status, "starting "+a.pkg+"…\n")

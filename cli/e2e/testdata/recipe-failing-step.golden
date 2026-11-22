@@ -4,6 +4,7 @@ $ quack --recipe clean
 › account.delete
 --- stderr
 quack: [rejected] there is no account
+    at run (io.mehow.quack.sample.ts:51:20)
 --- device
 shell emulator-5554: query-receivers
 shell emulator-5554: get-current-user

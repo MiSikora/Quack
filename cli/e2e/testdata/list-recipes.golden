@@ -1,42 +1,28 @@
 $ quack --list-recipes
 --- exit 0
 --- stdout
-broken
-    app.greet name=Bob
-    app.params count=many
+careful
+    Delete the account if there is one, then greet.
 
 clean
     Delete the account, then greet.
 
-    account.delete
-    app.greet name=Bob
+failRun
 
-fail-run
-    run echo oops >&2; exit 3
-    app.greet name=Bob
-
-fail-shell
-    shell fail now
-    app.greet name=Bob
+failShell
 
 greet
-    app.greet name=Bob
+    name=<string>
+        Default: Bob. Who to greet.
 
-greet-env
-    app.greet name='${QUACK_NAME}'
+greetEnv
 
 prepare
-    shell pm clear ${QUACK_PACKAGE}
-    run echo seeded ${QUACK_NAME} on $ANDROID_SERIAL
-    app.greet name=Bob
 
 setup
     Create the account and greet.
 
-    /open-app
-    wait 10ms
-    account.create username=alice
-    app.params count=3 flag=true tag=a tag='b c'
+typo
 --- stderr
 --- device
 shell emulator-5554: query-receivers

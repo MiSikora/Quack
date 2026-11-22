@@ -43,8 +43,10 @@ func printHelp(w io.Writer, hello wire.Hello, actions []wire.Action, header bool
 // it. A param with text gets a blank line after it, and a run of params without text stays together.
 func writeAction(out *strings.Builder, a wire.Action) {
 	out.WriteString(a.ID + "\n")
-	writeWrapped(out, sentence(a.Description), helpIndent)
-	out.WriteString("\n")
+	if a.Description != "" {
+		writeWrapped(out, sentence(a.Description), helpIndent)
+		out.WriteString("\n")
+	}
 	for _, p := range a.Params {
 		out.WriteString(helpIndent + paramUsage(p) + "\n")
 		var text []string

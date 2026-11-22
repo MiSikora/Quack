@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -95,7 +96,7 @@ func TestRunActionStartsTheAppInTheBackgroundUnlessToldToOpenIt(t *testing.T) {
 	call(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "alice"}})
 	call(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "bob"}, "open_app": true})
 
-	if want := []client.StartMode{client.Wake, client.Open}; !reflect.DeepEqual(source.modes, want) {
+	if want := []client.StartMode{client.Wake, client.OpenApp}; !reflect.DeepEqual(source.modes, want) {
 		t.Errorf("modes are %q, want %q", source.modes, want)
 	}
 }
@@ -174,58 +175,80 @@ func TestListActionsRefusesAnInvalidFilter(t *testing.T) {
 	}
 }
 
-func TestListRecipesGivesTheStepsOfEachRecipeThatMatchesTheFilter(t *testing.T) {
+func TestListRecipesGivesTheParamsOfEachRecipeThatMatchesTheFilter(t *testing.T) {
 	source := newFakeSource()
-	source.recipes = []recipe.Recipe{
-		{Name: "fresh", Description: "Start over", Steps: []recipe.Step{
-			recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
-			recipe.OpenApp{},
-			recipe.Wait{Duration: 2 * time.Second},
-		}},
-		{Name: "gone", Steps: []recipe.Step{recipe.Call{Action: "account.delete"}}},
-	}
+	path := writeRecipes(t, `
+import quack from "quack"
+export const fresh = quack.recipe({
+  description: "Start over",
+  params: { user: { type: "string", default: "alice", hints: ["alice", "bob"] }, count: { type: "int", required: true } },
+  run() {},
+})
+export const gone = quack.recipe({ run() {} })`)
 	session := connect(t, source)
 
 	result := call(t, session, "list_recipes", map[string]any{"filter": "^fr"})
 
-	want := `{"device":"emulator-5554","app":"io.mehow.quack.sample","file":"/config/io.mehow.quack.sample.toml","recipes":[` +
-		`{"name":"fresh","description":"Start over","steps":["account.create username=alice","/open-app","wait 2s"]}]}`
+	want := `{"device":"emulator-5554","app":"io.mehow.quack.sample","file":` + quoted(path) + `,"recipes":[` +
+		`{"name":"fresh","description":"Start over","params":[` +
+		`{"name":"user","type":"string","description":"","hints":["alice","bob"],"required":false,"default":"alice"},` +
+		`{"name":"count","type":"int","description":"","required":true}]}]}`
 	assertStructured(t, result, want)
 	if len(source.modes) > 0 {
 		t.Errorf("the app started %q, want it left alone", source.modes)
 	}
 }
 
-func TestRunRecipeGivesWhatEachStepGave(t *testing.T) {
+func TestListRecipesWithoutAFileGivesWhereToWriteThem(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	session := connect(t, newFakeSource())
+
+	result := call(t, session, "list_recipes", map[string]any{})
+
+	assertStructured(t, result, `{"device":"emulator-5554","app":"io.mehow.quack.sample","file":`+quoted(recipe.Path("io.mehow.quack.sample"))+`,"recipes":[]}`)
+}
+
+func TestRunRecipeGivesWhatEachStepGaveAndWhatItLogged(t *testing.T) {
 	source := newFakeSource()
-	source.recipes = []recipe.Recipe{{Name: "fresh", Steps: []recipe.Step{
-		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
-		recipe.OpenApp{},
-		recipe.Wait{Duration: time.Millisecond},
-		recipe.Shell{Command: "pm clear com.example"},
-		recipe.Run{Command: "echo seeded"},
-	}}}
+	writeRecipes(t, `
+import quack from "quack"
+export const fresh = quack.recipe({
+  params: { user: { type: "string", required: true } },
+  run({ user }) {
+    const created = quack.runAction<{ id: number }>("account.create", { username: user })
+    console.log("id " + created.data.id)
+    quack.openApp()
+    quack.wait("1ms")
+    quack.shell("pm clear com.example")
+    quack.run("echo seeded")
+  },
+})`)
 	session := connect(t, source)
 
-	result := call(t, session, "run_recipe", map[string]any{"recipe": "fresh"})
+	result := call(t, session, "run_recipe", map[string]any{"recipe": "fresh", "args": map[string]any{"user": "alice"}})
 
 	assertStructured(t, result, `{"steps":[`+
 		`{"step":"account.create username=alice","notifications":["Creating alice"],"message":"Created alice","data":{"id":7}},`+
 		`{"step":"/open-app","notifications":[],"message":""},`+
 		`{"step":"wait 1ms","notifications":[],"message":""},`+
 		`{"step":"shell pm clear com.example","notifications":[],"message":"ran pm clear com.example"},`+
-		`{"step":"run echo seeded","notifications":[],"message":"seeded"}]}`)
-	if want := []client.StartMode{client.Open}; !reflect.DeepEqual(source.app.starts, want) {
+		`{"step":"run echo seeded","notifications":[],"message":"seeded"}],"log":["id 7"]}`)
+	if want := []client.StartMode{client.OpenApp}; !reflect.DeepEqual(source.app.starts, want) {
 		t.Errorf("starts are %q, want %q", source.app.starts, want)
 	}
 }
 
-func TestRunRecipeSendsStepsAndNotificationsAsProgressWhenAskedTo(t *testing.T) {
+func TestRunRecipeSendsStepsNotificationsAndLogsAsProgressWhenAskedTo(t *testing.T) {
 	source := newFakeSource()
-	source.recipes = []recipe.Recipe{{Name: "fresh", Steps: []recipe.Step{
-		recipe.OpenApp{},
-		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
-	}}}
+	writeRecipes(t, `
+import quack from "quack"
+export const fresh = quack.recipe({
+  run() {
+    quack.openApp()
+    quack.runAction("account.create", { username: "alice" })
+    console.log("done")
+  },
+})`)
 	var mu sync.Mutex
 	var progress []string
 	session := connectWith(t, source, &mcp.ClientOptions{
@@ -244,51 +267,95 @@ func TestRunRecipeSendsStepsAndNotificationsAsProgressWhenAskedTo(t *testing.T) 
 
 	mu.Lock()
 	defer mu.Unlock()
-	if want := []string{"› /open-app", "› account.create username=alice", "Creating alice"}; !reflect.DeepEqual(progress, want) {
+	if want := []string{"› /open-app", "› account.create username=alice", "Creating alice", "done"}; !reflect.DeepEqual(progress, want) {
 		t.Errorf("progress is %q, want %q", progress, want)
 	}
 }
 
-func TestRunRecipeStopsAtTheFirstStepThatFails(t *testing.T) {
+func TestRunRecipeEndsAtAStepThatFailsSayingWhere(t *testing.T) {
 	source := newFakeSource()
-	source.recipes = []recipe.Recipe{{Name: "redo", Steps: []recipe.Step{
-		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
-		recipe.Call{Action: "account.delete"},
-		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"bob"}}},
-	}}}
+	writeRecipes(t, `
+import quack from "quack"
+export const redo = quack.recipe({
+  run() {
+    quack.runAction("account.create", { username: "alice" })
+    quack.runAction("account.delete")
+    quack.runAction("account.create", { username: "bob" })
+  },
+})`)
 	session := connect(t, source)
 
 	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "redo"})
 
 	assertError(t, result, "› account.create username=alice\nCreating alice\nCreated alice\n› account.delete\nDeleting\n"+
-		"[rejected] there is no account")
+		"[rejected] there is no account\n    at run (io.mehow.quack.sample.ts:5:20)")
 	if got := len(source.app.calls); got != 2 {
 		t.Errorf("the app got %d calls, want 2", got)
 	}
 }
 
-func TestRunRecipeRunsNoStepWhenACallWouldNotPassTheAppsChecks(t *testing.T) {
+func TestRunRecipeGivesTheErrorOfAStepTheRecipeCaught(t *testing.T) {
 	source := newFakeSource()
-	source.recipes = []recipe.Recipe{{Name: "bad", Steps: []recipe.Step{
-		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
-		recipe.Call{Action: "account.create"},
-	}}}
+	writeRecipes(t, `
+import quack from "quack"
+export const careful = quack.recipe({
+  run() {
+    try {
+      quack.runAction("account.delete")
+    } catch (e) {}
+    quack.runAction("account.create", { username: "alice" })
+  },
+})`)
 	session := connect(t, source)
 
-	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "bad"})
+	result := call(t, session, "run_recipe", map[string]any{"recipe": "careful"})
 
-	assertError(t, result, "[invalid_args] recipe 'bad' step 2: missing argument 'username'")
+	assertStructured(t, result, `{"steps":[`+
+		`{"step":"account.delete","notifications":["Deleting"],"message":"","error":{"code":"rejected","message":"there is no account"}},`+
+		`{"step":"account.create username=alice","notifications":["Creating alice"],"message":"Created alice","data":{"id":7}}],"log":[]}`)
+}
+
+func TestRunRecipeRefusesArgsItsParamsRefuse(t *testing.T) {
+	source := newFakeSource()
+	writeRecipes(t, `
+import quack from "quack"
+export const fresh = quack.recipe({ params: { user: { type: "string", required: true } }, run() { quack.runAction("app.greet") } })`)
+	session := connect(t, source)
+
+	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "fresh"})
+
+	assertError(t, result, "[invalid_args] recipe 'fresh': missing argument 'user'")
 	if len(source.app.calls) > 0 {
 		t.Errorf("the app got calls %+v, want none", source.app.calls)
 	}
 }
 
 func TestRunRecipeNamesTheFileWithoutTheRecipe(t *testing.T) {
+	path := writeRecipes(t, `export {}`)
 	session := connect(t, newFakeSource())
 
 	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "fresh"})
 
-	assertError(t, result, "no recipe named fresh in /config/io.mehow.quack.sample.toml")
+	assertError(t, result, "no recipe named fresh in "+path)
+}
+
+// writeRecipes writes file as the recipes of the sample app, in a config dir of the test's own, and returns its path.
+func writeRecipes(t *testing.T, file string) string {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := recipe.Path("io.mehow.quack.sample")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimPrefix(file, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func quoted(text string) string {
+	out, _ := json.Marshal(text)
+	return string(out)
 }
 
 // connect runs a server for source and connects a client to it in memory.
@@ -372,8 +439,7 @@ type fakeSource struct {
 	// finds are the device and package of each Find, joined by a space.
 	finds []string
 	// modes are the start modes of each Connect.
-	modes   []client.StartMode
-	recipes []recipe.Recipe
+	modes []client.StartMode
 }
 
 func newFakeSource() *fakeSource {
@@ -395,8 +461,8 @@ func (s *fakeSource) Connect(_ client.Target, mode client.StartMode) (App, error
 	return s.app, nil
 }
 
-func (s *fakeSource) Recipes(pkg string) ([]recipe.Recipe, string, error) {
-	return s.recipes, "/config/" + pkg + ".toml", nil
+func (s *fakeSource) Recipes(pkg string) (*recipe.Script, string, error) {
+	return clientSource{}.Recipes(pkg)
 }
 
 // fakeApp has account.create, which creates the account its username names, and account.delete, which the app

@@ -20,7 +20,7 @@ import (
 type prompt struct {
 	input   textinput.Model
 	actions []wire.Action
-	// recipes are the app's recipes, sorted by name, and recipePath the file they come from.
+	// recipes are the app's recipes, sorted by name, and recipePath the file they come from or would.
 	recipes    []recipe.Recipe
 	recipePath string
 	// browsing is whether ↑ opened the list on empty text. It ends when the text changes.
@@ -35,9 +35,10 @@ type prompt struct {
 type choice struct {
 	id          string
 	description string
-	action      wire.Action
-	// recipe is the chosen recipe, and command the chosen command. Both are nil for an action.
-	recipe  *recipe.Recipe
+	// action is the chosen action, or the chosen recipe as an action whose id is the recipe's name after '$', with the
+	// recipe's params, so that a recipe opens the box as an action does.
+	action wire.Action
+	// command is the chosen command, or nil for an action or a recipe.
 	command *command
 	matched []int
 }
@@ -61,7 +62,8 @@ func (p *prompt) choices() ([]choice, int) {
 	switch {
 	case strings.HasPrefix(text, "$"):
 		for _, r := range p.recipes {
-			all = append(all, choice{id: "$" + r.Name, description: r.Description, recipe: &r})
+			action := wire.Action{ID: "$" + r.Name, Description: r.Description, Params: r.Params}
+			all = append(all, choice{id: action.ID, description: action.Description, action: action})
 		}
 	case strings.HasPrefix(text, "/"):
 		for _, c := range commands() {
@@ -190,8 +192,8 @@ func (p *prompt) view() string {
 }
 
 // list is a line for each choice the text matches, up to rows of them, the best last, next to the input, or nil while
-// the list does not show. The choices scroll to keep the selection in sight. Without any recipes, '$' says where to
-// write them.
+// the list does not show. The choices scroll to keep the selection in sight. Without any recipes, '$' says how to start
+// them.
 func (p *prompt) list(rows int) []string {
 	if !p.open() {
 		return nil

@@ -1,8 +1,8 @@
-$ quack --json --recipe broken
+$ quack --recipe greet nope=1
 --- exit 2
 --- stdout
-{"code":"invalid_args","message":"recipe 'broken' step 2: 'count' expects int, got 'many'"}
 --- stderr
+quack: [invalid_args] recipe 'greet': unknown argument 'nope'
 --- device
 shell emulator-5554: query-receivers
 shell emulator-5554: get-current-user

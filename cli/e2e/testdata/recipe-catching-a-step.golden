@@ -1,7 +1,10 @@
-$ quack --recipe greet-env
+$ quack --recipe careful
 --- exit 0
 --- stdout
-› app.greet name='${QUACK_NAME}'
+› account.delete
+[rejected] there is no account
+kept going: [rejected] there is no account
+› app.greet name=Bob
 Hello, Bob!
 --- stderr
 --- device
@@ -9,5 +12,7 @@ shell emulator-5554: query-receivers
 shell emulator-5554: get-current-user
 shell emulator-5554: wake io.mehow.quack.sample
 request: {"method":"describe"}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"account.delete"}
 shell emulator-5554: wake io.mehow.quack.sample
 request: {"method":"call","action":"app.greet","args":{"name":"Bob"}}

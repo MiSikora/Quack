@@ -3,11 +3,6 @@ $ quack --list-recipes ^s
 --- stdout
 setup
     Create the account and greet.
-
-    /open-app
-    wait 10ms
-    account.create username=alice
-    app.params count=3 flag=true tag=a tag='b c'
 --- stderr
 --- device
 shell emulator-5554: query-receivers

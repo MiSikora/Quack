@@ -162,19 +162,25 @@ var scenarios = []scenario{
 	{name: "recipe", args: []string{"--recipe", "setup"}, recipes: sampleRecipes},
 	{name: "recipe-json", args: []string{"--json", "--recipe", "setup"}, recipes: sampleRecipes},
 	{name: "recipe-open-app-flag", args: []string{"--open-app", "--recipe", "greet"}, recipes: sampleRecipes},
+	{name: "recipe-args", args: []string{"--recipe", "greet", "name=Alice"}, recipes: sampleRecipes},
+	{name: "recipe-args-variable", args: []string{"--recipe", "greet", "name=${QUACK_NAME}"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Carol"}},
+	{name: "recipe-args-refused", args: []string{"--recipe", "greet", "nope=1"}, recipes: sampleRecipes},
+	{name: "recipe-args-refused-json", args: []string{"--json", "--recipe", "greet", "name=a", "name=b"}, recipes: sampleRecipes},
 	{name: "recipe-failing-step", args: []string{"--recipe", "clean"}, recipes: sampleRecipes},
 	{name: "recipe-failing-step-json", args: []string{"--json", "--recipe", "clean"}, recipes: sampleRecipes},
-	{name: "recipe-check-fails", args: []string{"--recipe", "broken"}, recipes: sampleRecipes},
-	{name: "recipe-check-fails-json", args: []string{"--json", "--recipe", "broken"}, recipes: sampleRecipes},
-	{name: "recipe-variable", args: []string{"--recipe", "greet-env"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Bob"}},
-	{name: "recipe-variable-unset", args: []string{"--recipe", "greet-env"}, recipes: sampleRecipes},
+	{name: "recipe-catching-a-step", args: []string{"--recipe", "careful"}, recipes: sampleRecipes},
+	{name: "recipe-catching-a-step-json", args: []string{"--json", "--recipe", "careful"}, recipes: sampleRecipes},
+	{name: "recipe-script-error", args: []string{"--recipe", "typo"}, recipes: sampleRecipes},
+	{name: "recipe-script-error-json", args: []string{"--json", "--recipe", "typo"}, recipes: sampleRecipes},
+	{name: "recipe-environment", args: []string{"--recipe", "greetEnv"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Bob"}},
+	{name: "recipe-environment-unset", args: []string{"--recipe", "greetEnv"}, recipes: sampleRecipes},
 	{name: "recipe-commands", args: []string{"--recipe", "prepare"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Bob"}},
 	{name: "recipe-commands-json", args: []string{"--json", "--recipe", "prepare"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Bob"}},
-	{name: "recipe-failing-shell", args: []string{"--recipe", "fail-shell"}, recipes: sampleRecipes},
-	{name: "recipe-failing-run-json", args: []string{"--json", "--recipe", "fail-run"}, recipes: sampleRecipes},
+	{name: "recipe-failing-shell", args: []string{"--recipe", "failShell"}, recipes: sampleRecipes},
+	{name: "recipe-failing-run-json", args: []string{"--json", "--recipe", "failRun"}, recipes: sampleRecipes},
 	{name: "recipe-unknown", args: []string{"--recipe", "nope"}, recipes: sampleRecipes},
 	{name: "recipe-without-file", args: []string{"--recipe", "setup"}},
-	{name: "recipe-broken-file", args: []string{"--recipe", "setup"}, recipes: "[setup]\nsteps = [{ wait = \"soon\" }]\n"},
+	{name: "recipe-broken-file", args: []string{"--recipe", "setup"}, recipes: "export const setup = (\n"},
 	{name: "recipe-with-action", args: []string{"--recipe", "setup", "app.greet", "name=Bob"}, recipes: sampleRecipes},
 	{name: "recipe-with-list-actions", args: []string{"--recipe", "setup", "--list-actions"}, recipes: sampleRecipes},
 	{name: "list-recipes", args: []string{"--list-recipes"}, recipes: sampleRecipes},
@@ -183,42 +189,90 @@ var scenarios = []scenario{
 	{name: "list-recipes-json", args: []string{"--json", "--list-recipes"}, recipes: sampleRecipes},
 	{name: "list-recipes-none", args: []string{"--list-recipes"}},
 	{name: "list-recipes-none-json", args: []string{"--json", "--list-recipes"}},
-	{name: "list-recipes-broken-file", args: []string{"--list-recipes"}, recipes: "[setup]\nsteps = [{ wait = \"soon\" }]\n"},
+	{name: "list-recipes-broken-file", args: []string{"--list-recipes"}, recipes: "export const setup = (\n"},
 	{name: "list-recipes-with-list-actions", args: []string{"--list-recipes", "--list-actions"}},
+	{name: "init-recipes", args: []string{"--init-recipes"}},
+	{name: "init-recipes-with-json", args: []string{"--init-recipes", "--json"}},
+	{name: "init-recipes-with-app", args: []string{"--init-recipes", "-a", "io.mehow.quack.sample"}},
+	{name: "init-recipes-with-app-keeps-its-file", args: []string{"--init-recipes", "-a", "io.mehow.quack.sample"}, recipes: sampleRecipes},
+	{name: "init-recipes-with-device", args: []string{"--init-recipes", "-d", "emulator-5554"}},
+	{name: "init-recipes-with-android-serial", args: []string{"--init-recipes"}, env: []string{"ANDROID_SERIAL=emulator-5554"}},
 }
 
-// sampleRecipes is a recipe file for the sample app.
-const sampleRecipes = `
-[setup]
-description = "Create the account and greet"
-steps = [
-  { open-app = true },
-  { wait = "10ms" },
-  { action = "account.create", args = { username = "alice" } },
-  { action = "app.params", args = { tag = ["a", "b c"], count = 3, flag = true } },
-]
+// sampleRecipes is a recipes file for the sample app.
+const sampleRecipes = `import quack from "quack"
 
-[greet]
-steps = [{ action = "app.greet", args = { name = "Bob" } }]
+export const setup = quack.recipe({
+  description: "Create the account and greet",
+  run() {
+    quack.openApp()
+    quack.wait("10ms")
+    quack.runAction("account.create", { username: "alice" })
+    quack.runAction("app.params", { tag: ["a", "b c"], count: 3, flag: true })
+  },
+})
 
-[greet-env]
-steps = [{ action = "app.greet", args = { name = "${QUACK_NAME}" } }]
+export const greet = quack.recipe({
+  params: { name: { type: "string", default: "Bob", hints: ["Alice", "Bob"], description: "Who to greet" } },
+  run({ name }) {
+    quack.runAction("app.greet", { name })
+  },
+})
 
-[prepare]
-steps = [{ shell = "pm clear ${QUACK_PACKAGE}" }, { run = "echo seeded ${QUACK_NAME} on $ANDROID_SERIAL" }, { action = "app.greet", args = { name = "Bob" } }]
+export const greetEnv = quack.recipe({
+  run() {
+    quack.runAction("app.greet", { name: quack.env.QUACK_NAME ?? "nobody" })
+  },
+})
 
-[fail-shell]
-steps = [{ shell = "fail now" }, { action = "app.greet", args = { name = "Bob" } }]
+export const prepare = quack.recipe({
+  run() {
+    quack.shell("pm clear " + quack.app.package)
+    quack.run("echo seeded " + quack.env.QUACK_NAME + " on $ANDROID_SERIAL")
+    quack.runAction("app.greet", { name: "Bob" })
+  },
+})
 
-[fail-run]
-steps = [{ run = "echo oops >&2; exit 3" }, { action = "app.greet", args = { name = "Bob" } }]
+export const failShell = quack.recipe({
+  run() {
+    quack.shell("fail now")
+    quack.runAction("app.greet", { name: "Bob" })
+  },
+})
 
-[clean]
-description = "Delete the account, then greet"
-steps = [{ action = "account.delete" }, { action = "app.greet", args = { name = "Bob" } }]
+export const failRun = quack.recipe({
+  run() {
+    quack.run("echo oops >&2; exit 3")
+    quack.runAction("app.greet", { name: "Bob" })
+  },
+})
 
-[broken]
-steps = [{ action = "app.greet", args = { name = "Bob" } }, { action = "app.params", args = { count = "many" } }]
+export const clean = quack.recipe({
+  description: "Delete the account, then greet",
+  run() {
+    quack.runAction("account.delete")
+    quack.runAction("app.greet", { name: "Bob" })
+  },
+})
+
+export const careful = quack.recipe({
+  description: "Delete the account if there is one, then greet",
+  run() {
+    try {
+      quack.runAction("account.delete")
+    } catch (e) {
+      console.log("kept going: " + (e as Error).message)
+    }
+    quack.runAction("app.greet", { name: "Bob" })
+  },
+})
+
+export const typo = quack.recipe({
+  run() {
+    const result = quack.runAction<{ user: { name: string } }>("app.greet", { name: "Bob" })
+    console.log(result.data.user.name)
+  },
+})
 `
 
 func TestScenarios(t *testing.T) {
@@ -260,7 +314,7 @@ func run(t *testing.T, adb *fakeAdb, s scenario) string {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "io.mehow.quack.sample.toml"), []byte(s.recipes), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "io.mehow.quack.sample.ts"), []byte(s.recipes), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

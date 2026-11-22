@@ -23,8 +23,8 @@ type StartMode string
 const (
 	// Wake starts the app in the background, or thaws it when Android froze it there.
 	Wake StartMode = "wake"
-	// Open shows the app's main screen.
-	Open StartMode = "open"
+	// OpenApp shows the app's main screen.
+	OpenApp StartMode = "open-app"
 )
 
 // AppError is an app that is missing, does not start, or speaks a protocol this CLI cannot use.
@@ -339,7 +339,7 @@ var startCommands = map[StartMode]string{
 	// Launcher activities usually lack CATEGORY_DEFAULT, so am start cannot resolve them from the package alone.
 	// An app can have several launcher activities. resolve-activity answers with the app chooser then, so take the
 	// first one query-activities lists, as monkey does.
-	Open: `c=$(cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER %[1]s | grep -m 1 / | tr -d ' '); ` +
+	OpenApp: `c=$(cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER %[1]s | grep -m 1 / | tr -d ' '); ` +
 		`case $c in */*) am start -W -n "$c" ;; *) echo "Error: %[1]s has no launcher activity" ;; esac`,
 }
 

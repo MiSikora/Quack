@@ -1,7 +1,7 @@
 $ quack --list-recipes
 --- exit 0
 --- stdout
-No recipes. Create $XDG_CONFIG_HOME/quack/recipes/io.mehow.quack.sample.toml
+No recipes. Create $XDG_CONFIG_HOME/quack/recipes/io.mehow.quack.sample.ts, and run quack --init-recipes for editors to check it.
 --- stderr
 --- device
 shell emulator-5554: query-receivers

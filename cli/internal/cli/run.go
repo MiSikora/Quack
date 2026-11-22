@@ -54,6 +54,7 @@ type options struct {
 	interactive bool
 	listDevices bool
 	listRecipes bool
+	initRecipes bool
 	openApp     bool
 	// recipe is the name of the recipe to run, or "" for none.
 	recipe       string
@@ -82,8 +83,9 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	boolFlag(fs, &opts.listActions, "list-actions", "l", "list the app's actions, or only those whose id matches regex")
 	boolFlag(fs, &opts.listDevices, "list-devices", "", "list the devices and the quack-enabled apps on each")
 	boolFlag(fs, &opts.listRecipes, "list-recipes", "", "list the app's recipes, or only those whose name matches regex")
+	boolFlag(fs, &opts.initRecipes, "init-recipes", "", "write the files that let editors check recipes, and with --app a starter recipes file of the app")
 	boolFlag(fs, &opts.openApp, "open-app", "", "show the app's main screen first, instead of starting it in the background")
-	fs.StringVar(&opts.recipe, "recipe", "", "run the steps of the app's recipe `name` in order")
+	fs.StringVar(&opts.recipe, "recipe", "", "run the app's recipe `name`")
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
 	boolFlag(fs, &opts.version, "version", "", "show quack's version")
 	boolFlag(fs, &opts.help, "help", "h", "show this help")
@@ -92,37 +94,41 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		"this help instead when stdin or stdout is not a terminal, AI_AGENT is set, or CI is set. With an action,\n" +
 		"quack runs it once, prints the outcome and exits. Scripts and agents: list the actions with --list-actions,\n" +
 		"run them with quack <action>, and add --json for output to parse.\n\n" +
-		"usage: quack [options]                           open the terminal UI\n" +
-		"       quack [options] <action> [key=value]...   run an action\n" +
-		"       quack [options] --recipe <name>           run the steps of a recipe\n" +
-		"       quack [options] --list-actions [regex]    list the app's actions and their params\n" +
-		"       quack [options] --list-recipes [regex]    list the app's recipes and their steps\n" +
-		"       quack [options] --list-devices            list the devices and their quack-enabled apps\n\n" +
+		"usage: quack [options]                                open the terminal UI\n" +
+		"       quack [options] <action> [key=value]...        run an action\n" +
+		"       quack [options] --recipe <name> [key=value]... run a recipe\n" +
+		"       quack [options] --list-actions [regex]         list the app's actions and their params\n" +
+		"       quack [options] --list-recipes [regex]         list the app's recipes and their params\n" +
+		"       quack [--app <package>] --init-recipes         set up recipes and editors to check them\n" +
+		"       quack [options] --list-devices                 list the devices and their quack-enabled apps\n\n" +
 		"arguments:\n" +
-		"  key=value   a param of the action. Repeat the key for a list: tag=a tag=b. The value takes variables as\n" +
-		"              a recipe arg does: quack account.login 'token=${API_TOKEN}'\n\n" +
+		"  key=value   a param of the action or the recipe. Repeat the key for a list: tag=a tag=b. The value takes the\n" +
+		"              environment variable NAME as ${NAME}, and $${NAME} writes ${NAME}:\n" +
+		"              quack account.login 'token=${API_TOKEN}'\n\n" +
 		"options:\n" + fs.FlagUsages() + "\n" +
 		"recipes:\n" +
-		"  A recipe runs steps in order with fixed args, and stops at the first that fails: a call of an action, open-app\n" +
-		"  to show the app's main screen, wait for a duration, shell to run a command on the device, or run to run one on\n" +
-		"  this computer. The terminal UI runs a recipe as $<name>. The recipes of an app are in\n" +
-		"  $XDG_CONFIG_HOME/quack/recipes/<package>.toml, or in ~/.config/quack/recipes/<package>.toml when\n" +
-		"  XDG_CONFIG_HOME is unset or empty:\n\n" +
-		"    [login]\n" +
-		"    description = \"Log in as the test user\"\n" +
-		"    steps = [\n" +
-		"      { open-app = true },\n" +
-		"      { wait = \"2s\" },\n" +
-		"      { action = \"account.login\", args = { user = \"foo\", remember = true, count = 3, tag = [\"a\", \"b\"] } },\n" +
-		"      { shell = \"pm grant ${QUACK_PACKAGE} android.permission.POST_NOTIFICATIONS\" },\n" +
-		"      { run = \"./seed-backend.sh ${QUACK_USER}\" },\n" +
-		"    ]\n\n" +
-		"  An arg or a command takes the environment variable NAME as ${NAME}, and $${NAME} writes ${NAME}.\n" +
-		"  QUACK_PACKAGE and ANDROID_SERIAL are the app and the device the recipe runs against, and run commands get\n" +
-		"  them in their environment too.\n\n" +
+		"  A recipe is a TypeScript or JavaScript function that runs actions and commands, and decides what to do with\n" +
+		"  what they return. The recipes of an app are the exports of $XDG_CONFIG_HOME/quack/recipes/<package>.ts, or of\n" +
+		"  ~/.config/quack/recipes/<package>.ts when XDG_CONFIG_HOME is unset or empty, or of the .js file there. The\n" +
+		"  file may import local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json there,\n" +
+		"  so that editors check recipes, and with --app a starter file of the app. The terminal UI runs a recipe as\n" +
+		"  $<name>:\n\n" +
+		"    import quack from \"quack\"\n\n" +
+		"    export const login = quack.recipe({\n" +
+		"      description: \"Log in as the test user\",\n" +
+		"      params: { user: { type: \"string\", default: \"foo\", hints: [\"foo\", \"bar\"] } },\n" +
+		"      run({ user }) {\n" +
+		"        quack.openApp()\n" +
+		"        const status = quack.runAction<{ loggedIn: boolean }>(\"account.status\")\n" +
+		"        if (!status.data.loggedIn) quack.runAction(\"account.login\", { user, remember: true })\n" +
+		"        quack.shell(\"pm grant io.example android.permission.POST_NOTIFICATIONS\")\n" +
+		"        quack.wait(\"2s\")\n" +
+		"      },\n" +
+		"    })\n\n" +
+		"  A step that fails throws, and ends the recipe unless it catches the error.\n\n" +
 		"exit codes:\n" +
 		"  0  done\n" +
-		"  1  the action rejected the call, failed, or ended without an answer, or a command of a recipe failed\n" +
+		"  1  the action rejected the call, failed, or ended without an answer, or a recipe failed\n" +
 		"  2  bad usage, an unknown action, or invalid args\n" +
 		"  3  no device or app to reach\n"
 	if err := fs.Parse(argv); err != nil {
@@ -141,11 +147,14 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	var err error
 	switch {
 	case opts.recipe != "":
-		if opts.listActions || opts.listDevices || opts.listRecipes {
-			return opts, usageErrorf("--recipe takes no --list-actions, --list-devices or --list-recipes")
+		if opts.listActions || opts.listDevices || opts.listRecipes || opts.initRecipes {
+			return opts, usageErrorf("--recipe takes no --list-actions, --list-devices, --list-recipes or --init-recipes")
 		}
-		if len(rest) > 0 {
-			return opts, usageErrorf("--recipe takes no action or key=value, the recipe fixes them")
+		opts.args, err = parseArgs(rest)
+		return opts, err
+	case opts.initRecipes:
+		if len(rest) > 0 || opts.listActions || opts.listDevices || opts.listRecipes || opts.json || fs.Changed("device") {
+			return opts, usageErrorf("--init-recipes takes only --app, since it sets up files and no device")
 		}
 	case opts.listDevices:
 		if len(rest) > 0 || opts.listActions || opts.listRecipes {
@@ -182,12 +191,15 @@ func run(opts options, terminal Terminal) error {
 		fmt.Fprintln(terminal.Out, "quack", version)
 		return nil
 	}
+	if opts.initRecipes {
+		return initRecipes(terminal.Out, opts.pkg)
+	}
 	if opts.listDevices {
 		return printDevices(terminal.Out, adb.Device(opts.device), opts.pkg, opts.json)
 	}
 	mode := client.Wake
 	if opts.openApp {
-		mode = client.Open
+		mode = client.OpenApp
 	}
 	if opts.interactive {
 		return tui.Run(client.Target{Device: adb.Device(opts.device), Package: opts.pkg}, mode, opts.startTimeout, version)
@@ -199,9 +211,9 @@ func run(opts options, terminal Terminal) error {
 	if opts.listRecipes {
 		return printRecipes(terminal.Out, target.Package, opts.filter, opts.json)
 	}
-	var r recipe.Recipe
+	var script *recipe.Script
 	if opts.recipe != "" {
-		if r, err = findRecipe(target.Package, opts.recipe); err != nil {
+		if script, err = findRecipe(target.Package, opts.recipe); err != nil {
 			return err
 		}
 	}
@@ -229,12 +241,12 @@ func run(opts options, terminal Terminal) error {
 		}
 		return nil
 	}
-	if opts.recipe != "" {
-		return runRecipe(app, r, terminal, opts.json)
-	}
 	args, err := recipe.ExpandArgs(opts.args, app.Target())
 	if err != nil {
 		return usageErrorf("%v", err)
+	}
+	if opts.recipe != "" {
+		return runRecipe(app, script, opts.recipe, args, terminal, opts.json)
 	}
 	call := wire.Call{Action: opts.action, Args: args}
 	result, err := app.Call(context.Background(), call, printNotifications(terminal, opts.json, 0))

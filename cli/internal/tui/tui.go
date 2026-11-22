@@ -82,6 +82,8 @@ type model struct {
 	// box is the open param box, or nil while the picker shows. The picker keeps its text and selection under it.
 	box  *paramBox
 	runs runs
+	// script is the app's recipes file, or nil when the app has none or it did not load.
+	script *recipe.Script
 	// quit asks for a second ctrl+c to quit, copied says what the mouse copied, and refused why a command did nothing.
 	quit    notice
 	copied  notice
@@ -126,11 +128,10 @@ type described struct {
 	recipes recipes
 }
 
-// recipes are the recipes of an app, as its file has them, or the error that reading it ended with.
+// recipes are the recipes file of an app, nil when it has none, or the error that reading it ended with.
 type recipes struct {
-	path string
-	list []recipe.Recipe
-	err  error
+	script *recipe.Script
+	err    error
 }
 
 // opened is the end of showing the app's main screen.
@@ -242,11 +243,25 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 	case tea.KeyPressMsg:
 		m.log.marked = nil
 		return m.press(msg)
+	case stepStarted:
+		m.log.add(m.runs.stepStarted(msg))
+		return m.activity.listen()
 	case runNotification:
 		m.log.add(m.runs.notification(msg))
 		return m.activity.listen()
 	case stepEnded:
-		m.log.add(m.runs.end(msg))
+		m.log.add(m.runs.stepEnded(msg))
+		return m.activity.listen()
+	case stepFailed:
+		m.log.add(m.runs.stepFailed(msg))
+		return m.activity.listen()
+	case runLogged:
+		m.log.add(msg.text)
+		return m.activity.listen()
+	case runEnded:
+		if lines := m.runs.ended(msg); lines != "" {
+			m.log.add(lines)
+		}
 		return m.activity.listen()
 	case statusLine:
 		m.log.add(statusStyle.Render(msg.text))
@@ -320,7 +335,7 @@ func (m *model) press(msg tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		return m.choose()
 	case "tab":
-		if c, ok := m.prompt.selection(); ok && c.command == nil && c.recipe == nil && len(c.action.Params) > 0 {
+		if c, ok := m.prompt.selection(); ok && c.command == nil && len(c.action.Params) > 0 {
 			return m.openBox(c.action)
 		}
 		return nil
@@ -416,9 +431,8 @@ func (m *model) clearInput() bool {
 	return m.prompt.clear()
 }
 
-// choose runs the selected command, recipe or action. An action with required params opens its box instead, even while
-// another runs. Any other action or recipe only says to stop the one that runs. A recipe whose calls the app would
-// refuse says why, and runs none of its steps.
+// choose runs the selected command, recipe or action. An action or a recipe with required params opens its box instead,
+// even while another runs. Any other only says to stop the one that runs.
 func (m *model) choose() tea.Cmd {
 	c, ok := m.prompt.selection()
 	switch {
@@ -427,15 +441,6 @@ func (m *model) choose() tea.Cmd {
 	case c.command != nil:
 		m.prompt.clear()
 		return c.command.run(m)
-	case c.recipe != nil && m.runs.active != nil:
-		return m.refused.show(refusedDuringRun)
-	case c.recipe != nil:
-		if err := recipe.Check(*c.recipe, m.prompt.actions, m.target); err != nil {
-			m.log.add(problemStyle.Render(err.Error()))
-			return nil
-		}
-		m.prompt.clear()
-		return m.startRecipe(*c.recipe)
 	case hasRequired(c.action):
 		return m.openBox(c.action)
 	case m.runs.active != nil:
@@ -446,23 +451,31 @@ func (m *model) choose() tea.Cmd {
 	}
 }
 
+// start runs action with args: the recipe that the id names after '$', as the picker and the box give a recipe, or else
+// the app's action, as the one step of its run.
 func (m *model) start(action wire.Action, args map[string]wire.RawArg) tea.Cmd {
-	step := runStep{recipe.Call{Action: action.ID, Args: args}, recipe.CommandLine(action, args)}
-	return m.startRun(&run{id: action.ID, steps: []runStep{step}})
-}
-
-func (m *model) startRecipe(r recipe.Recipe) tea.Cmd {
-	steps := make([]runStep, len(r.Steps))
-	for i, s := range r.Steps {
-		steps[i] = runStep{s, recipe.Line(s, m.prompt.actions)}
+	app := m.app
+	if name, ok := strings.CutPrefix(action.ID, "$"); ok {
+		script := m.script
+		return m.startRun(&run{id: action.ID, recipe: true}, func(ctx context.Context, observer recipe.Observer) error {
+			return script.Run(ctx, app, name, args, observer)
+		})
 	}
-	return m.startRun(&run{id: "$" + r.Name, recipe: true, steps: steps})
+	return m.startRun(&run{id: action.ID}, func(ctx context.Context, observer recipe.Observer) error {
+		step := recipe.Call{Action: action.ID, Args: args}
+		observer.Started(step)
+		result, err := recipe.Do(ctx, app, step, observer.Notified)
+		if err == nil {
+			observer.Ended(step, result)
+		}
+		return err
+	})
 }
 
-func (m *model) startRun(r *run) tea.Cmd {
-	header, work := m.runs.start(m.app, m.activity, r)
+func (m *model) startRun(r *run, work work) tea.Cmd {
+	header, cmd := m.runs.start(m.activity, r, m.prompt.actions, work)
 	m.log.add(header)
-	return work
+	return cmd
 }
 
 func (m *model) openBox(action wire.Action) tea.Cmd {
@@ -486,9 +499,28 @@ func (m *model) reload() tea.Cmd {
 func (m *model) openApp() tea.Cmd {
 	app, activity := m.app, m.activity
 	return func() tea.Msg {
-		activity.send(opened{app.Start(client.Open)})
+		activity.send(opened{app.Start(client.OpenApp)})
 		return nil
 	}
+}
+
+// initRecipes writes the files that let editors check recipes, and a starter recipes file of the app when it has none,
+// says what it wrote, and reads the recipes again. It touches only files, so it works while a run is active.
+func (m *model) initRecipes() tea.Cmd {
+	pkg := m.target.Package
+	written, err := recipe.Init(pkg)
+	if err != nil {
+		m.log.add(problemStyle.Render("init-recipes: " + err.Error()))
+		return nil
+	}
+	for _, path := range written {
+		m.log.add(statusStyle.Render("wrote " + path))
+	}
+	if len(written) == 0 {
+		m.log.add(statusStyle.Render("the recipes of " + pkg + " are set up already in " + recipe.Path(pkg)))
+	}
+	m.setRecipes(loadRecipes(pkg))
+	return nil
 }
 
 // clear empties the log down to its header.
@@ -510,14 +542,15 @@ func (m *model) describe(msg described) {
 	m.prompt.setActions(msg.actions)
 	line := fmt.Sprintf("reloaded %d actions", len(msg.actions))
 	if msg.recipes.err == nil {
-		line += fmt.Sprintf(" and %d recipes", len(msg.recipes.list))
+		line += fmt.Sprintf(" and %d recipes", len(msg.recipes.list()))
 	}
 	m.log.add(statusStyle.Render(line))
 }
 
-// setRecipes takes the recipes of the app's file. A file that does not read leaves no recipes, and says why.
+// setRecipes takes the recipes of the app's file. A file that does not load leaves no recipes, and says why.
 func (m *model) setRecipes(r recipes) {
-	m.prompt.setRecipes(r.list, r.path)
+	m.script = r.script
+	m.prompt.setRecipes(r.list(), recipe.Path(m.target.Package))
 	if r.err != nil {
 		m.log.add(problemStyle.Render(r.err.Error()))
 	}
@@ -871,6 +904,7 @@ func commands() []command {
 		{"/cancel", "ctrl+c", "Cancel the running action", (*model).cancel},
 		{"/clear", "ctrl+l", "Clear the log", (*model).clear},
 		{"/exit", "ctrl+d", "Cancel the run and exit", (*model).exit},
+		{"/init-recipes", "", "Start the app's recipes file and let editors check it", (*model).initRecipes},
 		{"/open-app", "ctrl+o", "Show the app's main screen", (*model).openApp},
 		{"/pick-app", "", "Pick another app on this device", (*model).pickApp},
 		{"/pick-device", "", "Pick another device", (*model).pickDevice},
@@ -896,8 +930,16 @@ func (s clientSource) Connect(target client.Target, mode client.StartMode, statu
 
 // loadRecipes reads the recipes of pkg.
 func loadRecipes(pkg string) recipes {
-	list, err := recipe.Load(pkg)
-	return recipes{recipe.Path(pkg), list, err}
+	script, err := recipe.Load(pkg)
+	return recipes{script, err}
+}
+
+// list is the recipes of the file, none without one.
+func (r recipes) list() []recipe.Recipe {
+	if r.script == nil {
+		return nil
+	}
+	return r.script.Recipes
 }
 
 func hasRequired(action wire.Action) bool {

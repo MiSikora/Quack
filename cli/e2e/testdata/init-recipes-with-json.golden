@@ -1,0 +1,6 @@
+$ quack --init-recipes --json
+--- exit 2
+--- stdout
+{"code":"usage","message":"--init-recipes takes only --app, since it sets up files and no device"}
+--- stderr
+--- device

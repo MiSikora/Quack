@@ -1,0 +1,15 @@
+$ quack --recipe typo
+--- exit 1
+--- stdout
+› app.greet name=Bob
+Hello, Bob!
+--- stderr
+quack: TypeError: Cannot read property 'user' of undefined
+    at run (io.mehow.quack.sample.ts:71:28)
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.greet","args":{"name":"Bob"}}

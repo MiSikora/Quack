@@ -2,5 +2,5 @@ $ quack --recipe setup --list-actions
 --- exit 2
 --- stdout
 --- stderr
-quack: --recipe takes no --list-actions, --list-devices or --list-recipes
+quack: --recipe takes no --list-actions, --list-devices, --list-recipes or --init-recipes
 --- device

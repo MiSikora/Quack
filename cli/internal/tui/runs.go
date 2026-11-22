@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -20,46 +21,63 @@ type runs struct {
 	// active is the run, or nil while none runs. A run that is stopping stays active until it ends.
 	active  *run
 	spinner spinner.Model
-	// now tells the time, which the end of a run measures from its start.
+	// now tells the time, which the end of a step measures from its start.
 	now func() time.Time
 }
 
-// run is a run of steps, one after another until one does not succeed: the one call of an action, or the steps of a
-// recipe.
+// run is the one call of an action, or a run of a recipe, which takes its steps one after another until it returns or
+// throws.
 type run struct {
 	// id names the run in the footer: the action's id, or the recipe's name after '$'.
 	id string
-	// recipe is whether the steps are a recipe's, which the log heads with the recipe and the footer counts.
+	// recipe is whether the run is a recipe's, which the log heads with the recipe and the footer follows step by step.
 	recipe bool
-	steps  []runStep
-	// step indexes the step that runs, and started is when it started.
-	step     int
-	started  time.Time
+	// step is the step that runs as the user types it, or empty between steps.
+	step string
+	// started is when the step that runs started, or else when the last step ended, or the run started.
+	started time.Time
+	// failure is the error of the last step that failed, which the end of the run does not repeat when it is the one
+	// that ended the run.
+	failure  error
 	stopping bool
 	cancel   context.CancelFunc
 }
 
-// runStep is a step of a run, and command the step as the user types it, which heads its lines in the log.
-type runStep struct {
-	step    recipe.Step
-	command string
-}
+// work is what a run does: it takes its steps against the app, tells observer about each, and returns the error that
+// ended it.
+type work func(ctx context.Context, observer recipe.Observer) error
 
-// runEnd is how a step ended: succeeded, failed or canceled.
+// runEnd is how a run ended: finished, failed or canceled.
 type runEnd interface{ runEnd() }
 
 type (
-	succeeded struct{ result wire.MessageResult }
-	failed    struct{ err error }
-	canceled  struct{}
+	finished struct{}
+	failed   struct{ err error }
+	canceled struct{}
 )
 
-// runNotification is a notification of a step, and stepEnded its end. Only Update touches the run.
+// stepStarted is the start of a step, as the user types it, runNotification a notification of the step, stepEnded or
+// stepFailed its end, runLogged a line the recipe logged, and runEnded the end of the run. Only Update touches the run.
 type (
+	stepStarted struct {
+		run     *run
+		command string
+	}
 	runNotification struct {
 		message string
 	}
 	stepEnded struct {
+		run    *run
+		result wire.MessageResult
+	}
+	stepFailed struct {
+		run *run
+		err error
+	}
+	runLogged struct {
+		text string
+	}
+	runEnded struct {
 		run *run
 		end runEnd
 	}
@@ -81,40 +99,46 @@ func newRuns() runs {
 	return runs{spinner: spinner.New(spinner.WithSpinner(spinner.Dot)), now: time.Now}
 }
 
-// start runs the steps of started in a goroutine of its own, which sends the notifications and the end of each step to
-// activity, and stops after a step that does not succeed. It returns the run's first lines: a blank one, the recipe's
-// name for a recipe, and the first step as the user types it.
-func (r *runs) start(app App, activity activity, started *run) (string, tea.Cmd) {
+// start does the work of started in a goroutine of its own, which sends what the work tells it to activity, each step
+// as actions have the user type it, and the end of the run last. It returns the run's first lines: a blank one, and the
+// recipe's name for a recipe.
+func (r *runs) start(activity activity, started *run, actions []wire.Action, work work) (string, tea.Cmd) {
 	ctx, cancel := context.WithCancel(activity.ctx)
 	started.started, started.cancel = r.now(), cancel
 	r.active = started
-	steps := started.steps
-	work := func() tea.Msg {
+	observer := recipe.Observer{
+		Started:  func(step recipe.Step) { activity.send(stepStarted{started, recipe.Line(step, actions)}) },
+		Notified: func(message string) { activity.send(runNotification{message}) },
+		Ended:    func(_ recipe.Step, result wire.MessageResult) { activity.send(stepEnded{started, result}) },
+		Failed:   func(_ recipe.Step, err error) { activity.send(stepFailed{started, err}) },
+		Logged:   func(text string) { activity.send(runLogged{text}) },
+	}
+	do := func() tea.Msg {
 		defer cancel()
-		for _, s := range steps {
-			result, err := recipe.Do(ctx, app, s.step, func(message string) { activity.send(runNotification{message}) })
-			var end runEnd
-			switch {
-			case err == nil:
-				end = succeeded{result}
-			case ctx.Err() != nil:
-				end = canceled{}
-			default:
-				end = failed{err}
-			}
-			activity.send(stepEnded{started, end})
-			if _, ok := end.(succeeded); !ok {
-				break
-			}
+		err := work(ctx, observer)
+		var end runEnd
+		switch {
+		case err == nil:
+			end = finished{}
+		case ctx.Err() != nil:
+			end = canceled{}
+		default:
+			end = failed{err}
 		}
+		activity.send(runEnded{started, end})
 		return nil
 	}
-	header := "\n"
+	header := ""
 	if started.recipe {
-		header += commandStyle.Render("› "+started.id) + "\n"
+		header = "\n" + commandStyle.Render("› "+started.id)
 	}
-	header += commandStyle.Render("› " + steps[0].command)
-	return header, tea.Batch(work, r.spinner.Tick)
+	return header, tea.Batch(do, r.spinner.Tick)
+}
+
+// stepStarted is the line of a step's start, the step as the user types it, which heads the step's lines.
+func (r *runs) stepStarted(e stepStarted) string {
+	e.run.step, e.run.started = e.command, r.now()
+	return commandStyle.Render("› " + e.command)
 }
 
 // notification is the lines of a notification, indented under its step.
@@ -122,33 +146,57 @@ func (r *runs) notification(e runNotification) string {
 	return prefixed("  ", "  ", e.message)
 }
 
-// end is the lines of a step's end, with the time the step took after its message and above its data. A step that
-// succeeded and has another after it goes on to that one, whose command follows. Otherwise the run ends and no longer
-// shows.
-func (r *runs) end(e stepEnded) string {
-	var text, data string
+// stepEnded is the lines of a step's end: its message, or done without one, the time the step took, and its data
+// under them.
+func (r *runs) stepEnded(e stepEnded) string {
+	text := e.result.Message
+	if text == "" {
+		text = statusStyle.Render("done")
+	}
+	now := r.now()
+	lines := text + statusStyle.Render(" · "+duration(now.Sub(e.run.started)))
+	if e.result.Data != nil {
+		lines += "\n" + prefixed("  ", "  ", e.result.IndentedData())
+	}
+	e.run.step, e.run.started = "", now
+	return lines
+}
+
+// stepFailed is the line of a step's failure: its error, and the time the step took. The recipe may catch the error
+// and go on.
+func (r *runs) stepFailed(e stepFailed) string {
+	now := r.now()
+	line := problemStyle.Render(e.err.Error()) + statusStyle.Render(" · "+duration(now.Sub(e.run.started)))
+	e.run.step, e.run.started, e.run.failure = "", now, e.err
+	return line
+}
+
+// ended is the lines of the run's end, after which it no longer shows: nothing for a run that finished, and else the
+// error or canceled, with the time since the last step started or ended after its first line. The rest of an error,
+// such as where a recipe threw, goes under it.
+func (r *runs) ended(e runEnded) string {
+	r.active = nil
+	var first, rest string
 	switch end := e.end.(type) {
-	case succeeded:
-		text = end.result.Message
-		if text == "" {
-			text = statusStyle.Render("done")
-		}
-		if end.result.Data != nil {
-			data = "\n" + prefixed("  ", "  ", end.result.IndentedData())
-		}
+	case finished:
+		return ""
 	case failed:
-		text = problemStyle.Render(end.err.Error())
+		head, tail, more := strings.Cut(end.err.Error(), "\n")
+		first = problemStyle.Render(head)
+		if more {
+			// Each line takes the style on its own, which pads no line to the width of the others.
+			for line := range strings.SplitSeq(tail, "\n") {
+				rest += "\n" + problemStyle.Render(line)
+			}
+		}
+		// The failed step said its error already, so only where the recipe was is left to say.
+		if e.run.failure != nil && errors.Is(end.err, e.run.failure) {
+			return strings.TrimPrefix(rest, "\n")
+		}
 	case canceled:
-		text = statusStyle.Render("canceled")
+		first = statusStyle.Render("canceled")
 	}
-	lines := text + statusStyle.Render(" · "+duration(r.now().Sub(e.run.started))) + data
-	if _, ok := e.end.(succeeded); !ok || e.run.step == len(e.run.steps)-1 {
-		r.active = nil
-		return lines
-	}
-	e.run.step++
-	e.run.started = r.now()
-	return lines + "\n" + commandStyle.Render("› "+e.run.steps[e.run.step].command)
+	return first + statusStyle.Render(" · "+duration(r.now().Sub(e.run.started))) + rest
 }
 
 // stop cancels the run unless it is stopping already, and says whether it did.
@@ -182,8 +230,8 @@ func (r *runs) footer() string {
 	// The spinner's frames end with a space of their own.
 	a := r.active
 	line := strings.TrimSpace(r.spinner.View()) + " " + a.id
-	if a.recipe {
-		line += fmt.Sprintf(" · step %d/%d %s", a.step+1, len(a.steps), a.steps[a.step].command)
+	if a.recipe && a.step != "" {
+		line += " · " + a.step
 	}
 	if a.stopping {
 		line += " canceling…"
@@ -246,8 +294,8 @@ func prefixed(first, rest, text string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (succeeded) runEnd() {}
-func (failed) runEnd()    {}
-func (canceled) runEnd()  {}
+func (finished) runEnd() {}
+func (failed) runEnd()   {}
+func (canceled) runEnd() {}
 
 var commandStyle = lipgloss.NewStyle().Bold(true)

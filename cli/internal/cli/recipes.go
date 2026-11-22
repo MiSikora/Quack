@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -24,37 +25,65 @@ func (e *stepError) Error() string { return e.err.Error() }
 
 func (e *stepError) Unwrap() error { return e.err }
 
-// runRecipe runs the steps of r, after checking its calls against the app's actions, so that a recipe the app would
-// refuse runs no step. Each step prints its line, then what the call of an action prints, and the first step that
-// fails ends the recipe with its error.
-func runRecipe(app client.App, r recipe.Recipe, terminal Terminal, json bool) error {
+// runRecipe runs the recipe name of s with args. Each step prints its line, then what the call of an action prints,
+// and console.log prints its lines. A step that fails ends the recipe with its error, unless the recipe catches it:
+// then the error prints as the step's outcome once the recipe goes on.
+func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wire.RawArg, terminal Terminal, json bool) error {
 	ctx := context.Background()
 	_, actions, err := app.Describe(ctx)
 	if err != nil {
 		return err
 	}
-	if err := recipe.Check(r, actions, app.Target()); err != nil {
-		// An environment variable that is not set is the user's to fix, like an arg the app would refuse.
-		var refused wire.Error
-		if !errors.As(err, &refused) {
-			return usageErrorf("%v", err)
-		}
-		return err
-	}
-	for i, step := range r.Steps {
-		if !json {
-			fmt.Fprintln(terminal.Out, "› "+recipe.Line(step, actions))
-		}
-		result, err := recipe.Do(ctx, app, step, printNotifications(terminal, json, i+1))
-		if err != nil {
-			return &stepError{i + 1, err}
-		}
-		// Only a call or a command has a message to print, which may be empty.
-		if json || hasMessage(step) {
-			printResult(terminal, json, result, i+1)
+	step := 0
+	// failure is the error of the step that failed last, until the recipe shows whether it caught it.
+	var failure *stepError
+	caught := func() {
+		if failure != nil {
+			printFailure(terminal, json, failure)
+			failure = nil
 		}
 	}
-	return nil
+	err = s.Run(ctx, app, name, args, recipe.Observer{
+		Started: func(started recipe.Step) {
+			caught()
+			step++
+			if !json {
+				fmt.Fprintln(terminal.Out, "› "+recipe.Line(started, actions))
+			}
+		},
+		Notified: func(message string) { printNotifications(terminal, json, step)(message) },
+		Ended: func(ended recipe.Step, result wire.MessageResult) {
+			// Only a call or a command has a message to print, which may be empty.
+			if json || hasMessage(ended) {
+				printResult(terminal, json, result, step)
+			}
+		},
+		Failed: func(_ recipe.Step, err error) { failure = &stepError{step, err} },
+		Logged: func(text string) {
+			caught()
+			if json {
+				printJSON(terminal.Out, notificationJSON{codeLog, text, step})
+			} else {
+				fmt.Fprintln(terminal.Out, text)
+			}
+		},
+	})
+	if failure != nil && errors.Is(err, failure.err) {
+		return &stepError{failure.step, err}
+	}
+	caught()
+	return err
+}
+
+// printFailure prints the error of a step that the recipe caught, as the step's outcome: its message, or with json its
+// outcomeJSON.
+func printFailure(terminal Terminal, json bool, failed *stepError) {
+	code, message, _ := failure(failed.err)
+	if json {
+		printJSON(terminal.Out, outcomeJSON{Code: code, Message: message, Step: failed.step})
+		return
+	}
+	fmt.Fprintln(terminal.Out, failed.err.Error())
 }
 
 // hasMessage is whether step ends with a message to print: what an action returns, or what a command prints.
@@ -66,29 +95,31 @@ func hasMessage(step recipe.Step) bool {
 	return true
 }
 
-// findRecipe reads the recipes of pkg and returns the one named name. A file that does not read is bad usage, like a
-// name it does not have.
-func findRecipe(pkg, name string) (recipe.Recipe, error) {
-	recipes, err := recipe.Load(pkg)
+// findRecipe reads the recipes of pkg and checks that they have one named name. A file that does not load is bad
+// usage, like a name it does not have.
+func findRecipe(pkg, name string) (*recipe.Script, error) {
+	s, err := recipe.Load(pkg)
 	if err != nil {
-		return recipe.Recipe{}, usageErrorf("%v", err)
+		return nil, usageErrorf("%v", err)
 	}
-	at := slices.IndexFunc(recipes, func(r recipe.Recipe) bool { return r.Name == name })
-	if at < 0 {
-		return recipe.Recipe{}, usageErrorf("no recipe named %s in %s", name, recipe.Path(pkg))
+	if s == nil || !slices.ContainsFunc(s.Recipes, func(r recipe.Recipe) bool { return r.Name == name }) {
+		return nil, usageErrorf("no recipe named %s in %s", name, recipe.Path(pkg))
 	}
-	return recipes[at], nil
+	return s, nil
 }
 
-// printRecipes lists the recipes of pkg whose name filter matches, or all of them without a filter, each like a man
-// page entry: its name, then its description and its steps indented below it. With asJSON they are an array of
-// recipeJSON instead. Without any recipes, it says where to write them. It fails when filter matches none.
+// printRecipes lists the recipes of pkg whose name filter matches, or all of them without a filter, each like an
+// action: its name, then its description and its params indented below it. With asJSON they are an array of
+// recipeJSON instead. Without any recipes, it says how to start them. It fails when filter matches none.
 func printRecipes(w io.Writer, pkg string, filter *regexp.Regexp, asJSON bool) error {
-	recipes, err := recipe.Load(pkg)
+	s, err := recipe.Load(pkg)
 	if err != nil {
 		return usageErrorf("%v", err)
 	}
-	var kept []recipe.Recipe
+	var recipes, kept []recipe.Recipe
+	if s != nil {
+		recipes = s.Recipes
+	}
 	for _, r := range recipes {
 		if filter == nil || filter.MatchString(r.Name) {
 			kept = append(kept, r)
@@ -100,28 +131,38 @@ func printRecipes(w io.Writer, pkg string, filter *regexp.Regexp, asJSON bool) e
 	case asJSON:
 		out := make([]recipeJSON, len(kept))
 		for i, r := range kept {
-			out[i] = recipeJSON{Name: r.Name, Description: r.Description, Steps: make([]string, len(r.Steps))}
-			for j, step := range r.Steps {
-				out[i].Steps[j] = recipe.Line(step, nil)
-			}
+			out[i] = recipeJSON{Name: r.Name, Description: r.Description, Params: paramsJSON(r.Params)}
 		}
 		printJSON(w, out)
 	case len(kept) == 0:
-		fmt.Fprintln(w, "No recipes. Create "+recipe.Path(pkg))
+		fmt.Fprintln(w, "No recipes. Create "+recipe.Path(pkg)+", and run quack --init-recipes for editors to check it.")
 	default:
 		var out strings.Builder
 		for _, r := range kept {
-			out.WriteString(r.Name + "\n")
-			if r.Description != "" {
-				writeWrapped(&out, sentence(r.Description), helpIndent)
-				out.WriteString("\n")
-			}
-			for _, step := range r.Steps {
-				out.WriteString(helpIndent + recipe.Line(step, nil) + "\n")
-			}
-			out.WriteString("\n")
+			writeAction(&out, wire.Action{ID: r.Name, Description: r.Description, Params: r.Params})
 		}
 		fmt.Fprint(w, strings.TrimSuffix(out.String(), "\n"))
+	}
+	return nil
+}
+
+// initRecipes writes the files that let editors check recipes, and with pkg a starter recipes file of pkg, and says
+// which it wrote and where recipes go.
+func initRecipes(w io.Writer, pkg string) error {
+	written, err := recipe.Init(pkg)
+	if err != nil {
+		return err
+	}
+	for _, path := range written {
+		fmt.Fprintln(w, "wrote "+path)
+	}
+	if len(written) == 0 {
+		fmt.Fprintln(w, "The files that let editors check recipes are up to date in "+recipe.Dir()+".")
+	}
+	if pkg == "" {
+		fmt.Fprintln(w, "Write the recipes of an app in "+filepath.Join(recipe.Dir(), "<package>.ts")+".")
+	} else {
+		fmt.Fprintln(w, "Write the recipes of "+pkg+" in "+recipe.Path(pkg)+".")
 	}
 	return nil
 }

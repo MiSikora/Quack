@@ -230,7 +230,7 @@ func TestEscClosesThePickerOfACommand(t *testing.T) {
 func TestPackageCommandShowsTheAppsOfTheDevice(t *testing.T) {
 	source := newFakeSource(newFakeApp(), device("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"))
 	source.appFor("emulator-5554", "com.duckduckgo.mobile")
-	h := startPicking(t, source, client.Target{}, client.Open)
+	h := startPicking(t, source, client.Target{}, client.OpenApp)
 	h.waitFor("type or ↑ to find an action")
 	source.install("emulator-5554", "io.mehow.quack.sample", "com.duckduckgo.mobile")
 
@@ -240,7 +240,7 @@ func TestPackageCommandShowsTheAppsOfTheDevice(t *testing.T) {
 	h.press("up", "enter")
 
 	h.waitFor("quack · com.duckduckgo.mobile 1.0 · emulator-5554", "type or ↑ to find an action")
-	want := []string{"emulator-5554 io.mehow.quack.sample open", "emulator-5554 com.duckduckgo.mobile wake"}
+	want := []string{"emulator-5554 io.mehow.quack.sample open-app", "emulator-5554 com.duckduckgo.mobile wake"}
 	if got := source.starts(); !reflect.DeepEqual(got, want) {
 		t.Errorf("started %q, want the flags' mode only for the first pick: %q", got, want)
 	}

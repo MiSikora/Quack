@@ -1,7 +1,7 @@
 $ quack --json --list-recipes
 --- exit 0
 --- stdout
-[{"name":"broken","description":"","steps":["app.greet name=Bob","app.params count=many"]},{"name":"clean","description":"Delete the account, then greet","steps":["account.delete","app.greet name=Bob"]},{"name":"fail-run","description":"","steps":["run echo oops \u003e\u00262; exit 3","app.greet name=Bob"]},{"name":"fail-shell","description":"","steps":["shell fail now","app.greet name=Bob"]},{"name":"greet","description":"","steps":["app.greet name=Bob"]},{"name":"greet-env","description":"","steps":["app.greet name='${QUACK_NAME}'"]},{"name":"prepare","description":"","steps":["shell pm clear ${QUACK_PACKAGE}","run echo seeded ${QUACK_NAME} on $ANDROID_SERIAL","app.greet name=Bob"]},{"name":"setup","description":"Create the account and greet","steps":["/open-app","wait 10ms","account.create username=alice","app.params count=3 flag=true tag=a tag='b c'"]}]
+[{"name":"careful","description":"Delete the account if there is one, then greet","params":[]},{"name":"clean","description":"Delete the account, then greet","params":[]},{"name":"failRun","description":"","params":[]},{"name":"failShell","description":"","params":[]},{"name":"greet","description":"","params":[{"name":"name","type":"string","description":"Who to greet","required":false,"default":"Bob"}]},{"name":"greetEnv","description":"","params":[]},{"name":"prepare","description":"","params":[]},{"name":"setup","description":"Create the account and greet","params":[]},{"name":"typo","description":"","params":[]}]
 --- stderr
 --- device
 shell emulator-5554: query-receivers

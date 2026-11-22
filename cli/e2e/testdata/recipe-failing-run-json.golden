@@ -1,7 +1,7 @@
-$ quack --json --recipe fail-run
+$ quack --json --recipe failRun
 --- exit 1
 --- stdout
-{"code":"command","message":"the command exited with 3: oops","step":1}
+{"code":"command","message":"the command exited with 3: oops\n    at run (io.mehow.quack.sample.ts:43:14)","step":1}
 --- stderr
 --- device
 shell emulator-5554: query-receivers

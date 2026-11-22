@@ -15,9 +15,9 @@ import (
 	"quack/internal/wire"
 )
 
-// paramBox asks for the params of one action: a row for each param under the action's id, and a preview of the call
-// on the input's row. One row has the focus. A focused param with hints takes the box for itself, with the hints its
-// text matches over it.
+// paramBox asks for the params of one action, or of a recipe as an action whose id is its name after '$': a row for each
+// param under the action's id, and a preview of the call on the input's row. One row has the focus. A focused param with
+// hints takes the box for itself, with the hints its text matches over it.
 type paramBox struct {
 	action  wire.Action
 	fields  []boxField
