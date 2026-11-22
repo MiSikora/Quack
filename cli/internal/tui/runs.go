@@ -186,9 +186,9 @@ func (r *runs) footer() string {
 		line += fmt.Sprintf(" · step %d/%d %s", a.step+1, len(a.steps), a.steps[a.step].command)
 	}
 	if a.stopping {
-		line += " stopping…"
+		line += " canceling…"
 	}
-	return line + " · ctrl+c stop action"
+	return line + " · ctrl+c cancel action"
 }
 
 func newActivity(ctx context.Context) activity {

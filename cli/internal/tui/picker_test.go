@@ -207,7 +207,7 @@ func TestDeviceCommandSwitchesToAnotherDevice(t *testing.T) {
 	h := startPicking(t, source, client.Target{Device: "emulator-5554"}, client.Wake)
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")
 
-	h.typing("/switch-device")
+	h.typing("/pick-device")
 	h.press("enter")
 	h.waitFor("Pixel 7", "Pixel 8", "> pick a device", "esc close")
 	h.press("up", "enter")
@@ -219,7 +219,7 @@ func TestDeviceCommandSwitchesToAnotherDevice(t *testing.T) {
 func TestEscClosesThePickerOfACommand(t *testing.T) {
 	h := start(t, newFakeApp())
 
-	h.typing("/switch-device")
+	h.typing("/pick-device")
 	h.press("enter")
 	h.waitFor("> pick a device", "esc close")
 	h.press("esc")
@@ -234,7 +234,7 @@ func TestPackageCommandShowsTheAppsOfTheDevice(t *testing.T) {
 	h.waitFor("type or ↑ to find an action")
 	source.install("emulator-5554", "io.mehow.quack.sample", "com.duckduckgo.mobile")
 
-	h.typing("/switch-app")
+	h.typing("/pick-app")
 	h.press("enter")
 	h.waitFor("com.duckduckgo.mobile", "> pick a package", "2/2", "esc close")
 	h.press("up", "enter")
@@ -250,12 +250,12 @@ func TestDeviceAndPackageAreRefusedDuringARun(t *testing.T) {
 	h := start(t, newFakeApp())
 	h.typing("account.watch")
 	h.press("enter")
-	h.waitFor("account.watch · ctrl+c stop action")
+	h.waitFor("account.watch · ctrl+c cancel action")
 
-	for _, command := range []string{"/switch-device", "/switch-app"} {
+	for _, command := range []string{"/pick-device", "/pick-app"} {
 		h.typing(command)
 		h.press("enter")
-		h.waitFor("stop the running action first (ctrl+c)")
+		h.waitFor("cancel the running action first (ctrl+c)")
 		h.waitFor("> find an action")
 		h.press("esc")
 	}
@@ -268,7 +268,7 @@ func TestDisconnectOpensTheDeviceStepAndWaits(t *testing.T) {
 	h.waitFor("type or ↑ to find an action")
 	h.typing("account.watch")
 	h.press("enter")
-	h.waitFor("account.watch · ctrl+c stop action")
+	h.waitFor("account.watch · ctrl+c cancel action")
 
 	source.set()
 
@@ -324,7 +324,7 @@ func TestAStartThePickerLeftBehindDoesNotTakeOver(t *testing.T) {
 	t.Cleanup(releaseLeft)
 	t.Cleanup(releaseNew)
 
-	h.typing("/switch-app")
+	h.typing("/pick-app")
 	h.press("enter")
 	h.waitFor("> pick a package")
 	h.press("up", "enter")

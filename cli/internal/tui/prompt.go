@@ -213,9 +213,9 @@ func (p *prompt) list(rows int) []string {
 // keys are the keys that work while the list shows, or else how to show it.
 func (p *prompt) keys() string {
 	if p.open() {
-		return "enter run · tab params · ↑↓ select · esc close · ctrl+c stop/quit"
+		return "enter run · tab params · ↑↓ select · esc close · ctrl+c cancel/quit"
 	}
-	return "type or ↑ to find an action · ctrl+c stop/quit"
+	return "type or ↑ to find an action · ctrl+o open app · ctrl+c cancel/quit"
 }
 
 // rows are count of choices, one per line, the best first, with the selection among them. The selected row is

@@ -35,7 +35,7 @@ func TestPanelShowsABlankRowTheTitleTheInputAndTheKeysAtRest(t *testing.T) {
 		strings.Repeat("─", 100),
 		"> find an action, $ for recipes, / for commands",
 		strings.Repeat("─", 100),
-		" type or ↑ to find an action · ctrl+c stop/quit",
+		" type or ↑ to find an action · ctrl+o open app · ctrl+c cancel/quit",
 	})
 	if lines := h.panel(); !strings.HasSuffix(lines[3], " 6/6") {
 		t.Errorf("the input line is %q, want the counter at its end", lines[3])
@@ -58,7 +58,7 @@ func TestUpOnEmptyTextListsEveryActionBestLastUnderARuleAndEscClosesIt(t *testin
 		strings.Repeat("─", 100),
 		"> find an action, $ for recipes, / for commands",
 		strings.Repeat("─", 100),
-		" enter run · tab params · ↑↓ select · esc close · ctrl+c stop/quit",
+		" enter run · tab params · ↑↓ select · esc close · ctrl+c cancel/quit",
 	})
 	h.press("esc")
 	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
@@ -233,10 +233,10 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 	h.press("esc", "esc")
 	h.typing("account.watch")
 	h.press("enter")
-	h.waitFor("account.watch · ctrl+c stop action")
+	h.waitFor("account.watch · ctrl+c cancel action")
 	check("one run")
 	h.press("ctrl+c")
-	h.waitFor("account.watch stopping… · ctrl+c stop")
+	h.waitFor("account.watch canceling… · ctrl+c cancel")
 	check("stopping")
 	releaseStops()
 	h.waitForLog("\ncanceled · ")
@@ -459,10 +459,10 @@ func TestSlashListsTheCommands(t *testing.T) {
 
 	h.typing("/")
 
-	h.waitFor("/switch-device", "/switch-app", "/stop-action", "/quit", "/open-app", "/clear", "▸ /reload", "7/7")
+	h.waitFor("/pick-device", "/pick-app", "/open-app", "/exit", "/clear", "/cancel", "▸ /reload", "7/7")
 	h.waitForNo("app.greet")
-	h.typing("q")
-	h.waitFor("▸ /quit")
+	h.typing("x")
+	h.waitFor("▸ /exit")
 }
 
 func TestQuestionMarkIsAnOrdinaryCharacter(t *testing.T) {
@@ -800,14 +800,14 @@ func TestActionsDoNotRunWhileARunRunsButTheBoxOpens(t *testing.T) {
 
 	h.typing("account.delete")
 	h.press("enter")
-	h.waitFor("> account.delete", "stop the running action first (ctrl+c)")
+	h.waitFor("> account.delete", "cancel the running action first (ctrl+c)")
 	h.press("esc")
 	h.typing("account.create")
 	h.press("enter")
 	h.waitFor("▸ username")
 	h.typing("alice")
 	h.press("enter")
-	h.waitFor("▸ username", "stop the running action first (ctrl+c)")
+	h.waitFor("▸ username", "cancel the running action first (ctrl+c)")
 	h.press("backspace")
 	h.waitFor("▸ username", "› account.create username=alic\n")
 	if got, want := app.received(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
@@ -844,7 +844,7 @@ func TestEscNeverStopsARun(t *testing.T) {
 	app.signIn("alice")
 
 	h.waitForLog("  Signed in as alice")
-	h.waitFor("account.watch · ctrl+c stop action")
+	h.waitFor("account.watch · ctrl+c cancel action")
 	select {
 	case <-app.canceled(0):
 		t.Fatal("esc stopped the watch")
@@ -857,7 +857,7 @@ func TestCtrlCStopsTheRunAndKeepsTheTextThenClearsThenAsksThenQuits(t *testing.T
 	h := start(t, app)
 	h.typing("account.watch")
 	h.press("enter")
-	h.waitFor("account.watch · ctrl+c stop action")
+	h.waitFor("account.watch · ctrl+c cancel action")
 	h.typing("abc")
 	h.waitFor("> abc")
 
@@ -881,11 +881,11 @@ func TestCtrlCWhileTheRunStopsAsksToQuit(t *testing.T) {
 	t.Cleanup(release)
 	h.typing("account.watch")
 	h.press("enter")
-	h.waitFor("account.watch · ctrl+c stop action")
+	h.waitFor("account.watch · ctrl+c cancel action")
 	h.typing("abc")
 
 	h.press("ctrl+c")
-	h.waitFor("account.watch stopping…")
+	h.waitFor("account.watch canceling…")
 	h.press("ctrl+c")
 
 	h.waitFor("> abc", "press ctrl+c again to quit")
@@ -1040,7 +1040,7 @@ steps = [{ wait = "1ms" }, { action = "account.watch" }, { action = "app.count" 
 	h.typing("$watch")
 	h.press("enter")
 	h.waitForLog("› account.watch\n  Signed out")
-	h.waitFor("$watch · step 2/3 account.watch · ctrl+c stop action")
+	h.waitFor("$watch · step 2/3 account.watch · ctrl+c cancel action")
 	h.press("ctrl+c")
 
 	h.waitForLog("\n› $watch\n› wait 1ms\ndone · ", "\n› account.watch\n  Signed out\ncanceled · ")
@@ -1066,7 +1066,7 @@ steps = [{ action = "account.delete" }]
 	h.typing("$clean")
 	h.press("enter")
 
-	h.waitFor("> $clean", "stop the running action first (ctrl+c)")
+	h.waitFor("> $clean", "cancel the running action first (ctrl+c)")
 	if got, want := app.received(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
@@ -1144,6 +1144,19 @@ func TestStatusLinesGoIntoTheLog(t *testing.T) {
 	h.press("ctrl+o")
 
 	h.waitForLog("starting io.mehow.quack.sample…\nshowed the app's main screen")
+}
+
+func TestCtrlOOpensTheAppEvenDuringARun(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+	h.typing("account.watch")
+	h.press("enter")
+	h.waitFor("account.watch · ctrl+c cancel action")
+
+	h.press("ctrl+o")
+
+	h.waitForLog("starting io.mehow.quack.sample…\nshowed the app's main screen")
+	h.waitFor("account.watch · ctrl+c cancel action")
 }
 
 func TestSmallWindowsShrinkTheList(t *testing.T) {

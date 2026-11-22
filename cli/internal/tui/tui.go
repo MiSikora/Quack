@@ -479,8 +479,8 @@ func (m *model) reload() tea.Cmd {
 	}
 }
 
-// open shows the app's main screen. The end goes through activity, after the status lines on the way to it.
-func (m *model) open() tea.Cmd {
+// openApp shows the app's main screen. The end goes through activity, after the status lines on the way to it.
+func (m *model) openApp() tea.Cmd {
 	app, activity := m.app, m.activity
 	return func() tea.Msg {
 		activity.send(opened{app.Start(client.Open)})
@@ -521,12 +521,12 @@ func (m *model) setRecipes(r recipes) {
 
 func (m *model) openedLine(msg opened) string {
 	if msg.err != nil {
-		return problemStyle.Render("open: " + msg.err.Error())
+		return problemStyle.Render("open-app: " + msg.err.Error())
 	}
 	return statusStyle.Render("showed the app's main screen")
 }
 
-func (m *model) stop() tea.Cmd {
+func (m *model) cancel() tea.Cmd {
 	m.runs.stop()
 	return nil
 }
@@ -537,17 +537,17 @@ func (m *model) exit() tea.Cmd {
 	return tea.Quit
 }
 
-// switchDevice opens the device picker, which goes on to the app picker unless the device has one app. It does nothing
+// pickDevice opens the device picker, which goes on to the app picker unless the device has one app. It does nothing
 // while a run is active.
-func (m *model) switchDevice() tea.Cmd {
+func (m *model) pickDevice() tea.Cmd {
 	if m.runs.active != nil {
 		return m.refused.show(refusedDuringRun)
 	}
 	return m.openPicker(func(p *picker) { p.skipPackage = true })
 }
 
-// switchApp opens the app picker for the device of the app. It does nothing while a run is active.
-func (m *model) switchApp() tea.Cmd {
+// pickApp opens the app picker for the device of the app. It does nothing while a run is active.
+func (m *model) pickApp() tea.Cmd {
 	if m.runs.active != nil {
 		return m.refused.show(refusedDuringRun)
 	}
@@ -865,12 +865,12 @@ func (n *notice) show(text string) tea.Cmd {
 func commands() []command {
 	return []command{
 		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", (*model).reload},
+		{"/cancel", "ctrl+c", "Cancel the running action", (*model).cancel},
 		{"/clear", "ctrl+l", "Clear the log", (*model).clear},
-		{"/open-app", "ctrl+o", "Show the app's main screen", (*model).open},
-		{"/quit", "ctrl+d", "Stop the run and quit", (*model).exit},
-		{"/stop-action", "ctrl+c", "Stop the running action", (*model).stop},
-		{"/switch-app", "", "Pick another app on this device", (*model).switchApp},
-		{"/switch-device", "", "Pick another device", (*model).switchDevice},
+		{"/exit", "ctrl+d", "Cancel the run and exit", (*model).exit},
+		{"/open-app", "ctrl+o", "Show the app's main screen", (*model).openApp},
+		{"/pick-app", "", "Pick another app on this device", (*model).pickApp},
+		{"/pick-device", "", "Pick another device", (*model).pickDevice},
 	}
 }
 
@@ -924,8 +924,8 @@ const (
 	// pollTime is how often an open picker asks the devices for their apps, so that an app installed while it waits
 	// shows by itself.
 	pollTime = 5 * time.Second
-	// refusedDuringRun is why an action, a recipe, /switch-device and /switch-app do nothing while an action runs.
-	refusedDuringRun = "stop the running action first (ctrl+c)"
+	// refusedDuringRun is why an action, a recipe, /pick-device and /pick-app do nothing while an action runs.
+	refusedDuringRun = "cancel the running action first (ctrl+c)"
 	// wheelRows is how far a turn of the mouse wheel scrolls the log.
 	wheelRows = 3
 )
