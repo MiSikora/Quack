@@ -8,6 +8,7 @@
           {
             "name": "name",
             "type": "string",
+            "hints": ["Alice", "Bob"],
             "required": true,
             "description": "Who to greet"
           },

@@ -14,7 +14,9 @@ type Param struct {
 	Description string
 	Type        ParamType
 	// Choices are the values an enum param takes. Other types have none.
-	Choices  []string
+	Choices []string
+	// Hints are values to offer while the user types a string param, in the app's order. Any other value works too.
+	Hints    []string
 	Presence Presence
 }
 

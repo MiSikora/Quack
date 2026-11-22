@@ -43,12 +43,16 @@ class ProtocolTest {
   }
 
   @Test
-  fun `encode an actions result with every param type and presence`() {
+  fun `encode an actions result with every param type, presence and hints`() {
     val greet =
       FakeAction(
         id = "app.greet",
         description = "Say hello",
-        params = listOf(Param.string("name", description = "Who to greet").required(), Param.int("times").withDefault(1)),
+        params =
+          listOf(
+            Param.string("name", description = "Who to greet").hints(listOf("Alice", "Bob")).required(),
+            Param.int("times").withDefault(1),
+          ),
       )
     val params =
       FakeAction(

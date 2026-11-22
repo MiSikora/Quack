@@ -61,7 +61,7 @@ func actionsResult(bodies []actionBody) Frame {
 			if err != nil {
 				return Malformed{fmt.Sprintf("param '%s' of '%s': %v", p.Name, a.ID, err)}
 			}
-			params[j] = Param{Name: p.Name, Description: p.Description, Type: ParamType(p.Type), Choices: p.Choices, Presence: presence}
+			params[j] = Param{Name: p.Name, Description: p.Description, Type: ParamType(p.Type), Choices: p.Choices, Hints: p.Hints, Presence: presence}
 		}
 		actions[i] = Action{ID: a.ID, Description: a.Description, Params: params}
 	}
@@ -127,6 +127,7 @@ type paramBody struct {
 	Name        string          `json:"name"`
 	Type        string          `json:"type"`
 	Choices     []string        `json:"choices"`
+	Hints       []string        `json:"hints"`
 	Required    bool            `json:"required"`
 	Default     json.RawMessage `json:"default"`
 	Description string          `json:"description"`

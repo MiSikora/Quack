@@ -222,6 +222,64 @@ class EndpointTest {
   }
 
   @Test
+  fun `describe the hints of string params in order and without duplicates`() = runTest {
+    val action =
+      FakeAction(
+        params =
+          listOf(
+            Param.string("feature").hints(listOf("sync", "autofill", "sync")),
+            Param.string("name").required().hints(listOf("Alice")),
+            Param.string("theme").withDefault("dark").hints(listOf("light", "dark")),
+            Param.string("text").hints(emptyList()),
+          ),
+      )
+
+    endpoint(action).describe() shouldReply
+      """
+      {
+        "result": {
+          "actions": [
+            {
+              "id": "test.action",
+              "description": "A test action",
+              "params": [
+                {
+                  "name": "feature",
+                  "type": "string",
+                  "hints": ["sync", "autofill"],
+                  "required": false,
+                  "description": ""
+                },
+                {
+                  "name": "name",
+                  "type": "string",
+                  "hints": ["Alice"],
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "theme",
+                  "type": "string",
+                  "hints": ["light", "dark"],
+                  "required": false,
+                  "default": "dark",
+                  "description": ""
+                },
+                {
+                  "name": "text",
+                  "type": "string",
+                  "required": false,
+                  "description": ""
+                }
+              ]
+            }
+          ]
+        }
+      }
+      """
+  }
+
+  @Test
   fun `call an action with parsed args`() = runTest {
     val name = Param.string("name").required()
     val times = Param.int("times").withDefault(2)

@@ -19,6 +19,7 @@ public interface QuackAction {
     public val description: String,
     internal val type: Type,
     internal val presence: Presence,
+    internal val hints: List<String> = emptyList(),
     internal val parse: (List<String>) -> T?,
   ) {
 
@@ -151,7 +152,14 @@ public interface QuackAction {
 }
 
 public fun <T : Any> QuackAction.Param<T?>.required(): QuackAction.Param<T> =
-  QuackAction.Param(name = name, type = type, presence = QuackAction.Param.Presence.Required, description = description, parse = parse)
+  QuackAction.Param(
+    name = name,
+    type = type,
+    presence = QuackAction.Param.Presence.Required,
+    description = description,
+    parse = parse,
+    hints = hints,
+  )
 
 public fun <T : Any> QuackAction.Param<T?>.withDefault(value: T): QuackAction.Param<T> =
   QuackAction.Param(
@@ -160,6 +168,16 @@ public fun <T : Any> QuackAction.Param<T?>.withDefault(value: T): QuackAction.Pa
     presence = QuackAction.Param.Presence.Default(value),
     description = description,
     parse = parse,
+    hints = hints,
   )
+
+/** Values the CLI offers while the user types, in this order and without duplicates. The user can still type any value. */
+public fun QuackAction.Param<String?>.hints(values: List<String>): QuackAction.Param<String?> = withHints(values)
+
+/** Values the CLI offers while the user types, in this order and without duplicates. The user can still type any value. */
+@JvmName("hintsOfNonNull") public fun QuackAction.Param<String>.hints(values: List<String>): QuackAction.Param<String> = withHints(values)
+
+private fun <T> QuackAction.Param<T>.withHints(values: List<String>): QuackAction.Param<T> =
+  QuackAction.Param(name = name, type = type, presence = presence, description = description, parse = parse, hints = values.distinct())
 
 public fun QuackAction.args(): QuackAction.Args = QuackAction.Args(this, emptyMap())
