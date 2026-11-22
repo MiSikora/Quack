@@ -1082,9 +1082,9 @@ func TestReloadReadsTheRecipesAgain(t *testing.T) {
 
 	h.waitForLog("reloaded 6 actions and 1 recipes")
 	h.waitFor("▸ $clean", "1/1")
-	writeRecipes(t, "[clean]\n")
+	path := writeRecipes(t, "[clean]\n")
 	h.press("ctrl+r")
-	h.waitForLog(": recipe 'clean' has no steps\nreloaded 6 actions")
+	h.waitForLog(wrapped(path+": recipe 'clean' has no steps", 100) + "\nreloaded 6 actions")
 	h.waitFor("No recipes", "0/0")
 }
 
@@ -1616,6 +1616,16 @@ func (h *harness) wait(read func() string, done func(string) bool, want string) 
 }
 
 // holds is whether s holds each text, in order.
+// wrapped is text as a log width columns wide shows it: cut into rows, without the spaces at their ends. Text that
+// starts with a temp path wraps where the path's length puts it, which differs between systems.
+func wrapped(text string, width int) string {
+	rows := strings.Split(ansi.Hardwrap(text, width, true), "\n")
+	for i, row := range rows {
+		rows[i] = strings.TrimRight(row, " ")
+	}
+	return strings.Join(rows, "\n")
+}
+
 func holds(s string, texts []string) bool {
 	for _, text := range texts {
 		i := strings.Index(s, text)
