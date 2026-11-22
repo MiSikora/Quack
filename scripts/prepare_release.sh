@@ -74,6 +74,9 @@ sed -i "" "s/^\[Unreleased\]: .*/$unreleasedLink"$'\\\n'"$newVersionLink/g" $cha
 versionNameKey="VERSION_NAME"
 sed -i "" "s/.*$versionNameKey.*/$versionNameKey=$newVersion/g" $propertiesFile
 
+# Replace current version in README.md.
+sed -i "" "s/io\.mehow\.quack:quack:[^\"]*/io.mehow.quack:quack:$newVersion/g" ./README.md
+
 git add . &>/dev/null
 git commit -am "Prepare for release $newVersion" &>/dev/null
 git tag -a "$newVersion" -m "Version $newVersion" &>/dev/null
