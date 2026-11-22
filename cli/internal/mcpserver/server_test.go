@@ -202,6 +202,8 @@ func TestRunRecipeGivesWhatEachStepGave(t *testing.T) {
 		recipe.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
 		recipe.OpenApp{},
 		recipe.Wait{Duration: time.Millisecond},
+		recipe.Shell{Command: "pm clear com.example"},
+		recipe.Run{Command: "echo seeded"},
 	}}}
 	session := connect(t, source)
 
@@ -210,7 +212,9 @@ func TestRunRecipeGivesWhatEachStepGave(t *testing.T) {
 	assertStructured(t, result, `{"steps":[`+
 		`{"step":"account.create username=alice","notifications":["Creating alice"],"message":"Created alice","data":{"id":7}},`+
 		`{"step":"/open-app","notifications":[],"message":""},`+
-		`{"step":"wait 1ms","notifications":[],"message":""}]}`)
+		`{"step":"wait 1ms","notifications":[],"message":""},`+
+		`{"step":"shell pm clear com.example","notifications":[],"message":"ran pm clear com.example"},`+
+		`{"step":"run echo seeded","notifications":[],"message":"seeded"}]}`)
 	if want := []client.StartMode{client.Open}; !reflect.DeepEqual(source.app.starts, want) {
 		t.Errorf("starts are %q, want %q", source.app.starts, want)
 	}
@@ -400,6 +404,15 @@ func (s *fakeSource) Recipes(pkg string) ([]recipe.Recipe, string, error) {
 type fakeApp struct {
 	calls  []wire.Call
 	starts []client.StartMode
+}
+
+func (a *fakeApp) Target() client.Target {
+	return client.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}
+}
+
+// Command answers every command with its text.
+func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
+	return adb.Output{Stdout: "ran " + cmd + "\n"}, nil
 }
 
 func (a *fakeApp) Start(mode client.StartMode) error {

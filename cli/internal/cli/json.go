@@ -8,6 +8,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
@@ -55,13 +56,15 @@ type paramJSON struct {
 
 // failure says how err ends quack: its code for --json, its message without the code, and the exit code. The app's
 // error codes keep their names. Failures the CLI finds itself are usage for what the user typed, device and app for
-// what cannot be reached, and no_reply for a call that ended without the app's answer.
+// what cannot be reached, no_reply for a call that ended without the app's answer, and command for a command of a
+// recipe that failed.
 func failure(err error) (code, message string, exit int) {
 	var refused wire.Error
 	var usage *usageError
 	var device *adb.Error
 	var app *client.AppError
 	var call *client.CallError
+	var command *recipe.CommandError
 	switch {
 	case errors.As(err, &refused):
 		exit, ok := errorExits[refused.Code]
@@ -77,6 +80,8 @@ func failure(err error) (code, message string, exit int) {
 		return "app", err.Error(), exitDevice
 	case errors.As(err, &call):
 		return "no_reply", err.Error(), exitAction
+	case errors.As(err, &command):
+		return "command", err.Error(), exitAction
 	default:
 		return "error", err.Error(), exitAction
 	}

@@ -1,9 +1,11 @@
 // Package recipe reads the recipes of an app and runs their steps. A recipe is a named list of steps with fixed args,
-// kept for each app in a TOML file of the user's config dir. An arg may hold ${NAME}, which takes the value of the
-// environment variable NAME when the step runs, and $$, which stands for $.
+// kept for each app in a TOML file of the user's config dir. An arg or a command may hold ${NAME}, which takes the value
+// of the environment variable NAME when the step runs, and $$, which stands for $. ${QUACK_PACKAGE} and
+// ${ANDROID_SERIAL} are the app and the device the recipe runs against, whatever the environment holds.
 package recipe
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -20,6 +23,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"quack/internal/adb"
 	"quack/internal/client"
 	"quack/internal/wire"
 )
@@ -31,7 +35,7 @@ type Recipe struct {
 	Steps       []Step
 }
 
-// Step is one step of a recipe: a Call, OpenApp or Wait.
+// Step is one step of a recipe: a Call, OpenApp, Wait, Shell or Run.
 type Step interface{ step() }
 
 // Call calls an action with the args the recipe fixes.
@@ -45,14 +49,42 @@ type Wait struct {
 	Duration time.Duration
 }
 
+// Shell runs Command on the app's device, as adb shell does.
+type Shell struct {
+	Command string
+}
+
+// Run runs Command on this computer with sh -c.
+type Run struct {
+	Command string
+}
+
+// CommandError is a command of a Shell or Run step that exited with a status other than 0.
+type CommandError struct {
+	Exit int
+	// Output is what the command printed to stderr, or to stdout when stderr is empty.
+	Output string
+}
+
+func (e *CommandError) Error() string {
+	if e.Output == "" {
+		return fmt.Sprintf("the command exited with %d", e.Exit)
+	}
+	return fmt.Sprintf("the command exited with %d: %s", e.Exit, e.Output)
+}
+
 func (Call) step()    {}
 func (OpenApp) step() {}
 func (Wait) step()    {}
+func (Shell) step()   {}
+func (Run) step()     {}
 
 // App is what a step needs from a quack app. client.App satisfies it.
 type App interface {
 	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
 	Start(mode client.StartMode) error
+	Command(ctx context.Context, cmd string) (adb.Output, error)
+	Target() client.Target
 }
 
 // Path is the file of the recipes of pkg: quack/recipes/<pkg>.toml in $XDG_CONFIG_HOME, or in ~/.config when that is
@@ -93,12 +125,12 @@ func Load(pkg string) ([]Recipe, error) {
 	return recipes, nil
 }
 
-// Check says whether each call of r would pass the app's checks of its args, so that a recipe that cannot finish
-// fails before its first step. Its errors carry the codes the app would answer with, except for an environment
+// Check says whether each call of r, run against target, would pass the app's checks of its args, so that a recipe
+// that cannot finish fails before its first step. Its errors carry the codes the app would answer with, except for an environment
 // variable that is not set.
-func Check(r Recipe, actions []wire.Action) error {
+func Check(r Recipe, actions []wire.Action, target client.Target) error {
 	for i, step := range r.Steps {
-		step, err := expandStep(step, os.LookupEnv)
+		step, err := expandStep(step, lookup(target))
 		if err != nil {
 			return fmt.Errorf("recipe '%s' step %d: %w", r.Name, i+1, err)
 		}
@@ -141,11 +173,11 @@ func Check(r Recipe, actions []wire.Action) error {
 	return nil
 }
 
-// Do runs step with its variables replaced. A Call returns the action's message and data, and the other steps an empty message. Canceling ctx
-// cancels the step, and a step that starts after ctx ended does not get far: the app cancels a call, and the app does
-// not open.
+// Do runs step with its variables replaced. A Call returns the action's message and data, a Shell or Run the stdout
+// of its command, and the other steps an empty message. Canceling ctx cancels the step, and a step that starts after
+// ctx ended does not get far: the app cancels a call, the app does not open, and a command ends at once.
 func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc) (wire.MessageResult, error) {
-	step, err := expandStep(step, os.LookupEnv)
+	step, err := expandStep(step, lookup(app.Target()))
 	if err != nil {
 		return wire.MessageResult{}, err
 	}
@@ -165,12 +197,57 @@ func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc)
 		case <-ctx.Done():
 			return wire.MessageResult{}, &client.CallError{Message: "canceled"}
 		}
+	case Shell:
+		out, err := app.Command(ctx, step.Command)
+		if ctx.Err() != nil {
+			return wire.MessageResult{}, &client.CallError{Message: "canceled"}
+		}
+		if err != nil {
+			return wire.MessageResult{}, err
+		}
+		return commandResult(out)
+	case Run:
+		return run(ctx, step.Command, app.Target())
 	}
 	return wire.MessageResult{}, nil
 }
 
-// Line writes step the way a user types it: a call as on the command line, /open-app as the TUI's command, and wait
-// with its duration. The args of a call go in the param order of its action in actions, or in key order when actions
+// run runs command on this computer, with QUACK_PACKAGE and ANDROID_SERIAL naming target in its environment, so that adb
+// in command reaches the recipe's device. Ending ctx kills sh, and the commands it started get a second to let go of
+// its output.
+func run(ctx context.Context, command string, target client.Target) (wire.MessageResult, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Env = append(os.Environ(), "QUACK_PACKAGE="+target.Package, "ANDROID_SERIAL="+string(target.Device))
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	cmd.WaitDelay = time.Second
+	err := cmd.Run()
+	var exited *exec.ExitError
+	switch {
+	case ctx.Err() != nil:
+		return wire.MessageResult{}, &client.CallError{Message: "canceled"}
+	case errors.As(err, &exited):
+		return commandResult(adb.Output{Stdout: stdout.String(), Stderr: stderr.String(), Exit: exited.ExitCode()})
+	case err != nil:
+		return wire.MessageResult{}, err
+	}
+	return commandResult(adb.Output{Stdout: stdout.String(), Stderr: stderr.String()})
+}
+
+// commandResult is the message of a command that exited with 0, its stdout, and a CommandError for any other status.
+func commandResult(out adb.Output) (wire.MessageResult, error) {
+	if out.Exit != 0 {
+		output := strings.TrimSpace(out.Stderr)
+		if output == "" {
+			output = strings.TrimSpace(out.Stdout)
+		}
+		return wire.MessageResult{}, &CommandError{Exit: out.Exit, Output: output}
+	}
+	return wire.MessageResult{Message: strings.TrimRight(out.Stdout, "\n")}, nil
+}
+
+// Line writes step the way a user types it: a call as on the command line, /open-app as the TUI's command, wait with
+// its duration, and shell and run with their commands. The args of a call go in the param order of its action in actions, or in key order when actions
 // lack it.
 func Line(step Step, actions []wire.Action) string {
 	switch step := step.(type) {
@@ -188,6 +265,10 @@ func Line(step Step, actions []wire.Action) string {
 		return "/open-app"
 	case Wait:
 		return "wait " + step.Duration.String()
+	case Shell:
+		return "shell " + step.Command
+	case Run:
+		return "run " + step.Command
 	}
 	return ""
 }
@@ -214,6 +295,8 @@ type (
 		Args    map[string]any `toml:"args"`
 		OpenApp *bool          `toml:"open-app"`
 		Wait    *string        `toml:"wait"`
+		Shell   *string        `toml:"shell"`
+		Run     *string        `toml:"run"`
 	}
 )
 
@@ -237,7 +320,7 @@ func (r rawRecipe) parse(name string) (Recipe, error) {
 
 func (s rawStep) parse() (Step, error) {
 	kinds := 0
-	for _, set := range []bool{s.Action != nil, s.OpenApp != nil, s.Wait != nil} {
+	for _, set := range []bool{s.Action != nil, s.OpenApp != nil, s.Wait != nil, s.Shell != nil, s.Run != nil} {
 		if set {
 			kinds++
 		}
@@ -246,9 +329,9 @@ func (s rawStep) parse() (Step, error) {
 	case s.Args != nil && s.Action == nil:
 		return nil, errors.New("args needs an action")
 	case kinds == 0:
-		return nil, errors.New("it needs one of action, open-app or wait")
+		return nil, errors.New("it needs one of action, open-app, wait, shell or run")
 	case kinds > 1:
-		return nil, errors.New("it takes only one of action, open-app or wait")
+		return nil, errors.New("it takes only one of action, open-app, wait, shell or run")
 	case s.OpenApp != nil:
 		if !*s.OpenApp {
 			return nil, errors.New("open-app must be true")
@@ -260,6 +343,12 @@ func (s rawStep) parse() (Step, error) {
 			return nil, fmt.Errorf("wait '%s' is not a duration above zero, such as 2s or 500ms", *s.Wait)
 		}
 		return Wait{d}, nil
+	case s.Shell != nil:
+		command, err := parseCommand("shell", *s.Shell)
+		return Shell{command}, err
+	case s.Run != nil:
+		command, err := parseCommand("run", *s.Run)
+		return Run{command}, err
 	}
 	var args map[string]wire.RawArg
 	for key, value := range s.Args {
@@ -278,6 +367,17 @@ func (s rawStep) parse() (Step, error) {
 		args[key] = values
 	}
 	return Call{Action: *s.Action, Args: args}, nil
+}
+
+// parseCommand checks the command of a shell or run step, which kind names.
+func parseCommand(kind, command string) (string, error) {
+	if strings.TrimSpace(command) == "" {
+		return "", fmt.Errorf("%s needs a command", kind)
+	}
+	if _, err := expand(command, anyValue); err != nil {
+		return "", fmt.Errorf("%s: %w", kind, err)
+	}
+	return command, nil
 }
 
 // rawValues are the values of an arg as the command line would give them: one for a scalar, and one for each item of
@@ -307,8 +407,17 @@ func rawValues(value any) (wire.RawArg, bool) {
 	return values, true
 }
 
-// expandStep returns step with the variables in the args of a call replaced by the values lookup gives.
+// expandStep returns step with the variables in the args of a call, or in a command, replaced by the values lookup
+// gives.
 func expandStep(step Step, lookup func(string) (string, bool)) (Step, error) {
+	switch s := step.(type) {
+	case Shell:
+		command, err := expand(s.Command, lookup)
+		return Shell{command}, err
+	case Run:
+		command, err := expand(s.Command, lookup)
+		return Run{command}, err
+	}
 	call, ok := step.(Call)
 	if !ok || call.Args == nil {
 		return step, nil
@@ -363,6 +472,20 @@ func expand(text string, lookup func(string) (string, bool)) (string, error) {
 			out.WriteByte('$')
 			rest = rest[at+1:]
 		}
+	}
+}
+
+// lookup finds the variables of a recipe that runs against target: QUACK_PACKAGE and ANDROID_SERIAL name target, and
+// any other name is an environment variable.
+func lookup(target client.Target) func(string) (string, bool) {
+	return func(name string) (string, bool) {
+		switch name {
+		case "QUACK_PACKAGE":
+			return target.Package, true
+		case "ANDROID_SERIAL":
+			return string(target.Device), true
+		}
+		return os.LookupEnv(name)
 	}
 }
 

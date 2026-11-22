@@ -103,20 +103,25 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		"options:\n" + fs.FlagUsages() + "\n" +
 		"recipes:\n" +
 		"  A recipe runs steps in order with fixed args, and stops at the first that fails: a call of an action, open-app\n" +
-		"  to show the app's main screen, or wait for a duration. The terminal UI runs a recipe as $<name>. The recipes\n" +
-		"  of an app are in $XDG_CONFIG_HOME/quack/recipes/<package>.toml, or in ~/.config/quack/recipes/<package>.toml\n" +
-		"  when XDG_CONFIG_HOME is unset or empty:\n\n" +
+		"  to show the app's main screen, wait for a duration, shell to run a command on the device, or run to run one on\n" +
+		"  this computer. The terminal UI runs a recipe as $<name>. The recipes of an app are in\n" +
+		"  $XDG_CONFIG_HOME/quack/recipes/<package>.toml, or in ~/.config/quack/recipes/<package>.toml when\n" +
+		"  XDG_CONFIG_HOME is unset or empty:\n\n" +
 		"    [login]\n" +
 		"    description = \"Log in as the test user\"\n" +
 		"    steps = [\n" +
 		"      { open-app = true },\n" +
 		"      { wait = \"2s\" },\n" +
 		"      { action = \"account.login\", args = { user = \"foo\", remember = true, count = 3, tag = [\"a\", \"b\"] } },\n" +
+		"      { shell = \"pm grant ${QUACK_PACKAGE} android.permission.POST_NOTIFICATIONS\" },\n" +
+		"      { run = \"./seed-backend.sh ${QUACK_USER}\" },\n" +
 		"    ]\n\n" +
-		"  An arg takes the environment variable NAME as ${NAME}, and $$ writes a $.\n\n" +
+		"  An arg or a command takes the environment variable NAME as ${NAME}, and $$ writes a $. QUACK_PACKAGE and\n" +
+		"  ANDROID_SERIAL are the app and the device the recipe runs against, and run commands get them in their\n" +
+		"  environment too.\n\n" +
 		"exit codes:\n" +
 		"  0  done\n" +
-		"  1  the action rejected the call, failed, or ended without an answer\n" +
+		"  1  the action rejected the call, failed, or ended without an answer, or a command of a recipe failed\n" +
 		"  2  bad usage, an unknown action, or invalid args\n" +
 		"  3  no device or app to reach\n"
 	if err := fs.Parse(argv); err != nil {

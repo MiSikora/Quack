@@ -33,7 +33,7 @@ func runRecipe(app client.App, r recipe.Recipe, terminal Terminal, json bool) er
 	if err != nil {
 		return err
 	}
-	if err := recipe.Check(r, actions); err != nil {
+	if err := recipe.Check(r, actions, app.Target()); err != nil {
 		// An environment variable that is not set is the user's to fix, like an arg the app would refuse.
 		var refused wire.Error
 		if !errors.As(err, &refused) {
@@ -49,12 +49,21 @@ func runRecipe(app client.App, r recipe.Recipe, terminal Terminal, json bool) er
 		if err != nil {
 			return &stepError{i + 1, err}
 		}
-		// Only a call has a message to print, which may be empty.
-		if _, isCall := step.(recipe.Call); isCall || json {
+		// Only a call or a command has a message to print, which may be empty.
+		if json || hasMessage(step) {
 			printResult(terminal, json, result, i+1)
 		}
 	}
 	return nil
+}
+
+// hasMessage is whether step ends with a message to print: what an action returns, or what a command prints.
+func hasMessage(step recipe.Step) bool {
+	switch step.(type) {
+	case recipe.OpenApp, recipe.Wait:
+		return false
+	}
+	return true
 }
 
 // findRecipe reads the recipes of pkg and returns the one named name. A file that does not read is bad usage, like a

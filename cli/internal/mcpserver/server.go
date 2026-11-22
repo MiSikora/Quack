@@ -41,6 +41,8 @@ type App interface {
 	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
 	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
 	Start(mode client.StartMode) error
+	Command(ctx context.Context, cmd string) (adb.Output, error)
+	Target() client.Target
 }
 
 // Serve serves the apps that adb reaches until the client disconnects. A started app waits up to startTimeout to
@@ -73,13 +75,17 @@ func New(source Source, version string) *mcp.Server {
 		Name: "list_recipes",
 		Description: "List the recipes of a quack-enabled app: named lists of steps with fixed args that the user keeps " +
 			"in a file on this computer. Each step is a call of an action as the command line writes it, /open-app, which " +
-			"shows the app's main screen, or a wait. An arg written ${NAME} takes the environment variable NAME of quack-mcp. " + targetHelp,
+			"shows the app's main screen, a wait, shell with a command that runs on the device, or run with a command that " +
+			"runs on this computer. An arg or a command written ${NAME} takes the environment variable NAME of quack-mcp, " +
+			"except ${QUACK_PACKAGE} and ${ANDROID_SERIAL}, which are the app and the device the recipe runs against. " +
+			targetHelp,
 	}, s.listRecipes)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "run_recipe",
 		Description: "Run a recipe of a quack-enabled app, step by step, and return what each step gave: its " +
-			"notifications, its message and its data. The recipe runs no step when one of its calls would not pass the " +
-			"app's checks, and stops at the first step that fails. Get the recipe names from list_recipes. " + targetHelp,
+			"notifications, its message and its data. The message of a command is what it printed. The recipe runs no " +
+			"step when one of its calls would not pass the app's checks, and stops at the first step that fails. Get the " +
+			"recipe names from list_recipes. " + targetHelp,
 		OutputSchema: schemaFor[runRecipeOutput](),
 	}, s.runRecipe)
 	return server
@@ -313,7 +319,7 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	if err := recipe.Check(r, actions); err != nil {
+	if err := recipe.Check(r, actions, app.Target()); err != nil {
 		return nil, runRecipeOutput{}, err
 	}
 	report := progress(ctx, req)

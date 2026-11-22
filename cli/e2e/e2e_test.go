@@ -166,6 +166,10 @@ var scenarios = []scenario{
 	{name: "recipe-check-fails-json", args: []string{"--json", "--recipe", "broken"}, recipes: sampleRecipes},
 	{name: "recipe-variable", args: []string{"--recipe", "greet-env"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Bob"}},
 	{name: "recipe-variable-unset", args: []string{"--recipe", "greet-env"}, recipes: sampleRecipes},
+	{name: "recipe-commands", args: []string{"--recipe", "prepare"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Bob"}},
+	{name: "recipe-commands-json", args: []string{"--json", "--recipe", "prepare"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Bob"}},
+	{name: "recipe-failing-shell", args: []string{"--recipe", "fail-shell"}, recipes: sampleRecipes},
+	{name: "recipe-failing-run-json", args: []string{"--json", "--recipe", "fail-run"}, recipes: sampleRecipes},
 	{name: "recipe-unknown", args: []string{"--recipe", "nope"}, recipes: sampleRecipes},
 	{name: "recipe-without-file", args: []string{"--recipe", "setup"}},
 	{name: "recipe-broken-file", args: []string{"--recipe", "setup"}, recipes: "[setup]\nsteps = [{ wait = \"soon\" }]\n"},
@@ -197,6 +201,15 @@ steps = [{ action = "app.greet", args = { name = "Bob" } }]
 
 [greet-env]
 steps = [{ action = "app.greet", args = { name = "${QUACK_NAME}" } }]
+
+[prepare]
+steps = [{ shell = "pm clear ${QUACK_PACKAGE}" }, { run = "echo seeded ${QUACK_NAME} on $ANDROID_SERIAL" }, { action = "app.greet", args = { name = "Bob" } }]
+
+[fail-shell]
+steps = [{ shell = "fail now" }, { action = "app.greet", args = { name = "Bob" } }]
+
+[fail-run]
+steps = [{ run = "echo oops >&2; exit 3" }, { action = "app.greet", args = { name = "Bob" } }]
 
 [clean]
 description = "Delete the account, then greet"

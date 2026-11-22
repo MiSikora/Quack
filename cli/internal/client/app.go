@@ -195,6 +195,14 @@ func (a App) Call(ctx context.Context, call wire.Call, notify NotificationFunc) 
 	return message, nil
 }
 
+// Target is the device of the app and its package.
+func (a App) Target() Target { return Target{a.device, a.pkg} }
+
+// Command runs cmd on the app's device, apart from the app.
+func (a App) Command(ctx context.Context, cmd string) (adb.Output, error) {
+	return a.device.Command(ctx, cmd)
+}
+
 // Start gets the app running the way mode asks, in one round trip. It says "starting" when the app was not running,
 // as soon as pidof answers and before the slow part.
 func (a App) Start(mode StartMode) error {

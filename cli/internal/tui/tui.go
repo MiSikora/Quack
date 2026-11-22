@@ -30,6 +30,8 @@ type App interface {
 	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
 	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
 	Start(mode client.StartMode) error
+	Command(ctx context.Context, cmd string) (adb.Output, error)
+	Target() client.Target
 }
 
 // Run shows the TUI until the user quits. It has the user pick a device and an app first, among those that want leaves,
@@ -425,7 +427,7 @@ func (m *model) choose() tea.Cmd {
 	case c.recipe != nil && m.runs.active != nil:
 		return m.refused.show(refusedDuringRun)
 	case c.recipe != nil:
-		if err := recipe.Check(*c.recipe, m.prompt.actions); err != nil {
+		if err := recipe.Check(*c.recipe, m.prompt.actions, m.target); err != nil {
 			m.log.add(problemStyle.Render(err.Error()))
 			return nil
 		}
