@@ -28,7 +28,8 @@ type Source interface {
 	Devices() ([]client.Device, error)
 	// Find returns the one app that device and pkg leave, either of which may be "" for any, as client.Find does.
 	Find(device adb.Device, pkg string) (client.Target, error)
-	Connect(target client.Target) (App, error)
+	// Connect gets the app of target running the way mode says before each request.
+	Connect(target client.Target, mode client.StartMode) (App, error)
 }
 
 // App is what the server needs from a quack app. client.App satisfies it.
@@ -119,9 +120,10 @@ type runActionInput struct {
 	Action string `json:"action"`
 	// Args are JSON values, so that a number reaches the app as the client wrote it. The SDK's validation still turns
 	// numbers into float64 first, so a long beyond 2^53 loses precision unless it comes as a string.
-	Args   map[string]json.RawMessage `json:"args,omitempty"`
-	Device string                     `json:"device,omitempty"`
-	App    string                     `json:"app,omitempty"`
+	Args    map[string]json.RawMessage `json:"args,omitempty"`
+	Device  string                     `json:"device,omitempty"`
+	App     string                     `json:"app,omitempty"`
+	OpenApp bool                       `json:"open_app,omitempty"`
 }
 
 type runActionOutput struct {
@@ -154,7 +156,7 @@ func (s tools) listActions(ctx context.Context, _ *mcp.CallToolRequest, in listA
 			return nil, listActionsOutput{}, fmt.Errorf("invalid filter: %v", err)
 		}
 	}
-	target, app, err := s.connect(in.Device, in.App)
+	target, app, err := s.connect(in.Device, in.App, client.Wake)
 	if err != nil {
 		return nil, listActionsOutput{}, err
 	}
@@ -179,7 +181,11 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 	if err != nil {
 		return nil, runActionOutput{}, err
 	}
-	_, app, err := s.connect(in.Device, in.App)
+	mode := client.Wake
+	if in.OpenApp {
+		mode = client.Open
+	}
+	_, app, err := s.connect(in.Device, in.App, mode)
 	if err != nil {
 		return nil, runActionOutput{}, err
 	}
@@ -205,12 +211,12 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 	return nil, runActionOutput{Notifications: notifications, Message: result.Message, Data: result.Data}, nil
 }
 
-func (s tools) connect(device, pkg string) (client.Target, App, error) {
+func (s tools) connect(device, pkg string, mode client.StartMode) (client.Target, App, error) {
 	target, err := s.source.Find(adb.Device(device), pkg)
 	if err != nil {
 		return client.Target{}, nil, err
 	}
-	app, err := s.source.Connect(target)
+	app, err := s.source.Connect(target, mode)
 	return target, app, err
 }
 
@@ -292,8 +298,8 @@ func (clientSource) Find(device adb.Device, pkg string) (client.Target, error) {
 	return client.Find(device, pkg)
 }
 
-func (s clientSource) Connect(target client.Target) (App, error) {
-	app, err := client.Resolve(client.Options{Target: target, Mode: client.Wake, StartTimeout: s.startTimeout, Status: s.status})
+func (s clientSource) Connect(target client.Target, mode client.StartMode) (App, error) {
+	app, err := client.Resolve(client.Options{Target: target, Mode: mode, StartTimeout: s.startTimeout, Status: s.status})
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +315,8 @@ var runActionSchema = func() *jsonschema.Schema {
 		"that large lose precision on the way."
 	schema.Properties["device"].Description = "the device's serial, as list_devices gives it"
 	schema.Properties["app"].Description = "the app's package, as list_devices gives it"
+	schema.Properties["open_app"].Description = "whether to show the app's main screen before the action runs, instead of " +
+		"starting the app in the background"
 	return schema
 }()
 

@@ -85,6 +85,18 @@ func TestRunActionPassesArgsAsTheAppParsesThem(t *testing.T) {
 	}
 }
 
+func TestRunActionStartsTheAppInTheBackgroundUnlessToldToOpenIt(t *testing.T) {
+	source := newFakeSource()
+	session := connect(t, source)
+
+	call(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "alice"}})
+	call(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "bob"}, "open_app": true})
+
+	if want := []client.StartMode{client.Wake, client.Open}; !reflect.DeepEqual(source.modes, want) {
+		t.Errorf("modes are %q, want %q", source.modes, want)
+	}
+}
+
 func TestRunActionGivesTheNotificationsTheMessageAndTheData(t *testing.T) {
 	session := connect(t, newFakeSource())
 
@@ -239,6 +251,8 @@ type fakeSource struct {
 	findErr error
 	// finds are the device and package of each Find, joined by a space.
 	finds []string
+	// modes are the start modes of each Connect.
+	modes []client.StartMode
 }
 
 func newFakeSource() *fakeSource {
@@ -255,7 +269,10 @@ func (s *fakeSource) Find(device adb.Device, pkg string) (client.Target, error) 
 	return client.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}, nil
 }
 
-func (s *fakeSource) Connect(client.Target) (App, error) { return s.app, nil }
+func (s *fakeSource) Connect(_ client.Target, mode client.StartMode) (App, error) {
+	s.modes = append(s.modes, mode)
+	return s.app, nil
+}
 
 // fakeApp has account.create, which creates the account its username names, and account.delete, which the app
 // rejects.
