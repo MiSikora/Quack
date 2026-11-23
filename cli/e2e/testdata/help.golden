@@ -28,7 +28,7 @@ options:
   -l, --list-actions             list the app's actions, or only those whose id matches regex
       --list-devices             list the devices and the quack-enabled apps on each
       --list-recipes             list the app's recipes, or only those whose name matches regex
-      --init-recipes             write the files that let editors check recipes, and with --app a starter recipes file of the app
+      --init-recipes             write the files that let editors check recipes, and with --app start .quack/ here with a recipe of the app
       --open-app                 show the app's main screen first, instead of starting it in the background
       --recipe name              run the app's recipe name
       --start-timeout duration   how long to wait for the app to answer (default 15s)
@@ -37,11 +37,18 @@ options:
 
 recipes:
   A recipe is a TypeScript or JavaScript function that runs actions and commands, and decides what to do with
-  what they return. The recipes of an app are the exports of $XDG_CONFIG_HOME/quack/recipes/<package>.ts, or of
-  ~/.config/quack/recipes/<package>.ts when XDG_CONFIG_HOME is unset or empty, or of the .js file there. The
-  file may import local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json there,
-  so that editors check recipes, and with --app a starter file of the app. The terminal UI lists the recipes
-  with the actions, marked ƒ, and $ lists only the recipes:
+  what they return. A project keeps them in .quack/recipes/, which quack finds in the current dir or above it,
+  up to the home dir. [recipes] in .quack/quack.toml maps the apps whose packages a regex fully matches to
+  files there, and [recipes] in config.toml maps apps to your own files in $XDG_CONFIG_HOME/quack/recipes/:
+
+    [recipes]
+    'io\.example\.app' = "recipes.ts"
+    'io\.example\..*' = ["common.ts", "debug.ts"]
+
+  An app gets the recipes of every file it matches in both, and two recipes of one name fail them all. Files
+  may import other local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json
+  next to the recipes, so that editors check them, and with --app starts .quack/ in the current dir when there
+  is none. The terminal UI lists the recipes with the actions, marked ƒ, and $ lists only the recipes:
 
     import quack from "quack"
 
@@ -61,7 +68,7 @@ recipes:
 
 settings:
   The terminal UI reads its settings from $XDG_CONFIG_HOME/quack/config.toml, or from
-  ~/.config/quack/config.toml when XDG_CONFIG_HOME is unset or empty. quack never writes the file, and both
+  ~/.config/quack/config.toml when XDG_CONFIG_HOME is unset or empty. quack never writes the file, and its
   keys are optional:
 
     show-data = true          # show the JSON data of notifications and results; /toggle-data flips it for

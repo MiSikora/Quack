@@ -7,55 +7,16 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/config"
 	"quack/internal/wire"
 )
-
-func TestPathIsATypeScriptFileInXDGConfigHome(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "/config")
-
-	if got, want := Path(pkg), "/config/quack/recipes/io.mehow.quack.sample.ts"; got != want {
-		t.Errorf("got %s, want %s", got, want)
-	}
-}
-
-func TestPathFallsBackToDotConfigInHome(t *testing.T) {
-	for _, value := range []string{"", "unset"} {
-		if value == "unset" {
-			t.Setenv("XDG_CONFIG_HOME", "")
-			os.Unsetenv("XDG_CONFIG_HOME")
-		} else {
-			t.Setenv("XDG_CONFIG_HOME", value)
-		}
-		t.Setenv("HOME", "/home/duck")
-
-		if got, want := Path(pkg), "/home/duck/.config/quack/recipes/io.mehow.quack.sample.ts"; got != want {
-			t.Errorf("XDG_CONFIG_HOME %s: got %s, want %s", value, got, want)
-		}
-	}
-}
-
-func TestPathIsTheJavaScriptFileWhenOnlyThatExists(t *testing.T) {
-	path := writeFile(t, pkg+".js", "")
-
-	if got := Path(pkg); got != path {
-		t.Errorf("got %s, want %s", got, path)
-	}
-}
-
-func TestLoadOfAMissingFileHasNoRecipes(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-
-	if s, err := Load(pkg); s != nil || err != nil {
-		t.Errorf("got %v, %v", s, err)
-	}
-}
 
 func TestLoadReadsTheExportedRecipesSortedByNameWithTheirParams(t *testing.T) {
 	writeFile(t, "common.ts", `export function helper(): string { return "x" }`)
@@ -80,22 +41,22 @@ export const notARecipe = 3
 const unexported = quack.recipe({ run() {} })
 `)
 
-	s, err := Load(pkg)
+	s, err := loadApp(t)
 
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []Recipe{
-		{Name: "clean"},
-		{Name: "login", Description: "Log in", Params: []wire.Param{
+		{Name: "clean", File: path},
+		{Name: "login", Description: "Log in", File: path, Params: []wire.Param{
 			{Name: "user", Description: "Who", Type: wire.ParamTypeString, Hints: []string{"alice", "bob"}, Presence: wire.Default{Values: []string{"foo"}}},
 			{Name: "count", Type: wire.ParamTypeInt, Presence: wire.Required{}},
 			{Name: "theme", Type: wire.ParamTypeEnum, Choices: []string{"light", "dark"}, Presence: wire.Optional{}},
 			{Name: "tags", Type: wire.ParamTypeStringList, Presence: wire.Default{Values: []string{"a", "b"}}},
 		}},
 	}
-	if s.Path != path || !reflect.DeepEqual(s.Recipes, want) {
-		t.Errorf("got %s %+v, want %s %+v", s.Path, s.Recipes, path, want)
+	if !reflect.DeepEqual(s.Recipes, want) {
+		t.Errorf("got %+v, want %+v", s.Recipes, want)
 	}
 }
 
@@ -124,10 +85,11 @@ const helper = quack.recipe({ run() {} })`)
 }
 
 func TestLoadReadsAJavaScriptFile(t *testing.T) {
-	writeFile(t, pkg+".js", `import quack from "quack"
+	writeFile(t, "recipes.js", `import quack from "quack"
 export const clean = quack.recipe({ description: "Clean", run() {} })`)
+	writeConfig(t, "[recipes]\n'.*' = \"recipes.js\"\n")
 
-	s, err := Load(pkg)
+	s, err := loadApp(t)
 
 	if err != nil || len(s.Recipes) != 1 || s.Recipes[0].Name != "clean" {
 		t.Errorf("got %+v, %v", s, err)
@@ -135,12 +97,12 @@ export const clean = quack.recipe({ description: "Clean", run() {} })`)
 }
 
 func TestLoadPassesOverExportsThatAreNoRecipes(t *testing.T) {
-	writeFile(t, pkg+".ts", `import quack from "quack"
+	write(t, `import quack from "quack"
 export const label = "zażółć"
 export const count = 3
 export const clean = quack.recipe({ run() {} })`)
 
-	s, err := Load(pkg)
+	s, err := loadApp(t)
 
 	if err != nil || len(s.Recipes) != 1 || s.Recipes[0].Name != "clean" {
 		t.Errorf("got %+v, %v", s, err)
@@ -178,97 +140,11 @@ quack.recipe({ name: "app:reset", run() {} })`, "recipe 'app:reset': its name ma
 	} {
 		write(t, c.file)
 
-		_, err := Load(pkg)
+		_, err := loadApp(t)
 
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: got %v, want %s", c.file, err, c.want)
 		}
-	}
-}
-
-func TestLoadFailsWhenBothFilesExist(t *testing.T) {
-	ts := write(t, "")
-	js := writeFile(t, pkg+".js", "")
-
-	_, err := Load(pkg)
-
-	if want := ts + " and " + js + " both hold recipes of " + pkg + ": keep one"; err == nil || err.Error() != want {
-		t.Errorf("got %v, want %s", err, want)
-	}
-}
-
-func TestLoadBringsTheFilesQuackOwnsUpToDate(t *testing.T) {
-	write(t, "")
-	stale := filepath.Join(Dir(), "quack.d.ts")
-	os.WriteFile(stale, []byte("old"), 0o644)
-
-	if _, err := Load(pkg); err != nil {
-		t.Fatal(err)
-	}
-
-	for name, want := range map[string][]byte{"quack.d.ts": quackTypes, "tsconfig.json": tsconfig} {
-		if got, _ := os.ReadFile(filepath.Join(Dir(), name)); string(got) != string(want) {
-			t.Errorf("%s: got %q", name, got)
-		}
-	}
-}
-
-func TestInitWritesTheFilesQuackOwnsOnce(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-
-	written, err := Init("")
-
-	want := []string{filepath.Join(Dir(), "quack.d.ts"), filepath.Join(Dir(), "tsconfig.json")}
-	if err != nil || !reflect.DeepEqual(written, want) {
-		t.Fatalf("got %v, %v, want %v", written, err, want)
-	}
-	for name, want := range map[string][]byte{"quack.d.ts": quackTypes, "tsconfig.json": tsconfig} {
-		if got, _ := os.ReadFile(filepath.Join(Dir(), name)); string(got) != string(want) {
-			t.Errorf("%s: got %q", name, got)
-		}
-	}
-	if written, err := Init(""); err != nil || len(written) != 0 {
-		t.Errorf("again: got %v, %v, want nothing written", written, err)
-	}
-	if entries, _ := os.ReadDir(Dir()); len(entries) != 2 {
-		t.Errorf("the recipes dir has %d files, want only the two quack owns", len(entries))
-	}
-}
-
-func TestInitWithAPackageStartsItsRecipesFileWithARecipeThatRuns(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-
-	written, err := Init(pkg)
-
-	want := []string{filepath.Join(Dir(), "quack.d.ts"), filepath.Join(Dir(), "tsconfig.json"), Path(pkg)}
-	if err != nil || !reflect.DeepEqual(written, want) {
-		t.Fatalf("got %v, %v, want %v", written, err, want)
-	}
-	s, err := Load(pkg)
-	if err != nil || len(s.Recipes) != 1 || s.Recipes[0].Name != "open" {
-		t.Fatalf("starter: got %+v, %v", s, err)
-	}
-	app := &fakeApp{}
-	if _, err := s.Run(context.Background(), app, "open", nil, Observer{}); err != nil || !reflect.DeepEqual(app.starts, []client.StartMode{client.OpenApp}) {
-		t.Errorf("open: got %v and starts %v", err, app.starts)
-	}
-	if written, err := Init(pkg); err != nil || len(written) != 0 {
-		t.Errorf("again: got %v, %v, want nothing written", written, err)
-	}
-}
-
-func TestInitKeepsARecipesFile(t *testing.T) {
-	for _, name := range []string{pkg + ".ts", pkg + ".js"} {
-		path := writeFile(t, name, "// mine")
-		t.Cleanup(func() { os.Remove(path) })
-
-		if written, err := Init(pkg); err != nil || slices.Contains(written, Path(pkg)) {
-			t.Errorf("%s: got %v, %v", name, written, err)
-		}
-		if got, _ := os.ReadFile(path); string(got) != "// mine" {
-			t.Errorf("%s: got %q", name, got)
-		}
-		os.Remove(path)
 	}
 }
 
@@ -394,7 +270,7 @@ export const r = quack.recipe({
 			t.Errorf("%v: got %v, want %s", c.args, err, c.want)
 		}
 	}
-	if _, err := s.Run(context.Background(), &fakeApp{}, "nope", nil, Observer{}); err == nil || !strings.HasPrefix(err.Error(), "no recipe named nope in ") {
+	if _, err := s.Run(context.Background(), &fakeApp{}, "nope", nil, Observer{}); err == nil || err.Error() != "no recipe named nope for io.mehow.quack.sample" {
 		t.Errorf("unknown recipe: got %v", err)
 	}
 }
@@ -413,7 +289,7 @@ export const r = quack.recipe({
     fail()
   },
 })`)
-	s, err := Load(pkg)
+	s, err := loadApp(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +575,7 @@ export const named = quack.recipe({ run() { quack.runRecipe("named" as any) } })
 import quack from "quack"
 export const r = quack.recipe({ run() {} })
 quack.runRecipe(r)`)
-	if _, err := Load(pkg); err == nil || !strings.HasPrefix(err.Error(), "TypeError: the \"quack\" module runs steps only inside a recipe's run") {
+	if _, err := loadApp(t); err == nil || !strings.HasPrefix(err.Error(), "TypeError: the \"quack\" module runs steps only inside a recipe's run") {
 		t.Errorf("outside a run: got %v", err)
 	}
 }
@@ -792,34 +668,55 @@ var actions = []wire.Action{
 	}},
 }
 
+// write keeps file as the recipes of pkg in the user's config.
 func write(t *testing.T, file string) string {
 	t.Helper()
-	return writeFile(t, pkg+".ts", strings.TrimPrefix(file, "\n"))
+	path := writeFile(t, pkg+".ts", strings.TrimPrefix(file, "\n"))
+	writeConfig(t, "[recipes]\n'"+regexp.QuoteMeta(pkg)+"' = \""+pkg+".ts\"\n")
+	return path
 }
 
+// writeFile writes a file to the user's recipes dir, where the types are up to date, in a config dir of the test's own.
 func writeFile(t *testing.T, name, content string) string {
 	t.Helper()
 	if !strings.HasPrefix(os.Getenv("XDG_CONFIG_HOME"), os.TempDir()) {
 		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	}
-	path := filepath.Join(Dir(), name)
-	if err := os.MkdirAll(Dir(), 0o755); err != nil {
+	if _, err := writeTypes(Dir()); err != nil {
 		t.Fatal(err)
 	}
+	path := filepath.Join(Dir(), name)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
 
-func load(t *testing.T, file string) *Script {
+func writeConfig(t *testing.T, content string) {
+	t.Helper()
+	if err := os.WriteFile(config.Path(), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// loadApp loads the recipes of pkg from a dir outside any project, and fails on warnings.
+func loadApp(t *testing.T) (*Cookbook, error) {
+	t.Helper()
+	c, warnings, err := Load(t.TempDir(), pkg)
+	if warnings != nil {
+		t.Fatalf("warnings: %q", warnings)
+	}
+	return c, err
+}
+
+func load(t *testing.T, file string) *Cookbook {
 	t.Helper()
 	write(t, file)
-	s, err := Load(pkg)
+	c, err := loadApp(t)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s
+	return c
 }
 
 func sameJSON(a, b string) bool {

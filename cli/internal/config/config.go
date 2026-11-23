@@ -1,4 +1,5 @@
-// Package config reads quack's settings file, which only the terminal UI uses. quack never writes it.
+// Package config reads quack's settings file. quack never writes it. Its settings are the terminal UI's, and its
+// [recipes] table belongs to package recipe, which reads it on its own.
 package config
 
 import (
@@ -53,6 +54,7 @@ func Parse(doc []byte) (Config, []string) {
 	var known struct {
 		ShowData        any `toml:"show-data"`
 		GroupNamespaces any `toml:"group-namespaces"`
+		Recipes         any `toml:"recipes"`
 	}
 	decoder := toml.NewDecoder(bytes.NewReader(doc))
 	decoder.DisallowUnknownFields()

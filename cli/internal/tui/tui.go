@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -31,7 +32,9 @@ func Run(want client.Target, mode client.StartMode, startTimeout time.Duration, 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	settings, problems := config.Load()
-	_, err := tea.NewProgram(newModel(clientSource{startTimeout}, newActivity(ctx), want, mode, version, settings, problems)).Run()
+	// A dir that is unknown fails each load of recipes, which says why.
+	dir, _ := os.Getwd()
+	_, err := tea.NewProgram(newModel(clientSource{startTimeout}, newActivity(ctx), want, mode, version, dir, settings, problems)).Run()
 	return err
 }
 
@@ -63,8 +66,10 @@ type model struct {
 	box  *paramBox
 	runs runs
 	// Leaves the JSON data of notifications and results out of the log, from the next line on.
-	hideData  bool
-	script    *recipe.Script
+	hideData bool
+	// The dir quack started in. Recipes load from its project and from the user's config.
+	dir       string
+	cookbook  *recipe.Cookbook
 	quit      notice
 	copied    notice
 	refused   notice
@@ -104,8 +109,9 @@ type described struct {
 }
 
 type recipes struct {
-	script *recipe.Script
-	err    error
+	cookbook *recipe.Cookbook
+	warnings []string
+	err      error
 }
 
 type listed struct {
@@ -133,10 +139,11 @@ type clientSource struct {
 }
 
 // The problems with the settings file go into the log, under the header.
-func newModel(source Source, activity activity, want client.Target, mode client.StartMode, version string, settings config.Config, problems []string) *model {
+func newModel(source Source, activity activity, want client.Target, mode client.StartMode, version, dir string, settings config.Config, problems []string) *model {
 	m := &model{
 		source:    source,
 		activity:  activity,
+		dir:       dir,
 		pending:   map[adb.Device]int{},
 		mode:      mode,
 		picker:    newPicker(want, 0),
@@ -403,7 +410,7 @@ func (m *model) choose() tea.Cmd {
 }
 
 func (m *model) start(r runnable, args map[string]wire.RawArg) tea.Cmd {
-	app, script := m.app, m.script
+	app, cookbook := m.app, m.cookbook
 	work := func(ctx context.Context, observer recipe.Observer) (json.RawMessage, error) {
 		step := recipe.Call{Action: r.ID, Args: args}
 		observer.Started(step)
@@ -415,7 +422,7 @@ func (m *model) start(r runnable, args map[string]wire.RawArg) tea.Cmd {
 	}
 	if r.recipe {
 		work = func(ctx context.Context, observer recipe.Observer) (json.RawMessage, error) {
-			return script.Run(ctx, app, r.ID, args, observer)
+			return cookbook.Run(ctx, app, r.ID, args, observer)
 		}
 	}
 	header, cmd := m.runs.start(m.activity, &run{runnable: r}, m.prompt.actions, work)
@@ -431,10 +438,10 @@ func (m *model) openBox(r runnable) tea.Cmd {
 
 // The answer goes through activity, so that it comes after the status lines on the way to it.
 func (m *model) reload() tea.Cmd {
-	app, activity, pkg := m.app, m.activity, m.target.Package
+	app, activity, dir, pkg := m.app, m.activity, m.dir, m.target.Package
 	return func() tea.Msg {
 		hello, actions, err := app.Describe(activity.ctx)
-		activity.send(described{hello, actions, err, loadRecipes(pkg)})
+		activity.send(described{hello, actions, err, loadRecipes(dir, pkg)})
 		return nil
 	}
 }
@@ -454,7 +461,7 @@ func (m *model) openApp() tea.Cmd {
 // It touches only files, so it works while a run is active.
 func (m *model) initRecipes() tea.Cmd {
 	pkg := m.target.Package
-	written, err := recipe.Init(pkg)
+	written, err := recipe.Init(m.dir, pkg)
 	if err != nil {
 		m.log.add(problemStyle.Render("init-recipes: " + err.Error()))
 		return nil
@@ -463,9 +470,9 @@ func (m *model) initRecipes() tea.Cmd {
 		m.log.add(statusStyle.Render("wrote " + path))
 	}
 	if len(written) == 0 {
-		m.log.add(statusStyle.Render("the recipes of " + pkg + " are set up already in " + recipe.Path(pkg)))
+		m.log.add(statusStyle.Render("the recipe files are up to date"))
 	}
-	m.setRecipes(loadRecipes(pkg))
+	m.setRecipes(loadRecipes(m.dir, pkg))
 	return nil
 }
 
@@ -501,8 +508,11 @@ func (m *model) describe(msg described) {
 }
 
 func (m *model) setRecipes(r recipes) {
-	m.script = r.script
-	m.prompt.setRecipes(r.list(), recipe.Path(m.target.Package))
+	m.cookbook = r.cookbook
+	m.prompt.setRecipes(r.list())
+	for _, warning := range r.warnings {
+		m.log.add(problemStyle.Render(warning))
+	}
 	if r.err != nil {
 		m.log.add(problemStyle.Render(r.err.Error()))
 	}
@@ -575,13 +585,13 @@ func (m *model) advance() tea.Cmd {
 
 func (m *model) connect(target client.Target) tea.Cmd {
 	m.picker.connecting = &target
-	source, activity, mode := m.source, m.activity, m.mode
+	source, activity, mode, dir := m.source, m.activity, m.mode, m.dir
 	return func() tea.Msg {
 		app, err := source.Connect(target, mode, activity)
 		msg := connected{target: target, app: app, described: described{err: err}}
 		if err == nil {
 			msg.hello, msg.actions, msg.err = app.Describe(activity.ctx)
-			msg.recipes = loadRecipes(target.Package)
+			msg.recipes = loadRecipes(dir, target.Package)
 		}
 		activity.send(msg)
 		return nil
@@ -833,7 +843,7 @@ func commands() []command {
 		{"/cancel", "ctrl+c", "Cancel the running action", (*model).cancel},
 		{"/clear", "ctrl+l", "Clear the log", (*model).clear},
 		{"/exit", "ctrl+d", "Cancel the run and exit", (*model).exit},
-		{"/init-recipes", "", "Start the app's recipes file and let editors check it", (*model).initRecipes},
+		{"/init-recipes", "", "Start the recipes of the app in .quack/ and let editors check them", (*model).initRecipes},
 		{"/open-app", "ctrl+o", "Show the app's main screen", (*model).openApp},
 		{"/pick-app", "", "Pick another app on this device", (*model).pickApp},
 		{"/pick-device", "", "Pick another device", (*model).pickDevice},
@@ -858,16 +868,16 @@ func (s clientSource) Connect(target client.Target, mode client.StartMode, statu
 	return app, nil
 }
 
-func loadRecipes(pkg string) recipes {
-	script, err := recipe.Load(pkg)
-	return recipes{script, err}
+func loadRecipes(dir, pkg string) recipes {
+	cookbook, warnings, err := recipe.Load(dir, pkg)
+	return recipes{cookbook, warnings, err}
 }
 
 func (r recipes) list() []recipe.Recipe {
-	if r.script == nil {
+	if r.cookbook == nil {
 		return nil
 	}
-	return r.script.Recipes
+	return r.cookbook.Recipes
 }
 
 var (

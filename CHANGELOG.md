@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Library: an action's id holds only ASCII letters, `_`, `.` and `-`, and does not start with `-`. The server leaves out other actions, or throws after `throwOnMisconfiguration()`.
 - CLI: a recipe's name follows the same rule as an action's id, and a recipes file with another name fails to load.
 - CLI: `quack.waitUntil` keeps checking while the check returns a falsy value, and returns the first truthy one instead of nothing.
+- CLI: recipes live in a project's `.quack/recipes/` or in `$XDG_CONFIG_HOME/quack/recipes/`, and a `[recipes]` table in `.quack/quack.toml` or `config.toml` maps the apps whose packages a regex matches to files there, instead of one `<package>.ts` file per app. An app gets the recipes of every file it matches. `--init-recipes` and `/init-recipes` start `.quack/`, and MCP `list_recipes` gives each recipe's file and the problems that left files out.
+- CLI: only `--init-recipes` and `/init-recipes` write `quack.d.ts` and `tsconfig.json`. Loading recipes warns when they are out of date instead of rewriting them.
 
 ### Fixed
 - CLI: a recipes file that exports a string with letters outside ASCII loads instead of crashing quack.

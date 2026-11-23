@@ -3,11 +3,9 @@ package recipe
 import (
 	"cmp"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -24,10 +22,11 @@ import (
 	"quack/internal/wire"
 )
 
-type Script struct {
-	Path string
+// script is one recipes file, bundled with the local files it imports.
+type script struct {
+	path string
 	// Sorted by name.
-	Recipes []Recipe
+	recipes []Recipe
 	code    string
 }
 
@@ -57,44 +56,15 @@ func (e *ScriptError) Error() string {
 
 func (e *ScriptError) Unwrap() error { return e.Err }
 
-var (
-	//go:embed types/quack.d.ts
-	quackTypes []byte
-	//go:embed types/tsconfig.json
-	tsconfig []byte
-	//go:embed types/starter.ts
-	starter []byte
-)
-
 // ~/.config on every OS when XDG_CONFIG_HOME is unset or empty.
 func Dir() string { return filepath.Join(config.Dir(), "recipes") }
 
-func Path(pkg string) string {
-	js := filepath.Join(Dir(), pkg+".js")
-	if _, err := os.Stat(js); err == nil && !exists(filepath.Join(Dir(), pkg+".ts")) {
-		return js
-	}
-	return filepath.Join(Dir(), pkg+".ts")
-}
-
-// Load returns nil without a recipes file. It also brings quack.d.ts and tsconfig.json next to recipes files up to
-// date, so that editors check recipes against the "quack" this quack runs.
-func Load(pkg string) (*Script, error) {
-	ts, js := filepath.Join(Dir(), pkg+".ts"), filepath.Join(Dir(), pkg+".js")
-	switch {
-	case exists(ts) && exists(js):
-		return nil, fmt.Errorf("%s and %s both hold recipes of %s: keep one", ts, js, pkg)
-	case !exists(ts) && !exists(js):
-		return nil, nil
-	}
-	// Recipes still run where the editor files cannot be written, such as in a read-only config dir.
-	_, _ = writeOwned()
-	path := Path(pkg)
+func loadScript(path string) (*script, error) {
 	code, err := bundle(path)
 	if err != nil {
 		return nil, err
 	}
-	s := &Script{Path: path, code: code}
+	s := &script{path: path, code: code}
 	r := newRuntime(s, nil, nil, Observer{})
 	exports, err := r.load()
 	if err != nil {
@@ -105,59 +75,21 @@ func Load(pkg string) (*Script, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	for _, declared := range named {
-		s.Recipes = append(s.Recipes, declared.Recipe)
+		s.recipes = append(s.recipes, declared.Recipe)
 	}
 	return s, nil
 }
 
-func Init(pkg string) ([]string, error) {
-	written, err := writeOwned()
-	if err != nil || pkg == "" {
-		return written, err
-	}
-	ts, js := filepath.Join(Dir(), pkg+".ts"), filepath.Join(Dir(), pkg+".js")
-	if exists(ts) || exists(js) {
-		return written, nil
-	}
-	if err := os.WriteFile(ts, starter, 0o644); err != nil {
-		return nil, err
-	}
-	return append(written, ts), nil
-}
-
-func writeOwned() ([]string, error) {
-	if err := os.MkdirAll(Dir(), 0o755); err != nil {
-		return nil, err
-	}
-	var written []string
-	for name, content := range map[string][]byte{"quack.d.ts": quackTypes, "tsconfig.json": tsconfig} {
-		path := filepath.Join(Dir(), name)
-		if current, err := os.ReadFile(path); err == nil && string(current) == string(content) {
-			continue
-		}
-		if err := os.WriteFile(path, content, 0o644); err != nil {
-			return nil, err
-		}
-		written = append(written, path)
-	}
-	slices.Sort(written)
-	return written, nil
-}
-
-// Run returns what the recipe's run returned as JSON, or nil when it returned undefined. Ending ctx interrupts the
-// recipe wherever it is.
-func (s *Script) Run(ctx context.Context, app App, name string, args map[string]wire.RawArg, observer Observer) (json.RawMessage, error) {
-	at := slices.IndexFunc(s.Recipes, func(r Recipe) bool { return r.Name == name })
-	if at < 0 {
-		return nil, fmt.Errorf("no recipe named %s in %s", name, s.Path)
-	}
-	raw, err := recipeArgs(s.Recipes[at], args)
+// The script declares the recipe named name.
+func (s *script) run(ctx context.Context, app App, name string, args map[string]wire.RawArg, observer Observer) (json.RawMessage, error) {
+	at := slices.IndexFunc(s.recipes, func(r Recipe) bool { return r.Name == name })
+	raw, err := recipeArgs(s.recipes[at], args)
 	if err != nil {
 		return nil, err
 	}
 	r := newRuntime(s, ctx, app, observer)
 	// Steps show the variables of params by name too, as if the recipe read them.
-	for _, variable := range s.Recipes[at].env {
+	for _, variable := range s.recipes[at].env {
 		r.env.Get(variable)
 	}
 	exports, err := r.load()
@@ -172,7 +104,7 @@ func (s *Script) Run(ctx context.Context, app App, name string, args map[string]
 	run := named[slices.IndexFunc(named, func(d declaredRecipe) bool { return d.Name == name })].run
 	stop := context.AfterFunc(ctx, func() { r.vm.Interrupt(canceled) })
 	defer stop()
-	returned, err := run(goja.Undefined(), r.vm.ToValue(argValues(s.Recipes[at], raw)))
+	returned, err := run(goja.Undefined(), r.vm.ToValue(argValues(s.recipes[at], raw)))
 	if err != nil {
 		return nil, r.thrown(err)
 	}
@@ -183,7 +115,7 @@ var canceled = &client.CallError{Message: "canceled"}
 
 // app is nil for a load, which only reads what the script declares.
 type runtime struct {
-	script   *Script
+	script   *script
 	vm       *goja.Runtime
 	ctx      context.Context
 	app      App
@@ -199,7 +131,7 @@ type declaredRecipe struct {
 	exported string
 }
 
-func newRuntime(s *Script, ctx context.Context, app App, observer Observer) *runtime {
+func newRuntime(s *script, ctx context.Context, app App, observer Observer) *runtime {
 	r := &runtime{script: s, vm: goja.New(), ctx: ctx, app: app, observer: observer, recipes: map[*goja.Object]declaredRecipe{}}
 	r.env = newEnvironment(r.vm)
 	r.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
@@ -242,7 +174,7 @@ func (r *runtime) load() (*goja.Object, error) {
 	})
 	_ = vm.Set("__quack", quack)
 	_ = vm.Set("console", console)
-	if _, err := vm.RunScript(filepath.Base(r.script.Path), r.script.code); err != nil {
+	if _, err := vm.RunScript(filepath.Base(r.script.path), r.script.code); err != nil {
 		err = r.thrown(err)
 		// The outermost frame is the function the bundle wraps the file in.
 		var thrown *ScriptError
@@ -267,7 +199,7 @@ func (r *runtime) recipe(definition *goja.Object) goja.Value {
 	if !ok {
 		panic(vm.NewTypeError("recipe() takes a definition with a run function"))
 	}
-	declared := declaredRecipe{run: run}
+	declared := declaredRecipe{Recipe: Recipe{File: r.script.path}, run: run}
 	if description := definition.Get("description"); description != nil && !goja.IsUndefined(description) {
 		declared.Description = description.String()
 	}
@@ -815,9 +747,4 @@ func (e *environment) hide(step Step) Step {
 		return Run{replacer.Replace(step.Command)}
 	}
 	return step
-}
-
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return !errors.Is(err, fs.ErrNotExist)
 }

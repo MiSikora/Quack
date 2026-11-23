@@ -383,23 +383,39 @@ export const gone = quack.recipe({ run() {} })`)
 
 	result := call(t, session, "list_recipes", map[string]any{"filter": "^fr"})
 
-	want := `{"device":"emulator-5554","app":"io.mehow.quack.sample","file":` + quoted(path) + `,"recipes":[` +
+	want := `{"device":"emulator-5554","app":"io.mehow.quack.sample","recipes":[` +
 		`{"name":"fresh","description":"Start over","params":[` +
 		`{"name":"user","type":"string","description":"","hints":["alice","bob"],"required":false,"default":"alice"},` +
-		`{"name":"count","type":"int","description":"","required":true}]}]}`
+		`{"name":"count","type":"int","description":"","required":true}],"file":` + quoted(path) + `}]}`
 	assertStructured(t, result, want)
 	if len(source.modes) > 0 {
 		t.Errorf("the app started %q, want it left alone", source.modes)
 	}
 }
 
-func TestListRecipesWithoutAFileGivesWhereToWriteThem(t *testing.T) {
+func TestListRecipesWithoutRecipesGivesNone(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	session := connect(t, newFakeSource())
 
 	result := call(t, session, "list_recipes", map[string]any{})
 
-	assertStructured(t, result, `{"device":"emulator-5554","app":"io.mehow.quack.sample","file":`+quoted(recipe.Path("io.mehow.quack.sample"))+`,"recipes":[]}`)
+	assertStructured(t, result, `{"device":"emulator-5554","app":"io.mehow.quack.sample","recipes":[]}`)
+}
+
+func TestListRecipesGivesTheProblemsThatLeftFilesOut(t *testing.T) {
+	path := writeRecipes(t, `import quack from "quack"
+export const fresh = quack.recipe({ run() {} })`)
+	mapping := "[recipes]\n'.*' = [\"io.mehow.quack.sample.ts\", \"gone.ts\"]\n"
+	if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "quack", "config.toml"), []byte(mapping), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	session := connect(t, newFakeSource())
+
+	result := call(t, session, "list_recipes", map[string]any{})
+
+	problem := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "quack", "config.toml") + ": [recipes] maps io.mehow.quack.sample to gone.ts, which does not exist"
+	assertStructured(t, result, `{"device":"emulator-5554","app":"io.mehow.quack.sample","recipes":[`+
+		`{"name":"fresh","description":"","params":[],"file":`+quoted(path)+`}],"problems":[`+quoted(problem)+`]}`)
 }
 
 func TestRunRecipeGivesWhatEachStepGaveAndWhatItLogged(t *testing.T) {
@@ -568,23 +584,28 @@ export const fresh = quack.recipe({
 	assertStructured(t, result, `{"steps":[],"log":["[3,0.5,true,\"slow\",[\"a\",\"b,c\"]]"]}`)
 }
 
-func TestRunRecipeNamesTheFileWithoutTheRecipe(t *testing.T) {
-	path := writeRecipes(t, `export {}`)
+func TestRunRecipeNamesTheAppWithoutTheRecipe(t *testing.T) {
+	writeRecipes(t, `export {}`)
 	session := connect(t, newFakeSource())
 
 	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "fresh"})
 
-	assertError(t, result, "no recipe named fresh in "+path)
+	assertError(t, result, "no recipe named fresh for io.mehow.quack.sample")
 }
 
+// writeRecipes keeps file as the recipes of the sample app in a config dir of the test's own, with up-to-date types.
 func writeRecipes(t *testing.T, file string) string {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	path := recipe.Path("io.mehow.quack.sample")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if _, err := recipe.Init(t.TempDir(), ""); err != nil {
 		t.Fatal(err)
 	}
+	path := filepath.Join(recipe.Dir(), "io.mehow.quack.sample.ts")
 	if err := os.WriteFile(path, []byte(strings.TrimPrefix(file, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mapping := "[recipes]\n'io\\.mehow\\.quack\\.sample' = \"io.mehow.quack.sample.ts\"\n"
+	if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "quack", "config.toml"), []byte(mapping), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -762,8 +783,9 @@ func (s *fakeSource) Connect(_ client.Target, mode client.StartMode) (App, error
 	return s.app, nil
 }
 
-func (s *fakeSource) Recipes(pkg string) (*recipe.Script, string, error) {
-	return clientSource{}.Recipes(pkg)
+// The config dir is outside any project, and the recipes come only from the user's config.
+func (s *fakeSource) Recipes(pkg string) (*recipe.Cookbook, []string, error) {
+	return recipe.Load(os.Getenv("XDG_CONFIG_HOME"), pkg)
 }
 
 type fakeApp struct {

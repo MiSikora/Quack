@@ -380,7 +380,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 
 func TestViewTakesTheAlternateScreenAndTheMouse(t *testing.T) {
 	app := newFakeApp()
-	m := newModel(newFakeSource(app), newActivity(t.Context()), client.Target{}, client.Wake, "dev", config.Default(), nil)
+	m := newModel(newFakeSource(app), newActivity(t.Context()), client.Target{}, client.Wake, "dev", t.TempDir(), config.Default(), nil)
 
 	view := m.View()
 
@@ -1048,8 +1048,9 @@ func TestConfigThatDoesNotParseGoesIntoTheLogAndEveryKeyKeepsItsDefault(t *testi
 	h.waitForLog("\n› sync.pair\n  Pairing code\n    {\n      \"code\": \"abc123\"\n    }\nPaired · ")
 	h.press("up")
 	h.waitFor("▸ account.    3", "3/7")
-	if got := strings.Count(h.logText(), "config.toml"); got != 1 {
-		t.Errorf("the log holds %d config problems, want one:\n%s", got, h.logText())
+	// Recipes also fail on the file, and say so with its full path.
+	if got := strings.Count(h.logText(), "\nconfig.toml:"); got != 1 {
+		t.Errorf("the log holds %d settings problems, want one:\n%s", got, h.logText())
 	}
 }
 
@@ -1313,7 +1314,7 @@ func TestDollarWithoutRecipesSaysWhereToWriteThem(t *testing.T) {
 
 	h.typing("$")
 
-	h.waitFor("  No recipes. Create "+recipe.Path("io.mehow.quack.sample"), "0/0")
+	h.waitFor("  No recipes. /init-recipes starts .quack/ here, or map the app in config.toml", "0/0")
 }
 
 func TestBrokenRecipeFileSaysWhyAndLeavesTheActions(t *testing.T) {
@@ -1326,7 +1327,24 @@ func TestBrokenRecipeFileSaysWhyAndLeavesTheActions(t *testing.T) {
 	h.waitFor("▸ account.", "2/6")
 	h.press("esc")
 	h.typing("$")
-	h.waitFor("No recipes. Create "+recipe.Path("io.mehow.quack.sample"), "0/0")
+	h.waitFor("No recipes. /init-recipes starts .quack/ here", "0/0")
+}
+
+func TestRecipeWarningsGoIntoTheLogAndTheOtherRecipesLoad(t *testing.T) {
+	h := start(t, newFakeApp(), func(*model) {
+		path := writeRecipes(t, `import quack from "quack"
+export const clean = quack.recipe({ run() {} })`)
+		project := filepath.Dir(filepath.Dir(path))
+		mapping := "[recipes]\n'.*' = [\"io.mehow.quack.sample.ts\", \"gone.ts\"]\n"
+		if err := os.WriteFile(filepath.Join(project, "quack.toml"), []byte(mapping), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	h.resize(300, 30)
+
+	h.waitForLog("switched to io.mehow.quack.sample", "quack.toml: [recipes] maps io.mehow.quack.sample to gone.ts, which does not exist")
+	h.typing("$")
+	h.waitFor("▸ clean ƒ", "1/1")
 }
 
 func TestEnterRunsARecipeWritingEachStepUnderItsCommandAndWhatItLogs(t *testing.T) {
@@ -1662,14 +1680,21 @@ func TestInitRecipesStartsTheRecipesOfTheAppAndListsThem(t *testing.T) {
 	h.typing("/init-recipes")
 	h.press("enter")
 
-	path := recipe.Path("io.mehow.quack.sample")
-	h.waitForLog("wrote "+filepath.Join(recipe.Dir(), "quack.d.ts"), "wrote "+filepath.Join(recipe.Dir(), "tsconfig.json"), "wrote "+path)
+	project := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), ".quack")
+	h.waitForLog(
+		"wrote "+filepath.Join(recipe.Dir(), "quack.d.ts"),
+		"wrote "+filepath.Join(recipe.Dir(), "tsconfig.json"),
+		"wrote "+filepath.Join(project, "recipes", "quack.d.ts"),
+		"wrote "+filepath.Join(project, "recipes", "tsconfig.json"),
+		"wrote "+filepath.Join(project, "quack.toml"),
+		"wrote "+filepath.Join(project, "recipes", "recipes.ts"),
+	)
 	h.typing("$")
 	h.waitFor("▸ open ƒ", "Show the app's main screen", "1/1")
 	h.press("esc")
 	h.typing("/init-recipes")
 	h.press("enter")
-	h.waitForLog("the recipes of io.mehow.quack.sample are set up already in " + path)
+	h.waitForLog("the recipe files are up to date")
 }
 
 func TestCtrlOOpensTheAppEvenDuringARun(t *testing.T) {
@@ -1766,14 +1791,15 @@ func startPicking(t *testing.T, source *fakeSource, want client.Target, mode cli
 	return startIn(t, t.TempDir(), source, want, mode, options...)
 }
 
-// The settings come from the config dir as Run reads them.
+// The settings come from the config dir as Run reads them, and quack starts in it too, so that its .quack is the
+// project.
 func startIn(t *testing.T, configDir string, source *fakeSource, want client.Target, mode client.StartMode, options ...func(*model)) *harness {
 	t.Setenv("XDG_CONFIG_HOME", configDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	activity := newActivity(ctx)
 	h := &harness{t: t, exited: make(chan struct{}), height: 30, seen: map[int]bool{}, clock: &fakeClock{now: time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)}}
 	settings, problems := config.Load()
-	m := newModel(source, activity, want, mode, "dev", settings, problems)
+	m := newModel(source, activity, want, mode, "dev", configDir, settings, problems)
 	m.clock = h.clock
 	m.clipboard = func(text string) error {
 		h.mu.Lock()
@@ -1806,10 +1832,20 @@ func withRecipes(t *testing.T, file string) func(*model) {
 	return func(*model) { writeRecipes(t, file) }
 }
 
+// writeRecipes keeps file as the recipes of the sample app in the project of the dir quack starts in, with
+// up-to-date types.
 func writeRecipes(t *testing.T, file string) string {
 	t.Helper()
-	path := recipe.Path("io.mehow.quack.sample")
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	project := filepath.Join(dir, ".quack")
+	path := filepath.Join(project, "recipes", "io.mehow.quack.sample.ts")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recipe.Init(dir, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "quack.toml"), []byte("[recipes]\n'io\\.mehow\\.quack\\.sample' = \"io.mehow.quack.sample.ts\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(file), 0o644); err != nil {

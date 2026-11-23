@@ -3,7 +3,10 @@ $ quack --init-recipes -a io.mehow.quack.sample
 --- stdout
 wrote $XDG_CONFIG_HOME/quack/recipes/quack.d.ts
 wrote $XDG_CONFIG_HOME/quack/recipes/tsconfig.json
-wrote $XDG_CONFIG_HOME/quack/recipes/io.mehow.quack.sample.ts
-Write the recipes of io.mehow.quack.sample in $XDG_CONFIG_HOME/quack/recipes/io.mehow.quack.sample.ts.
+wrote $PWD/.quack/recipes/quack.d.ts
+wrote $PWD/.quack/recipes/tsconfig.json
+wrote $PWD/.quack/quack.toml
+wrote $PWD/.quack/recipes/recipes.ts
+The recipes of io.mehow.quack.sample are in the files that [recipes] in .quack/quack.toml maps it to.
 --- stderr
 --- device

@@ -24,6 +24,8 @@ type Recipe struct {
 	Name        string
 	Description string
 	Params      []wire.Param
+	// The absolute path of the file that declares it.
+	File string
 	// The environment variable of each param that takes one, while it is set.
 	env map[string]string
 }

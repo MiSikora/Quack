@@ -1,0 +1,12 @@
+$ quack --list-recipes ^s
+--- exit 0
+--- stdout
+setup
+    Create the account and greet.
+
+signIn
+    Log in as bob, then show the account.
+--- stderr
+quack: the recipe types in $XDG_CONFIG_HOME/quack/recipes are out of date: init-recipes updates them
+--- device
+shell emulator-5554: query-receivers

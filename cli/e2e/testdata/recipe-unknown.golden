@@ -2,6 +2,6 @@ $ quack --recipe nope
 --- exit 2
 --- stdout
 --- stderr
-quack: no recipe named nope in $XDG_CONFIG_HOME/quack/recipes/io.mehow.quack.sample.ts
+quack: no recipe named nope for io.mehow.quack.sample
 --- device
 shell emulator-5554: query-receivers

@@ -77,7 +77,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	boolFlag(fs, &opts.listActions, "list-actions", "l", "list the app's actions, or only those whose id matches regex")
 	boolFlag(fs, &opts.listDevices, "list-devices", "", "list the devices and the quack-enabled apps on each")
 	boolFlag(fs, &opts.listRecipes, "list-recipes", "", "list the app's recipes, or only those whose name matches regex")
-	boolFlag(fs, &opts.initRecipes, "init-recipes", "", "write the files that let editors check recipes, and with --app a starter recipes file of the app")
+	boolFlag(fs, &opts.initRecipes, "init-recipes", "", "write the files that let editors check recipes, and with --app start .quack/ here with a recipe of the app")
 	boolFlag(fs, &opts.openApp, "open-app", "", "show the app's main screen first, instead of starting it in the background")
 	fs.StringVar(&opts.recipe, "recipe", "", "run the app's recipe `name`")
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
@@ -102,11 +102,16 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		"options:\n" + fs.FlagUsages() + "\n" +
 		"recipes:\n" +
 		"  A recipe is a TypeScript or JavaScript function that runs actions and commands, and decides what to do with\n" +
-		"  what they return. The recipes of an app are the exports of $XDG_CONFIG_HOME/quack/recipes/<package>.ts, or of\n" +
-		"  ~/.config/quack/recipes/<package>.ts when XDG_CONFIG_HOME is unset or empty, or of the .js file there. The\n" +
-		"  file may import local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json there,\n" +
-		"  so that editors check recipes, and with --app a starter file of the app. The terminal UI lists the recipes\n" +
-		"  with the actions, marked ƒ, and $ lists only the recipes:\n\n" +
+		"  what they return. A project keeps them in .quack/recipes/, which quack finds in the current dir or above it,\n" +
+		"  up to the home dir. [recipes] in .quack/quack.toml maps the apps whose packages a regex fully matches to\n" +
+		"  files there, and [recipes] in config.toml maps apps to your own files in $XDG_CONFIG_HOME/quack/recipes/:\n\n" +
+		"    [recipes]\n" +
+		"    'io\\.example\\.app' = \"recipes.ts\"\n" +
+		"    'io\\.example\\..*' = [\"common.ts\", \"debug.ts\"]\n\n" +
+		"  An app gets the recipes of every file it matches in both, and two recipes of one name fail them all. Files\n" +
+		"  may import other local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json\n" +
+		"  next to the recipes, so that editors check them, and with --app starts .quack/ in the current dir when there\n" +
+		"  is none. The terminal UI lists the recipes with the actions, marked ƒ, and $ lists only the recipes:\n\n" +
 		"    import quack from \"quack\"\n\n" +
 		"    export const login = quack.recipe({\n" +
 		"      description: \"Log in as the test user\",\n" +
@@ -122,7 +127,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		"  A step that fails throws, and ends the recipe unless it catches the error.\n\n" +
 		"settings:\n" +
 		"  The terminal UI reads its settings from $XDG_CONFIG_HOME/quack/config.toml, or from\n" +
-		"  ~/.config/quack/config.toml when XDG_CONFIG_HOME is unset or empty. quack never writes the file, and both\n" +
+		"  ~/.config/quack/config.toml when XDG_CONFIG_HOME is unset or empty. quack never writes the file, and its\n" +
 		"  keys are optional:\n\n" +
 		"    show-data = true          # show the JSON data of notifications and results; /toggle-data flips it for\n" +
 		"                              # the session\n" +
@@ -212,11 +217,11 @@ func run(opts options, terminal Terminal) error {
 		return err
 	}
 	if opts.listRecipes {
-		return printRecipes(terminal.Out, target.Package, opts.filter, opts.json)
+		return printRecipes(terminal, target.Package, opts.filter, opts.json)
 	}
-	var script *recipe.Script
+	var cookbook *recipe.Cookbook
 	if opts.recipe != "" {
-		if script, err = findRecipe(target.Package, opts.recipe); err != nil {
+		if cookbook, err = findRecipe(target.Package, opts.recipe, terminal); err != nil {
 			return err
 		}
 	}
@@ -249,7 +254,7 @@ func run(opts options, terminal Terminal) error {
 		return usageErrorf("%v", err)
 	}
 	if opts.recipe != "" {
-		return runRecipe(app, script, opts.recipe, args, terminal, opts.json)
+		return runRecipe(app, cookbook, opts.recipe, args, terminal, opts.json)
 	}
 	result, err := app.Call(context.Background(), wire.Call{Action: opts.action, Args: args}, printNotifications(terminal, opts.json, 0))
 	if err != nil {

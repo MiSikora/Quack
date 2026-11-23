@@ -37,8 +37,12 @@ type scenario struct {
 	// The default device is emulator-5554, a Pixel 8, user 0, with the sample app running.
 	device func(*fakeDevice)
 	others func() []*fakeDevice
-	// Empty means no recipes file.
-	recipes string
+	// Empty means no recipes file. The user's config maps the app to it, or with inProject, the .quack dir of the dir
+	// quack runs in does.
+	recipes   string
+	inProject bool
+	// The types next to the recipes file are those of an older quack.
+	oldTypes bool
 }
 
 var scenarios = []scenario{
@@ -183,10 +187,13 @@ var scenarios = []scenario{
 	{name: "list-recipes-none-json", args: []string{"--json", "--list-recipes"}},
 	{name: "list-recipes-broken-file", args: []string{"--list-recipes"}, recipes: "export const setup = (\n"},
 	{name: "list-recipes-with-list-actions", args: []string{"--list-recipes", "--list-actions"}},
+	{name: "list-recipes-in-project", args: []string{"--list-recipes", "^s"}, recipes: sampleRecipes, inProject: true},
+	{name: "list-recipes-old-types", args: []string{"--list-recipes", "^s"}, recipes: sampleRecipes, oldTypes: true},
+	{name: "recipe-in-project", args: []string{"--recipe", "greet", "name=Alice"}, recipes: sampleRecipes, inProject: true},
 	{name: "init-recipes", args: []string{"--init-recipes"}},
 	{name: "init-recipes-with-json", args: []string{"--init-recipes", "--json"}},
 	{name: "init-recipes-with-app", args: []string{"--init-recipes", "-a", "io.mehow.quack.sample"}},
-	{name: "init-recipes-with-app-keeps-its-file", args: []string{"--init-recipes", "-a", "io.mehow.quack.sample"}, recipes: sampleRecipes},
+	{name: "init-recipes-with-app-keeps-quack-toml", args: []string{"--init-recipes", "-a", "io.mehow.quack.sample"}, recipes: sampleRecipes, inProject: true},
 	{name: "init-recipes-with-device", args: []string{"--init-recipes", "-d", "emulator-5554"}},
 	{name: "init-recipes-with-android-serial", args: []string{"--init-recipes"}, env: []string{"ANDROID_SERIAL=emulator-5554"}},
 }
@@ -323,17 +330,17 @@ func TestScenarios(t *testing.T) {
 
 func run(t *testing.T, adb *fakeAdb, s scenario) string {
 	config := t.TempDir()
+	// quack runs in a dir outside any project, which it names by its real path.
+	wd, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if s.recipes != "" {
-		dir := filepath.Join(config, "quack", "recipes")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "io.mehow.quack.sample.ts"), []byte(s.recipes), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		writeRecipes(t, s, filepath.Join(config, "quack"), filepath.Join(wd, ".quack"))
 	}
 	cmd := exec.Command(os.Args[0], s.args...)
-	cmd.Env = append(cleanEnv(), runAsQuack+"=1", "ANDROID_ADB_SERVER_PORT="+adb.port(), "XDG_CONFIG_HOME="+config)
+	cmd.Dir = wd
+	cmd.Env = append(cleanEnv(), runAsQuack+"=1", "ANDROID_ADB_SERVER_PORT="+adb.port(), "XDG_CONFIG_HOME="+config, "PWD="+wd)
 	cmd.Env = append(cmd.Env, s.env...)
 	cmd.Stdin = strings.NewReader("")
 	if s.stdinDevNull {
@@ -346,7 +353,7 @@ func run(t *testing.T, adb *fakeAdb, s scenario) string {
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	code := 0
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
@@ -360,8 +367,8 @@ func run(t *testing.T, adb *fakeAdb, s scenario) string {
 		fmt.Fprintf(&out, "--- stdin from %s\n", os.DevNull)
 	}
 	fmt.Fprintf(&out, "--- exit %d\n", code)
-	// The config dir differs on each run, so the output names it as the variable that points to it.
-	hideConfig := strings.NewReplacer(config, "$XDG_CONFIG_HOME")
+	// The dirs differ on each run, so the output names them as the variables that point to them.
+	hideConfig := strings.NewReplacer(config, "$XDG_CONFIG_HOME", wd, "$PWD")
 	fmt.Fprintf(&out, "--- stdout\n%s", ensureNewline(hideConfig.Replace(stdout.String())))
 	fmt.Fprintf(&out, "--- stderr\n%s", ensureNewline(hideConfig.Replace(stderr.String())))
 	out.WriteString("--- device\n")
@@ -371,12 +378,43 @@ func run(t *testing.T, adb *fakeAdb, s scenario) string {
 	return out.String()
 }
 
+// writeRecipes writes the scenario's recipes file with a quack.toml in project, or with a config.toml in config, that
+// maps the sample app to it.
+func writeRecipes(t *testing.T, s scenario, config, project string) {
+	toml, dir := filepath.Join(config, "config.toml"), filepath.Join(config, "recipes")
+	if s.inProject {
+		toml, dir = filepath.Join(project, "quack.toml"), filepath.Join(project, "recipes")
+	}
+	files := map[string]string{
+		toml: "[recipes]\n'io\\.mehow\\.quack\\.sample' = \"io.mehow.quack.sample.ts\"\n",
+		filepath.Join(dir, "io.mehow.quack.sample.ts"): s.recipes,
+	}
+	for _, name := range []string{"quack.d.ts", "tsconfig.json"} {
+		types, err := os.ReadFile(filepath.Join("..", "internal", "recipe", "types", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.oldTypes {
+			types = append([]byte("// An older quack's types.\n"), types...)
+		}
+		files[filepath.Join(dir, name)] = string(types)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range files {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func cleanEnv() []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		key, _, _ := strings.Cut(kv, "=")
 		switch key {
-		case "ANDROID_SERIAL", "ANDROID_ADB_SERVER_PORT", "NO_COLOR", "XDG_CONFIG_HOME":
+		case "ANDROID_SERIAL", "ANDROID_ADB_SERVER_PORT", "NO_COLOR", "XDG_CONFIG_HOME", "PWD":
 			continue
 		}
 		env = append(env, kv)

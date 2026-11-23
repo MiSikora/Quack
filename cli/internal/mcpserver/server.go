@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -27,8 +28,8 @@ type Source interface {
 	// device and pkg may be "" for any, as in client.Find.
 	Find(device adb.Device, pkg string) (client.Target, error)
 	Connect(target client.Target, mode client.StartMode) (App, error)
-	// Recipes is nil without a recipes file.
-	Recipes(pkg string) (*recipe.Script, string, error)
+	// Recipes gives the app's recipes, and the problems that left some files or entries out.
+	Recipes(pkg string) (*recipe.Cookbook, []string, error)
 }
 
 type App interface {
@@ -99,9 +100,10 @@ func New(ctx context.Context, source Source, version string) *mcp.Server {
 	}, s.listRuns)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "list_recipes",
-		Description: "List the recipes of a quack-enabled app with their params: scripts that the user keeps in a file " +
-			"on this computer, which run the app's actions, commands on the device or on this computer, and waits, and " +
-			"decide what to do with what they return. " + targetHelp,
+		Description: "List the recipes of a quack-enabled app with their params and files: scripts that the user keeps " +
+			"on this computer, in the .quack dir of a project or in their config, which run the app's actions, commands " +
+			"on the device or on this computer, and waits, and decide what to do with what they return. problems lists " +
+			"the recipe files and settings that quack left out. " + targetHelp,
 	}, s.listRecipes)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "run_recipe",
@@ -183,17 +185,18 @@ type listRecipesInput struct {
 }
 
 type listRecipesOutput struct {
-	Device string `json:"device"`
-	App    string `json:"app"`
-	// Also where to write recipes when there are none.
-	File    string         `json:"file"`
-	Recipes []recipeOutput `json:"recipes"`
+	Device   string         `json:"device"`
+	App      string         `json:"app"`
+	Recipes  []recipeOutput `json:"recipes"`
+	Problems []string       `json:"problems,omitempty"`
 }
 
 type recipeOutput struct {
 	Name        string        `json:"name"`
 	Description string        `json:"description"`
 	Params      []paramOutput `json:"params"`
+	// The file that declares it.
+	File string `json:"file"`
 }
 
 type runRecipeInput struct {
@@ -364,18 +367,15 @@ func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRec
 	if err != nil {
 		return nil, listRecipesOutput{}, err
 	}
-	script, file, err := s.source.Recipes(target.Package)
+	cookbook, problems, err := s.source.Recipes(target.Package)
 	if err != nil {
 		return nil, listRecipesOutput{}, err
 	}
-	out := listRecipesOutput{Device: string(target.Device), App: target.Package, File: file, Recipes: []recipeOutput{}}
-	if script == nil {
-		return nil, out, nil
-	}
-	for _, r := range script.Recipes {
+	out := listRecipesOutput{Device: string(target.Device), App: target.Package, Recipes: []recipeOutput{}, Problems: problems}
+	for _, r := range cookbook.Recipes {
 		if filter.MatchString(r.Name) {
 			params := action(wire.Action{Params: r.Params}).Params
-			out.Recipes = append(out.Recipes, recipeOutput{Name: r.Name, Description: r.Description, Params: params})
+			out.Recipes = append(out.Recipes, recipeOutput{Name: r.Name, Description: r.Description, Params: params, File: r.File})
 		}
 	}
 	return nil, out, nil
@@ -391,19 +391,16 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	script, file, err := s.source.Recipes(target.Package)
+	cookbook, _, err := s.source.Recipes(target.Package)
 	if err != nil {
 		return nil, runRecipeOutput{}, err
-	}
-	if script == nil {
-		return nil, runRecipeOutput{}, fmt.Errorf("no recipe named %s in %s", in.Recipe, file)
 	}
 	_, actions, err := app.Describe(ctx)
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
 	if canElicit(req.Session) {
-		for _, r := range script.Recipes {
+		for _, r := range cookbook.Recipes {
 			if r.Name == in.Recipe {
 				if form, err := askForParams(req, "recipe "+in.Recipe, r.Params, args); form != nil || err != nil {
 					return form, runRecipeOutput{}, err
@@ -419,7 +416,7 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 		report(line)
 	}
 	var done stepOutput
-	out.Data, err = script.Run(ctx, app, in.Recipe, args, recipe.Observer{
+	out.Data, err = cookbook.Run(ctx, app, in.Recipe, args, recipe.Observer{
 		Started: func(step recipe.Step) {
 			done = stepOutput{Step: recipe.Line(step, actions), Notifications: []notificationOutput{}}
 			print("› " + done.Step)
@@ -705,9 +702,13 @@ func (s clientSource) Connect(target client.Target, mode client.StartMode) (App,
 	return app, err
 }
 
-func (clientSource) Recipes(pkg string) (*recipe.Script, string, error) {
-	script, err := recipe.Load(pkg)
-	return script, recipe.Path(pkg), err
+// Recipes come from the project of the dir quack-mcp runs in, as the MCP client started it, and from the user's config.
+func (clientSource) Recipes(pkg string) (*recipe.Cookbook, []string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, nil, err
+	}
+	return recipe.Load(dir, pkg)
 }
 
 // Raw JSON would otherwise infer as an array of bytes.

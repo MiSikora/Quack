@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
 
 	"quack/internal/client"
+	"quack/internal/config"
 	"quack/internal/recipe"
 	"quack/internal/wire"
 )
@@ -26,7 +27,7 @@ func (e *stepError) Unwrap() error { return e.err }
 
 // A step error that the recipe catches prints as that step's outcome only once the recipe goes on. What the recipe
 // returned prints after its last step, as an action's data does.
-func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wire.RawArg, terminal Terminal, json bool) error {
+func runRecipe(app client.App, c *recipe.Cookbook, name string, args map[string]wire.RawArg, terminal Terminal, json bool) error {
 	ctx := context.Background()
 	_, actions, err := app.Describe(ctx)
 	if err != nil {
@@ -41,7 +42,7 @@ func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wi
 			failure = nil
 		}
 	}
-	data, err := s.Run(ctx, app, name, args, recipe.Observer{
+	data, err := c.Run(ctx, app, name, args, recipe.Observer{
 		Started: func(started recipe.Step) {
 			caught()
 			step++
@@ -97,34 +98,47 @@ func hasMessage(step recipe.Step) bool {
 	return true
 }
 
-// A file that does not load is bad usage, like a name it does not have.
-func findRecipe(pkg, name string) (*recipe.Script, error) {
-	s, err := recipe.Load(pkg)
+// A recipes file that does not load is bad usage, like a name it does not have. The warnings go to stderr.
+func loadRecipes(pkg string, terminal Terminal) (*recipe.Cookbook, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	c, warnings, err := recipe.Load(dir, pkg)
 	if err != nil {
 		return nil, usageErrorf("%v", err)
 	}
-	if s == nil || !slices.ContainsFunc(s.Recipes, func(r recipe.Recipe) bool { return r.Name == name }) {
-		return nil, usageErrorf("no recipe named %s in %s", name, recipe.Path(pkg))
+	for _, warning := range warnings {
+		fmt.Fprintln(terminal.Err, "quack: "+warning)
 	}
-	return s, nil
+	return c, nil
 }
 
-func printRecipes(w io.Writer, pkg string, filter *regexp.Regexp, asJSON bool) error {
-	s, err := recipe.Load(pkg)
+func findRecipe(pkg, name string, terminal Terminal) (*recipe.Cookbook, error) {
+	c, err := loadRecipes(pkg, terminal)
 	if err != nil {
-		return usageErrorf("%v", err)
+		return nil, err
 	}
-	var recipes, kept []recipe.Recipe
-	if s != nil {
-		recipes = s.Recipes
+	if !slices.ContainsFunc(c.Recipes, func(r recipe.Recipe) bool { return r.Name == name }) {
+		return nil, usageErrorf("no recipe named %s for %s", name, pkg)
 	}
-	for _, r := range recipes {
+	return c, nil
+}
+
+func printRecipes(terminal Terminal, pkg string, filter *regexp.Regexp, asJSON bool) error {
+	c, err := loadRecipes(pkg, terminal)
+	if err != nil {
+		return err
+	}
+	var kept []recipe.Recipe
+	for _, r := range c.Recipes {
 		if filter == nil || filter.MatchString(r.Name) {
 			kept = append(kept, r)
 		}
 	}
+	w := terminal.Out
 	switch {
-	case len(recipes) > 0 && len(kept) == 0:
+	case len(c.Recipes) > 0 && len(kept) == 0:
 		return usageErrorf("no recipe matches '%s'", filter)
 	case asJSON:
 		out := make([]recipeJSON, len(kept))
@@ -133,7 +147,7 @@ func printRecipes(w io.Writer, pkg string, filter *regexp.Regexp, asJSON bool) e
 		}
 		printJSON(w, out)
 	case len(kept) == 0:
-		fmt.Fprintln(w, "No recipes. Create "+recipe.Path(pkg)+", and run quack --init-recipes for editors to check it.")
+		fmt.Fprintln(w, "No recipes for "+pkg+". quack --init-recipes --app "+pkg+" starts .quack/ here, or map the app under [recipes] in "+config.Path()+".")
 	default:
 		var out strings.Builder
 		for _, r := range kept {
@@ -145,20 +159,25 @@ func printRecipes(w io.Writer, pkg string, filter *regexp.Regexp, asJSON bool) e
 }
 
 func initRecipes(w io.Writer, pkg string) error {
-	written, err := recipe.Init(pkg)
+	dir, err := os.Getwd()
 	if err != nil {
 		return err
 	}
+	written, err := recipe.Init(dir, pkg)
 	for _, path := range written {
 		fmt.Fprintln(w, "wrote "+path)
 	}
+	if err != nil {
+		return err
+	}
 	if len(written) == 0 {
-		fmt.Fprintln(w, "The files that let editors check recipes are up to date in "+recipe.Dir()+".")
+		fmt.Fprintln(w, "The files that let editors check recipes are up to date.")
 	}
 	if pkg == "" {
-		fmt.Fprintln(w, "Write the recipes of an app in "+filepath.Join(recipe.Dir(), "<package>.ts")+".")
+		fmt.Fprintln(w, "Map apps to recipe files under [recipes] in .quack/quack.toml, or in "+config.Path()+".\n"+
+			"quack --init-recipes --app <package> starts .quack/ here.")
 	} else {
-		fmt.Fprintln(w, "Write the recipes of "+pkg+" in "+recipe.Path(pkg)+".")
+		fmt.Fprintln(w, "The recipes of "+pkg+" are in the files that [recipes] in .quack/quack.toml maps it to.")
 	}
 	return nil
 }

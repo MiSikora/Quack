@@ -71,13 +71,23 @@ Run `quack --help` to see everything else.
 
 ## Script your setups as recipes
 
-A recipe is a small TypeScript or JavaScript function that runs actions and commands, and decides what to do with what they return. Recipes are kept on your computer, one file per app, in `~/.config/quack/recipes/<app package>.ts`. To start the file of an app, along with what your editor needs to autocomplete and check it, run:
+A recipe is a small TypeScript or JavaScript function that runs actions and commands, and decides what to do with what they return. A project keeps its recipes in a `.quack/` dir, which quack finds in the dir you run it from or above it, up to your home dir. To start one, with a first recipe and what your editor needs to autocomplete and check it, run this in your project:
 
 ```
 quack --init-recipes --app <app package>
 ```
 
-or type `/init-recipes` in `quack`.
+or type `/init-recipes` in `quack`. Commit the whole `.quack/` dir, type files included, so that your team shares the recipes.
+
+`.quack/quack.toml` maps apps to files in `.quack/recipes/`:
+
+```toml
+[recipes]
+'com\.example\.app' = "recipes.ts"
+'com\.example\..*' = ["accounts.ts", "sync.ts"]
+```
+
+Each key is a regex that has to match the whole package. Keep it in single quotes, which TOML leaves as written, so that `\.` reaches the regex. An app gets the recipes of every file that a matching key names. Files no key names can still be imported by those that are. Recipes of your own go in the same kind of `[recipes]` table in `~/.config/quack/config.toml`, with the files in `~/.config/quack/recipes/`. quack merges both, and fails to load an app's recipes when two of them share a name. Run `/init-recipes` again after updating quack, so that the type files match it.
 
 Each recipe gets the name it declares, or else the name of its export:
 

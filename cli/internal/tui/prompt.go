@@ -15,10 +15,9 @@ import (
 )
 
 type prompt struct {
-	input      textinput.Model
-	actions    []wire.Action
-	recipes    []recipe.Recipe
-	recipePath string
+	input   textinput.Model
+	actions []wire.Action
+	recipes []recipe.Recipe
 	// Browsing lists the runnables of an empty prompt, sorted by id. With grouped, the ids that share a namespace with
 	// another go into its group, and group names the group that browsing shows, or is empty at the top level.
 	browsing bool
@@ -218,8 +217,8 @@ func (p *prompt) setActions(actions []wire.Action) {
 	p.keepSelection(func() { p.actions = actions })
 }
 
-func (p *prompt) setRecipes(recipes []recipe.Recipe, path string) {
-	p.keepSelection(func() { p.recipes, p.recipePath = recipes, path })
+func (p *prompt) setRecipes(recipes []recipe.Recipe) {
+	p.keepSelection(func() { p.recipes = recipes })
 }
 
 func (p *prompt) keepSelection(change func()) {
@@ -263,7 +262,7 @@ func (p *prompt) list(rows int) []string {
 	if len(choices) == 0 {
 		empty := "  no match"
 		if total == 0 && strings.HasPrefix(p.input.Value(), "$") {
-			empty = "  No recipes. Create " + p.recipePath
+			empty = "  No recipes. /init-recipes starts .quack/ here, or map the app in config.toml"
 		}
 		return []string{statusStyle.Render(empty)}
 	}
