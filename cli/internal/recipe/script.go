@@ -19,6 +19,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 
 	"quack/internal/client"
+	"quack/internal/config"
 	"quack/internal/wire"
 )
 
@@ -65,14 +66,7 @@ var (
 )
 
 // ~/.config on every OS when XDG_CONFIG_HOME is unset or empty.
-func Dir() string {
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".config")
-	}
-	return filepath.Join(dir, "quack", "recipes")
-}
+func Dir() string { return filepath.Join(config.Dir(), "recipes") }
 
 func Path(pkg string) string {
 	js := filepath.Join(Dir(), pkg+".js")

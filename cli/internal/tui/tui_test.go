@@ -22,6 +22,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/config"
 	"quack/internal/recipe"
 	"quack/internal/wire"
 )
@@ -185,7 +186,7 @@ func TestEscInAGroupClosesTheListAndUpStartsAtTheTop(t *testing.T) {
 }
 
 func TestBrowsingWithoutGroupsListsEveryIdSorted(t *testing.T) {
-	h := start(t, newFakeApp(), flat)
+	h := startWithConfig(t, newFakeApp(), flat)
 
 	h.press("up")
 
@@ -269,7 +270,7 @@ func TestBoxShowsOverTheInputWhichPreviewsTheCall(t *testing.T) {
 }
 
 func TestListCoversTheBottomOfTheLogWithoutMovingIt(t *testing.T) {
-	h := start(t, newFakeApp(), flat)
+	h := startWithConfig(t, newFakeApp(), flat)
 	h.typing("app.count")
 	h.press("enter")
 	h.waitForLog("  50\nCounted · ")
@@ -301,7 +302,7 @@ func TestListCoversTheBottomOfTheLogWithoutMovingIt(t *testing.T) {
 }
 
 func TestMouseOverTheListSelectsNothing(t *testing.T) {
-	h := start(t, newFakeApp(), flat)
+	h := startWithConfig(t, newFakeApp(), flat)
 	h.typing("app.count")
 	h.press("enter")
 	h.waitForLog("  50\nCounted · ")
@@ -379,7 +380,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 
 func TestViewTakesTheAlternateScreenAndTheMouse(t *testing.T) {
 	app := newFakeApp()
-	m := newModel(newFakeSource(app), newActivity(t.Context()), client.Target{}, client.Wake, "dev")
+	m := newModel(newFakeSource(app), newActivity(t.Context()), client.Target{}, client.Wake, "dev", config.Default(), nil)
 
 	view := m.View()
 
@@ -550,7 +551,7 @@ func TestDoubleClickCopiesTheWordAndAClickClearsTheSelection(t *testing.T) {
 }
 
 func TestListScrollsToKeepTheSelectionInSight(t *testing.T) {
-	h := start(t, newFakeApp(), flat)
+	h := startWithConfig(t, newFakeApp(), flat)
 	// A list of 5 rows, so that the 6 actions scroll.
 	h.resize(100, 10)
 	h.press("up")
@@ -989,6 +990,67 @@ func TestToggleDataHidesTheDataOfNotificationsAndResultsUntilToggledBack(t *test
 	h.press("enter")
 
 	h.waitForLog("\n› sync.pair\n  Pairing code\n    {\n      \"code\": \"abc123\"\n    }\nPaired · ")
+}
+
+func TestShowDataFalseInTheConfigHidesTheDataUntilToggled(t *testing.T) {
+	app := newFakeApp()
+	app.setActions(append(app.actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	h := startWithConfig(t, app, "show-data = false\n")
+
+	h.typing("sync.pair")
+	h.press("enter")
+	h.waitForLog("\n› sync.pair\n  Pairing code\nPaired · ")
+	h.typing("/toggle-data")
+	h.press("enter")
+	h.waitForLog("showing the JSON data of notifications and results")
+	h.typing("sync.pair")
+	h.press("enter")
+
+	h.waitForLog("\n› sync.pair\n  Pairing code\n    {\n      \"code\": \"abc123\"\n    }\nPaired · ")
+	if got := strings.Count(h.logText(), "abc123"); got != 1 {
+		t.Errorf("the data shows %d times, want only in the run after the toggle:\n%s", got, h.logText())
+	}
+}
+
+func TestUnknownConfigKeyGoesIntoTheLogAndTheOtherKeysApply(t *testing.T) {
+	h := startWithConfig(t, newFakeApp(), "show-dta = false\ngroup-namespaces = false\n")
+
+	h.waitForLog("config.toml:1: unknown key 'show-dta'\nswitched to io.mehow.quack.sample")
+	h.press("up")
+	h.waitFor("  app.params", "▸ account.create", "6/6")
+}
+
+func TestConfigValueOfTheWrongTypeGoesIntoTheLogAndKeepsItsDefault(t *testing.T) {
+	app := newFakeApp()
+	app.setActions(append(app.actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	h := startWithConfig(t, app, "show-data = false\ngroup-namespaces = \"no\"\n")
+
+	h.waitForLog("config.toml:2: 'group-namespaces' must be true or false")
+	h.press("up")
+	h.waitFor("  app.        3", "▸ account.    3", "3/7")
+	h.press("esc")
+	h.typing("sync.pair")
+	h.press("enter")
+	h.waitForLog("\n› sync.pair\n  Pairing code\nPaired · ")
+	if strings.Contains(h.logText(), "abc123") {
+		t.Errorf("the data shows although show-data is false:\n%s", h.logText())
+	}
+}
+
+func TestConfigThatDoesNotParseGoesIntoTheLogAndEveryKeyKeepsItsDefault(t *testing.T) {
+	app := newFakeApp()
+	app.setActions(append(app.actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	h := startWithConfig(t, app, "show-data = false\ngroup-namespaces =\n")
+
+	h.waitForLog("config.toml:2:19: unexpected character U+000A at start of value")
+	h.typing("sync.pair")
+	h.press("enter")
+	h.waitForLog("\n› sync.pair\n  Pairing code\n    {\n      \"code\": \"abc123\"\n    }\nPaired · ")
+	h.press("up")
+	h.waitFor("▸ account.    3", "3/7")
+	if got := strings.Count(h.logText(), "config.toml"); got != 1 {
+		t.Errorf("the log holds %d config problems, want one:\n%s", got, h.logText())
+	}
 }
 
 func TestOutputKeepsItsOrder(t *testing.T) {
@@ -1502,7 +1564,7 @@ export const clean = quack.recipe({ run() {} })`)
 
 func TestReloadKeepsTheSelectedAction(t *testing.T) {
 	app := newFakeApp()
-	h := start(t, app, flat)
+	h := startWithConfig(t, app, flat)
 	h.press("up", "up", "up")
 	h.waitFor("▸ account.watch")
 
@@ -1588,7 +1650,7 @@ func TestCtrlOOpensTheAppEvenDuringARun(t *testing.T) {
 }
 
 func TestSmallWindowsShrinkTheList(t *testing.T) {
-	h := start(t, newFakeApp(), flat)
+	h := startWithConfig(t, newFakeApp(), flat)
 
 	h.press("up", "up", "up", "up", "up")
 	for _, size := range []struct{ width, height, rows int }{{100, 30, 6}, {100, 10, 5}, {100, 8, 3}} {
@@ -1651,13 +1713,33 @@ func start(t *testing.T, app *fakeApp, options ...func(*model)) *harness {
 	return h
 }
 
-// The apps read their recipes from a config dir of the test's own, which has none.
+// The settings file of the test's own config dir holds file.
+func startWithConfig(t *testing.T, app *fakeApp, file string, options ...func(*model)) *harness {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "quack"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "quack", "config.toml"), []byte(file), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := startIn(t, dir, newFakeSource(app), client.Target{}, client.Wake, options...)
+	h.waitFor("quack · ", "type or ↑ to find an action")
+	return h
+}
+
+// The apps read their recipes and settings from a config dir of the test's own, which has none.
 func startPicking(t *testing.T, source *fakeSource, want client.Target, mode client.StartMode, options ...func(*model)) *harness {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	return startIn(t, t.TempDir(), source, want, mode, options...)
+}
+
+// The settings come from the config dir as Run reads them.
+func startIn(t *testing.T, configDir string, source *fakeSource, want client.Target, mode client.StartMode, options ...func(*model)) *harness {
+	t.Setenv("XDG_CONFIG_HOME", configDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	activity := newActivity(ctx)
 	h := &harness{t: t, exited: make(chan struct{}), height: 30, seen: map[int]bool{}, clock: &fakeClock{now: time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)}}
-	m := newModel(source, activity, want, mode, "dev")
+	settings, problems := config.Load()
+	m := newModel(source, activity, want, mode, "dev", settings, problems)
 	m.clock = h.clock
 	m.clipboard = func(text string) error {
 		h.mu.Lock()
@@ -1703,7 +1785,7 @@ func writeRecipes(t *testing.T, file string) string {
 }
 
 // Browsing lists every runnable without groups.
-func flat(m *model) { m.prompt.grouped = false }
+const flat = "group-namespaces = false\n"
 
 // The runs' clock moves on by the next of steps each time it is read.
 func withClock(steps ...time.Duration) func(*model) {

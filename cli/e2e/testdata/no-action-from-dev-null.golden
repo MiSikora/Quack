@@ -60,6 +60,18 @@ recipes:
 
   A step that fails throws, and ends the recipe unless it catches the error.
 
+settings:
+  The terminal UI reads its settings from $XDG_CONFIG_HOME/quack/config.toml, or from
+  ~/.config/quack/config.toml when XDG_CONFIG_HOME is unset or empty. quack never writes the file, and both
+  keys are optional:
+
+    show-data = true          # show the JSON data of notifications and results; /toggle-data flips it for
+                              # the session
+    group-namespaces = true   # while browsing with ↑, group the ids that share a namespace, such as sync.
+
+  The terminal UI logs each problem with the file when it starts, and leaves the keys it could not read at
+  their defaults.
+
 exit codes:
   0  done
   1  the action rejected the call, failed, or ended without an answer, or a recipe failed

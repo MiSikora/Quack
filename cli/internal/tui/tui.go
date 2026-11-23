@@ -15,6 +15,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/config"
 	"quack/internal/recipe"
 	"quack/internal/wire"
 )
@@ -28,7 +29,8 @@ type App interface {
 func Run(want client.Target, mode client.StartMode, startTimeout time.Duration, version string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, err := tea.NewProgram(newModel(clientSource{startTimeout}, newActivity(ctx), want, mode, version)).Run()
+	settings, problems := config.Load()
+	_, err := tea.NewProgram(newModel(clientSource{startTimeout}, newActivity(ctx), want, mode, version, settings, problems)).Run()
 	return err
 }
 
@@ -129,7 +131,8 @@ type clientSource struct {
 	startTimeout time.Duration
 }
 
-func newModel(source Source, activity activity, want client.Target, mode client.StartMode, version string) *model {
+// The problems with the settings file go into the log, under the header.
+func newModel(source Source, activity activity, want client.Target, mode client.StartMode, version string, settings config.Config, problems []string) *model {
 	m := &model{
 		source:    source,
 		activity:  activity,
@@ -137,13 +140,17 @@ func newModel(source Source, activity activity, want client.Target, mode client.
 		mode:      mode,
 		picker:    newPicker(want, 0),
 		clock:     wallClock{},
-		prompt:    prompt{input: newInput("find an action or a recipe, $ for recipes only, / for commands"), grouped: true},
+		prompt:    prompt{input: newInput("find an action or a recipe, $ for recipes only, / for commands"), grouped: settings.GroupNamespaces},
+		hideData:  !settings.ShowData,
 		runs:      newRuns(),
 		clipboard: clipboard.WriteAll,
 		header:    header(version),
 	}
 	m.picker.auto, m.picker.skipPackage = true, true
 	m.log.add(m.header)
+	for _, problem := range problems {
+		m.log.add(problemStyle.Render(problem))
+	}
 	return m
 }
 

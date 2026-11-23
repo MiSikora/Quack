@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- CLI: the terminal UI reads `show-data` and `group-namespaces` from `$XDG_CONFIG_HOME/quack/config.toml`, the first state of `/toggle-data` and whether browsing groups the ids by namespace. It logs each problem with the file when it starts, and goes on with the defaults for the keys it could not read.
+
 ### Changed
 - CLI: typing in a param with hints in the terminal UI selects the best matching hint, so that enter picks it. ↓ goes back to the text as typed.
 - CLI: the terminal UI lists recipes with the actions, marked `ƒ` after their names, and `$` lists only the recipes. A recipe and an action of the same name both show. The terminal UI writes a recipe's command line as `--recipe <name>` instead of `$<name>`.
