@@ -17,40 +17,40 @@ func TestParse(t *testing.T) {
 		{
 			name: "no keys",
 			doc:  "",
-			want: Config{ShowData: true, GroupNamespaces: true},
-		},
-		{
-			name: "both keys",
-			doc:  "show-data = false\ngroup-namespaces = false\n",
-			want: Config{ShowData: false, GroupNamespaces: false},
-		},
-		{
-			name: "a recipes table, which package recipe reads",
-			doc:  "show-data = false\n[recipes]\n'io\\.example' = \"recipes.ts\"\n",
 			want: Config{ShowData: false, GroupNamespaces: true},
 		},
 		{
+			name: "both keys",
+			doc:  "show-data = true\ngroup-namespaces = false\n",
+			want: Config{ShowData: true, GroupNamespaces: false},
+		},
+		{
+			name: "a recipes table, which package recipe reads",
+			doc:  "show-data = true\n[recipes]\n'io\\.example' = \"recipes.ts\"\n",
+			want: Config{ShowData: true, GroupNamespaces: true},
+		},
+		{
 			name:     "an unknown key",
-			doc:      "# settings\nshow-data = false\nshow-dta = true\n",
-			want:     Config{ShowData: false, GroupNamespaces: true},
+			doc:      "# settings\nshow-data = true\nshow-dta = true\n",
+			want:     Config{ShowData: true, GroupNamespaces: true},
 			problems: []string{"config.toml:3: unknown key 'show-dta'"},
 		},
 		{
 			name:     "an unknown table",
-			doc:      "group-namespaces = false\n[tui]\nshow-data = false\n",
-			want:     Config{ShowData: true, GroupNamespaces: false},
+			doc:      "group-namespaces = false\n[tui]\nshow-data = true\n",
+			want:     Config{ShowData: false, GroupNamespaces: false},
 			problems: []string{"config.toml:2: unknown key 'tui'"},
 		},
 		{
 			name:     "a value of the wrong type before a valid key",
 			doc:      "show-data = \"no\"\ngroup-namespaces = false\n",
-			want:     Config{ShowData: true, GroupNamespaces: false},
+			want:     Config{ShowData: false, GroupNamespaces: false},
 			problems: []string{"config.toml:1: 'show-data' must be true or false"},
 		},
 		{
 			name: "every problem at once",
-			doc:  "colors = 1\nshow-data = false\ngroup-namespaces = 0\n",
-			want: Config{ShowData: false, GroupNamespaces: true},
+			doc:  "colors = 1\nshow-data = true\ngroup-namespaces = 0\n",
+			want: Config{ShowData: true, GroupNamespaces: true},
 			problems: []string{
 				"config.toml:1: unknown key 'colors'",
 				"config.toml:3: 'group-namespaces' must be true or false",
@@ -58,8 +58,8 @@ func TestParse(t *testing.T) {
 		},
 		{
 			name:     "a file that does not parse",
-			doc:      "show-data = false\ngroup-namespaces =\n",
-			want:     Config{ShowData: true, GroupNamespaces: true},
+			doc:      "show-data = true\ngroup-namespaces =\n",
+			want:     Config{ShowData: false, GroupNamespaces: true},
 			problems: []string{"config.toml:2:19: unexpected character U+000A at start of value"},
 		},
 	} {
@@ -91,13 +91,13 @@ func TestLoadReadsTheFileInTheXDGConfigDir(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "quack"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "quack", "config.toml"), []byte("show-data = false\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "quack", "config.toml"), []byte("show-data = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	got, problems := Load()
 
-	if want := (Config{ShowData: false, GroupNamespaces: true}); got != want || problems != nil {
+	if want := (Config{ShowData: true, GroupNamespaces: true}); got != want || problems != nil {
 		t.Errorf("got %+v and %q, want %+v and no problems", got, problems, want)
 	}
 }

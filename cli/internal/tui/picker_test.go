@@ -45,7 +45,7 @@ func TestEscClosesThePickerOfTheStartAndPickDeviceShowsItAgain(t *testing.T) {
 	h.waitFor("> / for commands", "/ for commands · ctrl+c quit")
 	h.typing("/toggle-data")
 	h.press("enter")
-	h.waitForLog("hiding the JSON data of notifications and results")
+	h.waitForLog("showing the JSON data of notifications and results")
 	h.typing("/pick-device")
 	h.press("enter")
 	h.waitFor("▸ io.mehow.quack.sample", "> pick an app", "esc close")
@@ -139,7 +139,7 @@ func TestNoAppLeavesTheCommandsThatNeedNone(t *testing.T) {
 	h.waitForNo("/open-app")
 	h.typing("toggle-data")
 	h.press("enter")
-	h.waitForLog("hiding the JSON data of notifications and results")
+	h.waitForLog("showing the JSON data of notifications and results")
 }
 
 func TestNoAppSaysWhyInTheInfoLine(t *testing.T) {

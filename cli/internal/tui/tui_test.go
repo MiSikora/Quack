@@ -935,7 +935,7 @@ func TestHintsOfANonStringParamDoNotShow(t *testing.T) {
 func TestDataOfARunPrintsIndentedUnderItsMessage(t *testing.T) {
 	app := newFakeApp()
 	app.SetActions(append(app.Actions(), wire.Action{ID: "account.show", Description: "Show the account"}))
-	h := start(t, app, withClock(0, 0, 1234*time.Millisecond))
+	h := startWithConfig(t, app, "show-data = true\n", withClock(0, 0, 1234*time.Millisecond))
 
 	h.typing("account.show")
 	h.press("enter")
@@ -963,7 +963,7 @@ func TestNotificationsOfARunPrintUnderItsCommand(t *testing.T) {
 func TestDataOfANotificationPrintsIndentedUnderIt(t *testing.T) {
 	app := newFakeApp()
 	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
-	h := start(t, app)
+	h := startWithConfig(t, app, "show-data = true\n")
 
 	h.typing("sync.pair")
 	h.press("enter")
@@ -974,30 +974,10 @@ func TestDataOfANotificationPrintsIndentedUnderIt(t *testing.T) {
 		"    }\nPaired · ")
 }
 
-func TestToggleDataHidesTheDataOfNotificationsAndResultsUntilToggledBack(t *testing.T) {
+func TestDataIsHiddenUntilToggled(t *testing.T) {
 	app := newFakeApp()
 	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
 	h := start(t, app)
-
-	h.typing("/toggle-data")
-	h.press("enter")
-	h.waitForLog("hiding the JSON data of notifications and results")
-	h.typing("sync.pair")
-	h.press("enter")
-	h.waitForLog("\n› sync.pair\n  Pairing code\nPaired · ")
-	h.typing("/toggle-data")
-	h.press("enter")
-	h.waitForLog("showing the JSON data of notifications and results")
-	h.typing("sync.pair")
-	h.press("enter")
-
-	h.waitForLog("\n› sync.pair\n  Pairing code\n    {\n      \"code\": \"abc123\"\n    }\nPaired · ")
-}
-
-func TestShowDataFalseInTheConfigHidesTheDataUntilToggled(t *testing.T) {
-	app := newFakeApp()
-	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
-	h := startWithConfig(t, app, "show-data = false\n")
 
 	h.typing("sync.pair")
 	h.press("enter")
@@ -1014,6 +994,26 @@ func TestShowDataFalseInTheConfigHidesTheDataUntilToggled(t *testing.T) {
 	}
 }
 
+func TestShowDataTrueInTheConfigShowsTheDataUntilToggled(t *testing.T) {
+	app := newFakeApp()
+	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	h := startWithConfig(t, app, "show-data = true\n")
+
+	h.typing("sync.pair")
+	h.press("enter")
+	h.waitForLog("\n› sync.pair\n  Pairing code\n    {\n      \"code\": \"abc123\"\n    }\nPaired · ")
+	h.typing("/toggle-data")
+	h.press("enter")
+	h.waitForLog("hiding the JSON data of notifications and results")
+	h.typing("sync.pair")
+	h.press("enter")
+
+	h.waitForLog("hiding the JSON data of notifications and results\n\n› sync.pair\n  Pairing code\nPaired · ")
+	if got := strings.Count(h.logText(), "abc123"); got != 1 {
+		t.Errorf("the data shows %d times, want only in the run before the toggle:\n%s", got, h.logText())
+	}
+}
+
 func TestUnknownConfigKeyGoesIntoTheLogAndTheOtherKeysApply(t *testing.T) {
 	h := startWithConfig(t, newFakeApp(), "show-dta = false\ngroup-namespaces = false\n")
 
@@ -1025,7 +1025,7 @@ func TestUnknownConfigKeyGoesIntoTheLogAndTheOtherKeysApply(t *testing.T) {
 func TestConfigValueOfTheWrongTypeGoesIntoTheLogAndKeepsItsDefault(t *testing.T) {
 	app := newFakeApp()
 	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
-	h := startWithConfig(t, app, "show-data = false\ngroup-namespaces = \"no\"\n")
+	h := startWithConfig(t, app, "show-data = true\ngroup-namespaces = \"no\"\n")
 
 	h.waitForLog("config.toml:2: 'group-namespaces' must be true or false")
 	h.press("up")
@@ -1033,21 +1033,18 @@ func TestConfigValueOfTheWrongTypeGoesIntoTheLogAndKeepsItsDefault(t *testing.T)
 	h.press("esc")
 	h.typing("sync.pair")
 	h.press("enter")
-	h.waitForLog("\n› sync.pair\n  Pairing code\nPaired · ")
-	if strings.Contains(h.logText(), "abc123") {
-		t.Errorf("the data shows although show-data is false:\n%s", h.logText())
-	}
+	h.waitForLog("\n› sync.pair\n  Pairing code\n    {\n      \"code\": \"abc123\"\n    }\nPaired · ")
 }
 
 func TestConfigThatDoesNotParseGoesIntoTheLogAndEveryKeyKeepsItsDefault(t *testing.T) {
 	app := newFakeApp()
 	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
-	h := startWithConfig(t, app, "show-data = false\ngroup-namespaces =\n")
+	h := startWithConfig(t, app, "show-data = true\ngroup-namespaces =\n")
 
 	h.waitForLog("config.toml:2:19: unexpected character U+000A at start of value")
 	h.typing("sync.pair")
 	h.press("enter")
-	h.waitForLog("\n› sync.pair\n  Pairing code\n    {\n      \"code\": \"abc123\"\n    }\nPaired · ")
+	h.waitForLog("\n› sync.pair\n  Pairing code\nPaired · ")
 	h.press("up")
 	h.waitFor("▸ account.    3", "3/7")
 	// Recipes also fail on the file, and say so with its full path.
@@ -1390,7 +1387,7 @@ export const setup = quack.recipe({
 
 func TestARecipeThatRunsAnotherShowsItsStepsAndWhatItReturnedUnlessDataIsHidden(t *testing.T) {
 	app := newFakeApp()
-	h := start(t, app, withRecipes(t, `
+	h := startWithConfig(t, app, "show-data = true\n", withRecipes(t, `
 import quack from "quack"
 
 const greet = quack.recipe({

@@ -75,7 +75,7 @@ settings:
   ~/.config/quack/config.toml when XDG_CONFIG_HOME is unset or empty. quack never writes the file, and its
   keys are optional:
 
-    show-data = true          # show the JSON data of notifications and results; /toggle-data flips it for
+    show-data = false         # show the JSON data of notifications and results; /toggle-data flips it for
                               # the session
     group-namespaces = true   # while browsing with ↑, group the ids that share a namespace, such as sync.
 

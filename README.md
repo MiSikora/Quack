@@ -66,7 +66,7 @@ Connect your phone or start an emulator, then run `quack`. It lets you pick a de
 `quack` reads its settings from `~/.config/quack/config.toml`:
 
 ```toml
-show-data = true         # show the JSON data of notifications and results, which /toggle-data flips
+show-data = false        # show the JSON data of notifications and results, which /toggle-data flips
 group-namespaces = true  # group the actions that share a namespace when you browse them
 ```
 

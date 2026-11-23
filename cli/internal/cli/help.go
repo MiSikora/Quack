@@ -59,7 +59,7 @@ func usage(flags string) string {
 		"  The terminal UI reads its settings from $XDG_CONFIG_HOME/quack/config.toml, or from\n" +
 		"  ~/.config/quack/config.toml when XDG_CONFIG_HOME is unset or empty. quack never writes the file, and its\n" +
 		"  keys are optional:\n\n" +
-		"    show-data = true          # show the JSON data of notifications and results; /toggle-data flips it for\n" +
+		"    show-data = false         # show the JSON data of notifications and results; /toggle-data flips it for\n" +
 		"                              # the session\n" +
 		"    group-namespaces = true   # while browsing with ↑, group the ids that share a namespace, such as sync.\n\n" +
 		"  The terminal UI logs each problem with the file when it starts, and leaves the keys it could not read at\n" +

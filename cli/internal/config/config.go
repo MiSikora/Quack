@@ -18,7 +18,7 @@ type Config struct {
 	GroupNamespaces bool
 }
 
-func Default() Config { return Config{ShowData: true, GroupNamespaces: true} }
+func Default() Config { return Config{ShowData: false, GroupNamespaces: true} }
 
 // Dir holds quack's files: $XDG_CONFIG_HOME/quack, or ~/.config/quack when XDG_CONFIG_HOME is unset or empty.
 func Dir() string {

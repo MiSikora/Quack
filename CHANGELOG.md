@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A recipe's name follows the same rule as an action's id, and a recipes file with another name fails to load.
 - A recipe needs a `name`. `quack.recipe()` throws without one, and an export no longer names a recipe.
 - An app gets only the recipes that a mapped file declares itself. A recipe that a file imports runs through `quack.runRecipe()` and is not listed for the importing file.
+- The terminal UI hides the JSON data of notifications and results until `/toggle-data` shows it, or `show-data = true` in `config.toml`.
 - `quack.waitUntil` keeps checking while the check returns a falsy value, and returns the first truthy one instead of nothing.
 - Recipes live in a project's `.quack/recipes/` or in `$XDG_CONFIG_HOME/quack/recipes/`, and a `[recipes]` table in `.quack/quack.toml` or `config.toml` maps the apps whose packages a regex matches to files there, instead of one `<package>.ts` file per app. An app gets the recipes of every file it matches. `--init-recipes` and `/init-recipes` start `.quack/`.
 - Only `--init-recipes` and `/init-recipes` write `quack.d.ts` and `tsconfig.json`. Loading recipes warns when they are out of date instead of rewriting them. They carry a version that changes only with the recipe API, so a project that a newer quack wrote them in says to upgrade quack, and `--init-recipes` leaves them alone.
