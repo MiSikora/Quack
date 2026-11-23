@@ -56,11 +56,10 @@ func loadScript(path string) (*script, error) {
 	}
 	s := &script{path: path, code: code}
 	r := newRuntime(s, nil, nil, nil, func(step.Event) {})
-	exports, err := r.load()
-	if err != nil {
+	if err := r.load(); err != nil {
 		return nil, err
 	}
-	named, err := r.named(exports)
+	named, err := r.named()
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -72,12 +71,10 @@ func loadScript(path string) (*script, error) {
 
 func (s *script) run(ctx context.Context, app step.App, actions []wire.Action, name string, args map[string]wire.RawArg, emit func(step.Event)) (json.RawMessage, error) {
 	r := newRuntime(s, ctx, app, actions, emit)
-	exports, err := r.load()
-	if err != nil {
+	if err := r.load(); err != nil {
 		return nil, err
 	}
-	// The bundle's exports are getters, which an interrupt would panic out of, so the recipe is found first.
-	named, err := r.named(exports)
+	named, err := r.named()
 	if err != nil {
 		return nil, err
 	}
@@ -131,8 +128,7 @@ const (
 
 type declaredRecipe struct {
 	Recipe
-	run      goja.Callable
-	exported string
+	run goja.Callable
 }
 
 func (r *runtime) caller() string {
@@ -152,7 +148,7 @@ func newRuntime(s *script, ctx context.Context, app step.App, actions []wire.Act
 	return r
 }
 
-func (r *runtime) load() (*goja.Object, error) {
+func (r *runtime) load() error {
 	vm := r.vm
 	quack := vm.NewObject()
 	target := device.Target{}
@@ -193,13 +189,9 @@ func (r *runtime) load() (*goja.Object, error) {
 		if errors.As(err, &thrown) && len(thrown.Stack) > 0 {
 			thrown.Stack = thrown.Stack[:len(thrown.Stack)-1]
 		}
-		return nil, err
+		return err
 	}
-	exports, ok := vm.Get("__recipes").(*goja.Object)
-	if !ok {
-		exports = vm.NewObject()
-	}
-	return exports, nil
+	return nil
 }
 
 func (r *runtime) recipe(definition *goja.Object) goja.Value {
@@ -211,12 +203,19 @@ func (r *runtime) recipe(definition *goja.Object) goja.Value {
 	if !ok {
 		panic(vm.NewTypeError("recipe() takes a definition with a run function"))
 	}
-	declared := declaredRecipe{Recipe: Recipe{File: cmp.Or(r.caller(), r.script.path), script: r.script.path}, run: run}
+	var name string
+	if value := definition.Get("name"); value != nil {
+		name, _ = value.Export().(string)
+	}
+	if name == "" {
+		panic(vm.NewTypeError("recipe() takes a definition with a name"))
+	}
+	if !isName(name) {
+		panic(vm.NewTypeError(fmt.Sprintf("recipe '%s': its name may hold only ASCII letters, digits, '_', '.' and '-', and must not start with '-'", name)))
+	}
+	declared := declaredRecipe{Recipe: Recipe{Name: name, File: cmp.Or(r.caller(), r.script.path)}, run: run}
 	if description := definition.Get("description"); description != nil && !goja.IsUndefined(description) {
 		declared.Description = description.String()
-	}
-	if name := definition.Get("name"); name != nil && !goja.IsUndefined(name) {
-		declared.Name = name.String()
 	}
 	if params := definition.Get("params"); params != nil && !goja.IsUndefined(params) {
 		object := params.ToObject(vm)
@@ -239,29 +238,18 @@ func (r *runtime) recipe(definition *goja.Object) goja.Value {
 	return handle
 }
 
-func (r *runtime) named(exports *goja.Object) ([]declaredRecipe, error) {
+// named is the recipes that the script's own file declares, sorted by name. Those of the files it imports run only
+// through quack.runRecipe(). A file can be a link, which esbuild follows, so files compare by their real paths.
+func (r *runtime) named() ([]declaredRecipe, error) {
 	var named []declaredRecipe
 	for _, declared := range r.recipes {
-		if declared.Name != "" {
-			named = append(named, declared)
-		}
-	}
-	for _, key := range exports.Keys() {
-		handle, _ := exports.Get(key).(*goja.Object)
-		if declared, ok := r.recipes[handle]; ok && declared.Name == "" {
-			if declared.exported == "" {
-				declared.exported = key
-				r.recipes[handle] = declared
-			}
-			declared.Name = key
+		if realPath(declared.File) == realPath(r.script.path) {
+			declared.File = r.script.path
 			named = append(named, declared)
 		}
 	}
 	slices.SortFunc(named, func(a, b declaredRecipe) int { return strings.Compare(a.Name, b.Name) })
 	for i, declared := range named {
-		if !isName(declared.Name) {
-			return nil, fmt.Errorf("recipe '%s': its name may hold only ASCII letters, digits, '_', '.' and '-', and must not start with '-'", declared.Name)
-		}
 		if i > 0 && named[i-1].Name == declared.Name {
 			return nil, fmt.Errorf("two recipes are named '%s'", declared.Name)
 		}
@@ -375,7 +363,6 @@ func (r *runtime) runRecipe(handle goja.Value, args map[string]any) goja.Value {
 	}
 	r.depth++
 	defer func() { r.depth-- }()
-	declared.Name = cmp.Or(declared.Name, declared.exported)
 	maps.DeleteFunc(args, func(_ string, value any) bool { return value == nil })
 	data, threw, err := r.call(declared, r.rawArgs(args), true)
 	if threw != nil {
@@ -647,7 +634,6 @@ func bundle(path string) (string, error) {
 		AbsWorkingDir: filepath.Dir(path),
 		Bundle:        true,
 		Format:        api.FormatIIFE,
-		GlobalName:    "__recipes",
 		Platform:      api.PlatformNeutral,
 		Target:        api.ES2017,
 		Sourcemap:     api.SourceMapInline,

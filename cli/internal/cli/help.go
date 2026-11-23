@@ -34,13 +34,16 @@ func usage(flags string) string {
 		"  files there, and [recipes] in config.toml maps apps to your own files in $XDG_CONFIG_HOME/quack/recipes/:\n\n" +
 		"    [recipes]\n" +
 		"    'io\\.example\\.app' = \"recipes.ts\"\n" +
-		"    'io\\.example\\..*' = [\"common.ts\", \"debug.ts\"]\n\n" +
-		"  An app gets the recipes of every file it matches in both, and two recipes of one name fail them all. Files\n" +
-		"  may import other local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json\n" +
-		"  next to the recipes, so that editors check them, and with --app starts .quack/ in the current dir when there\n" +
-		"  is none. The terminal UI lists the recipes with the actions, marked ƒ, and $ lists only the recipes:\n\n" +
+		"    'io\\.example\\..*' = [\"common.ts\", \"features/*.ts\"]\n\n" +
+		"  A path can be in a subdir, or a glob whose *, ? and [...] match within one dir. An app gets the recipes that\n" +
+		"  every file it matches in both declares itself, and two recipes of one name fail them all. Files may import\n" +
+		"  other local files, whose recipes run through quack.runRecipe() without being listed, but no packages.\n" +
+		"  quack --init-recipes writes quack.d.ts and tsconfig.json next to the recipes, so that editors check them,\n" +
+		"  and with --app starts .quack/ in the current dir when there is none. The terminal UI lists the recipes with\n" +
+		"  the actions, marked ƒ, and $ lists only the recipes:\n\n" +
 		"    import quack from \"quack\"\n\n" +
 		"    export const login = quack.recipe({\n" +
+		"      name: \"login\",\n" +
 		"      description: \"Log in as the test user\",\n" +
 		"      params: { user: { type: \"string\", default: \"foo\", hints: [\"foo\", \"bar\"] } },\n" +
 		"      run({ user }) {\n" +

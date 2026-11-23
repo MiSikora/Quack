@@ -2,7 +2,7 @@ $ quack --json --recipe typo
 --- exit 1
 --- stdout
 {"code":"ok","message":"Hello, Bob!","step":1}
-{"code":"error","message":"TypeError: Cannot read property 'user' of undefined\n    at run (io.mehow.quack.sample.ts:71:28)"}
+{"code":"error","message":"TypeError: Cannot read property 'user' of undefined\n    at run (io.mehow.quack.sample.ts:80:28)"}
 --- stderr
 --- device
 shell emulator-5554: query-receivers

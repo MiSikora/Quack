@@ -10,11 +10,9 @@ type Recipe struct {
 	Name        string
 	Description string
 	Params      []wire.Param
-	// The absolute path of the file whose code declares it: a mapped file, or one that a mapped file imports. It is
-	// the mapped file when the source map does not tell.
-	File   string
-	script string
-	env    map[string]string
+	// The mapped file that declares it, as the [recipes] table reaches it.
+	File string
+	env  map[string]string
 }
 
 // Follows the rules of action ids: ASCII letters, digits, '_', '.' and '-', and no '-' first, which would read as a flag.

@@ -57,6 +57,7 @@ func TestRunRunsARecipeWithNumberedStepsAndReturnsItsData(t *testing.T) {
 	cookbook := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
+  name: "r",
   run() {
     console.log("first")
     const created = quack.runAction("account.create", { age: 7, username: "ann" })
@@ -88,6 +89,7 @@ func TestAFailedStepThatEndsTheRecipeComesBackAsAStepError(t *testing.T) {
 	cookbook := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
+  name: "r",
   run() {
     quack.openApp()
     quack.runAction("fail")
@@ -101,7 +103,7 @@ export const r = quack.recipe({
 	if !errors.As(err, &failed) || failed.Step != 2 || !errors.Is(err, refused) || !errors.As(err, &thrown) {
 		t.Fatalf("got %#v, want step 2's error", err)
 	}
-	if want := "[rejected] no way\n    at run (io.mehow.quack.sample.ts:5:20)"; err.Error() != want {
+	if want := "[rejected] no way\n    at run (io.mehow.quack.sample.ts:6:20)"; err.Error() != want {
 		t.Errorf("got %q, want %q", err.Error(), want)
 	}
 }
@@ -110,6 +112,7 @@ func TestAFailedStepThatTheRecipeWentOnFromIsNoStepError(t *testing.T) {
 	cookbook := load(t, `
 import quack from "quack"
 export const rethrows = quack.recipe({
+  name: "rethrows",
   run() {
     try {
       quack.runAction("fail")
@@ -120,6 +123,7 @@ export const rethrows = quack.recipe({
   },
 })
 export const goesOn = quack.recipe({
+  name: "goesOn",
   run() {
     try {
       quack.runAction("fail")

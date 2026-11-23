@@ -51,9 +51,9 @@ func TestLoadMergesTheFilesOfEveryPatternThatMatchesTheApp(t *testing.T) {
 
 func TestLoadRunsEachRecipeFromItsOwnFile(t *testing.T) {
 	writeFile(t, "a.ts", `import quack from "quack"
-export const first = quack.recipe({ run() { console.log("a") } })`)
+export const first = quack.recipe({ name: "first", run() { console.log("a") } })`)
 	writeFile(t, "b.ts", `import quack from "quack"
-export const second = quack.recipe({ run() { console.log("b") } })`)
+export const second = quack.recipe({ name: "second", run() { console.log("b") } })`)
 	writeConfig(t, "[recipes]\n'.*' = [\"a.ts\", \"b.ts\"]\n")
 	c, err := loadApp(t)
 	if err != nil {
@@ -103,13 +103,14 @@ func TestAProjectThatMapsAnotherAppGivesNothing(t *testing.T) {
 	}
 }
 
-func TestLoadLeavesOutAFileNoPatternMapsWhichAMappedFileImports(t *testing.T) {
-	writeFile(t, "common.ts", `import quack from "quack"
-export const helper = quack.recipe({ run() {} })
+func TestARecipeOfAFileNoPatternMapsRunsFromAMappedFileThatImportsItButIsNotListed(t *testing.T) {
+	writeFile(t, "lib/common.ts", `import quack from "quack"
+export const login = quack.recipe({ name: "login", run() { quack.runAction("app.login", { name: "Ann" }) } })
 export function greet() { quack.runAction("app.greet", { name: "Bob" }) }`)
 	write(t, `import quack from "quack"
-import { greet } from "./common"
-export const hello = quack.recipe({ run() { greet() } })`)
+import { greet, login } from "./lib/common"
+export { login } from "./lib/common"
+export const hello = quack.recipe({ name: "hello", run() { greet(); quack.runRecipe(login) } })`)
 
 	c, err := loadApp(t)
 
@@ -117,36 +118,66 @@ export const hello = quack.recipe({ run() { greet() } })`)
 		t.Fatalf("got %v, %v, want only hello", names(c), err)
 	}
 	app := newApp()
-	if _, err := c.Run(context.Background(), app, nil, "hello", nil, ignore); err != nil || !reflect.DeepEqual(lines(app.Calls()), []string{"app.greet name=Bob"}) {
+	if _, err := c.Run(context.Background(), app, nil, "hello", nil, ignore); err != nil || !reflect.DeepEqual(lines(app.Calls()), []string{"app.greet name=Bob", "app.login name=Ann"}) {
 		t.Errorf("run: got %v and calls %v", err, lines(app.Calls()))
 	}
 }
 
-func TestARecipeFromAFileNoPatternMapsHasThatFileAndRunsFromTheMappedOne(t *testing.T) {
-	helpers := writeFile(t, "helpers.ts", `import quack from "quack"
-export const reset = quack.recipe({ run() { quack.runAction("app.greet", { name: "Bob" }) } })`)
-	main := write(t, `export { reset } from "./helpers"
-import quack from "quack"
-export const login = quack.recipe({ run() {} })`)
+func TestRecipesOfOneNameInImportedFilesFailNothing(t *testing.T) {
+	writeFile(t, "lib/a.ts", `import quack from "quack"
+export const a = quack.recipe({ name: "reset", run() { quack.runAction("app.greet", { name: "a" }) } })`)
+	writeFile(t, "lib/b.ts", `import quack from "quack"
+export const b = quack.recipe({ name: "reset", run() { quack.runAction("app.greet", { name: "b" }) } })`)
+	write(t, `import quack from "quack"
+import { a } from "./lib/a"
+import { b } from "./lib/b"
+quack.recipe({ name: "reset", run() { quack.runRecipe(a); quack.runRecipe(b) } })`)
 
 	c, err := loadApp(t)
 
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := map[string]string{"login": main, "reset": helpers}; !reflect.DeepEqual(files(c), want) {
-		t.Fatalf("got %v, want %v", files(c), want)
+	if err != nil || !reflect.DeepEqual(names(c), []string{"reset"}) {
+		t.Fatalf("got %v, %v, want only reset", names(c), err)
 	}
 	app := newApp()
-	if _, err := c.Run(context.Background(), app, nil, "reset", nil, ignore); err != nil || !reflect.DeepEqual(lines(app.Calls()), []string{"app.greet name=Bob"}) {
+	if _, err := c.Run(context.Background(), app, nil, "reset", nil, ignore); err != nil || !reflect.DeepEqual(lines(app.Calls()), []string{"app.greet name=a", "app.greet name=b"}) {
 		t.Errorf("run: got %v and calls %v", err, lines(app.Calls()))
+	}
+}
+
+func TestAMappingTakesPathsInSubdirectoriesAndGlobsAndLoadsEachFileOnce(t *testing.T) {
+	a := writeFile(t, "features/a.ts", recipeNamed("fromA"))
+	b := writeFile(t, "features/b.ts", recipeNamed("fromB"))
+	writeFile(t, "features/notes.md", "not a recipe")
+	writeFile(t, "features/old.ts/c.ts", recipeNamed("fromC"))
+	deep := writeFile(t, "features/deep/d.ts", recipeNamed("fromD"))
+	writeConfig(t, `[recipes]
+'.*' = ["features/*.ts", "features/a.ts", "./features/deep/*.ts"]
+'io\..*' = "features/[ab].ts"
+`)
+
+	c, err := loadApp(t)
+
+	if want := map[string]string{"fromA": a, "fromB": b, "fromD": deep}; err != nil || !reflect.DeepEqual(files(c), want) {
+		t.Errorf("got %v, %v, want %v", files(c), err, want)
+	}
+}
+
+func TestAGlobThatMatchesNoFilesIsAWarning(t *testing.T) {
+	writeFile(t, "a.ts", recipeNamed("a"))
+	writeConfig(t, "[recipes]\n'.*' = [\"features/*.ts\", \"a.ts\"]\n")
+
+	c, warnings, err := Load(t.TempDir(), pkg)
+
+	want := []string{configFile() + ": [recipes] maps io.mehow.quack.sample to features/*.ts, which matches no files"}
+	if err != nil || !reflect.DeepEqual(warnings, want) || !reflect.DeepEqual(names(c), []string{"a"}) {
+		t.Errorf("got %v, %q, %v, want a and %q", names(c), warnings, err, want)
 	}
 }
 
 func TestAMappedFileThatIsALinkHasItsRecipesOnlyItself(t *testing.T) {
 	writeFile(t, "a.ts", `import quack from "quack"
 import { login } from "./common"
-export const reset = quack.recipe({ run() { quack.runRecipe(login) } })`)
+export const reset = quack.recipe({ name: "reset", run() { quack.runRecipe(login) } })`)
 	shared := filepath.Join(filepath.Dir(Dir()), "shared")
 	if err := os.Mkdir(shared, 0o755); err != nil {
 		t.Fatal(err)
@@ -171,12 +202,12 @@ export const login = quack.recipe({ name: "login", run() {} })`), 0o644); err !=
 func TestAMappedFileThatAnotherImportsHasItsRecipesOnlyItself(t *testing.T) {
 	common := writeFile(t, "common.ts", `import quack from "quack"
 export const login = quack.recipe({ name: "login", run() { quack.runAction("app.login", { name: "Ann" }) } })
-export const seed = quack.recipe({ run() {} })
+export const seed = quack.recipe({ name: "seed", run() {} })
 export function greet() { quack.runAction("app.greet", { name: "Bob" }) }`)
 	debug := writeFile(t, "debug.ts", `import quack from "quack"
 import { greet, login } from "./common"
 export { seed } from "./common"
-export const reset = quack.recipe({ run() { greet(); quack.runRecipe(login) } })`)
+export const reset = quack.recipe({ name: "reset", run() { greet(); quack.runRecipe(login) } })`)
 	writeConfig(t, "[recipes]\n'.*' = [\"common.ts\", \"debug.ts\"]\n")
 
 	c, err := loadApp(t)
@@ -235,8 +266,11 @@ func TestEntriesThatDoNotParseAreWarningsAndTheOthersApply(t *testing.T) {
 'io\.mehow(' = "a.ts"
 '.*' = "a.ts"
 'io.*' = "../escape.ts"
-'i.*' = "sub/x.ts"
+'i.*' = "sub/../a.ts"
 '.' = ".."
+'..' = ""
+'...' = "/etc/a.ts"
+'io' = "[a.ts"
 'io\..*' = 3
 'io\.mehow\..*' = ["a.ts", 4]
 [other]
@@ -248,10 +282,13 @@ x = 1
 
 	want := []string{
 		file + ":1: unknown key 'colors'",
-		file + ":10: unknown key 'other'",
-		file + ": [recipes] '.' maps to '..', which is not the name of a file in the recipes dir",
-		file + ": [recipes] 'i.*' maps to 'sub/x.ts', which is not the name of a file in the recipes dir",
-		file + ": [recipes] 'io.*' maps to '../escape.ts', which is not the name of a file in the recipes dir",
+		file + ":13: unknown key 'other'",
+		file + ": [recipes] '.' maps to '..', which is not a path in the recipes dir",
+		file + ": [recipes] '..' maps to '', which is not a path in the recipes dir",
+		file + ": [recipes] '...' maps to '/etc/a.ts', which is not a path in the recipes dir",
+		file + ": [recipes] 'i.*' maps to 'sub/../a.ts', which is not a path in the recipes dir",
+		file + ": [recipes] 'io' maps to '[a.ts', which is not a valid glob",
+		file + ": [recipes] 'io.*' maps to '../escape.ts', which is not a path in the recipes dir",
 		file + ": [recipes] 'io\\..*' must map to a file name or an array of file names",
 		file + ": [recipes] 'io\\.mehow(' is not a valid regex: missing closing ): `io\\.mehow(`",
 		file + ": [recipes] 'io\\.mehow\\..*' must map to a file name or an array of file names",
@@ -356,6 +393,7 @@ func TestLoadWritesNothingAndWarnsOfOutOfDateTypesInEachDirItLoadedFrom(t *testi
 // adds its hash here, so that quacks sharing a project tell older types from newer ones.
 var typesHashes = map[int]string{
 	1: "089d231843cb3df7c40ef09c0e652b08c0615f7e72b6eeda739a653c0276d7f7",
+	2: "3d242b6f6e627b9d52f13edade6b1d00db76dcf5b320ab719d7b88386cc59611",
 }
 
 func TestEachChangeOfTheRecipeTypesRaisesTheirVersion(t *testing.T) {
@@ -372,7 +410,7 @@ func TestEachChangeOfTheRecipeTypesRaisesTheirVersion(t *testing.T) {
 func TestLoadSaysToUpgradeQuackForTypesANewerQuackWrote(t *testing.T) {
 	dir := writeProject(t, "[recipes]\n'.*' = \"recipes.ts\"\n", map[string]string{"recipes.ts": recipeNamed("open")})
 	recipes := filepath.Join(dir, ".quack", "recipes")
-	newer := strings.Replace(string(quackTypes), "recipe types 1.", "recipe types 99.", 1)
+	newer := strings.Replace(string(quackTypes), "recipe types 2.", "recipe types 99.", 1)
 	os.WriteFile(filepath.Join(recipes, "quack.d.ts"), []byte(newer), 0o644)
 
 	_, warnings, err := Load(dir, pkg)
@@ -506,7 +544,7 @@ func emptyDir(t *testing.T) string {
 
 func recipeNamed(name string) string {
 	return `import quack from "quack"
-export const ` + name + ` = quack.recipe({ run() {} })`
+export const ` + name + ` = quack.recipe({ name: "` + name + `", run() {} })`
 }
 
 func configFile() string { return filepath.Join(filepath.Dir(Dir()), "config.toml") }

@@ -96,9 +96,9 @@ or type `/init-recipes` in `quack`. Commit the whole `.quack/` dir, type files i
 'com\.example\..*' = ["accounts.ts", "sync.ts"]
 ```
 
-Each key is a regex that has to match the whole package. Keep it in single quotes, which TOML leaves as written, so that `\.` reaches the regex. An app gets the recipes of every file that a matching key names. Files no key names can still be imported by those that are. Recipes of your own go in the same kind of `[recipes]` table in `~/.config/quack/config.toml`, with the files in `~/.config/quack/recipes/`. quack merges both, and fails to load an app's recipes when two of them share a name. quack warns when the type files are older than it, and `/init-recipes` then updates them. They change only when the recipe API does, not with every quack release. When a teammate's newer quack wrote them, quack asks you to upgrade instead of writing older ones over them.
+Each key is a regex that has to match the whole package. Keep it in single quotes, which TOML leaves as written, so that `\.` reaches the regex. Each value is a path in `recipes/`, or an array of them, and a path can be in a subdir, such as `"features/login.ts"`, or a glob, such as `"features/*.ts"`. A glob's `*`, `?` and `[...]` match within one dir. An app gets the recipes that every file a matching key names declares itself. Recipes of your own go in the same kind of `[recipes]` table in `~/.config/quack/config.toml`, with the files in `~/.config/quack/recipes/`. quack merges both, and fails to load an app's recipes when two of them share a name. quack warns when the type files are older than it, and `/init-recipes` then updates them. They change only when the recipe API does, not with every quack release. When a teammate's newer quack wrote them, quack asks you to upgrade instead of writing older ones over them.
 
-Each recipe gets the name it declares, or else the name of its export:
+Each recipe needs a `name`, which quack lists it by:
 
 ```ts
 import quack from "quack"
@@ -123,6 +123,7 @@ Recipes build on each other. `quack.runRecipe` runs another recipe with args and
 
 ```ts
 export const signIn = quack.recipe({
+  name: "signIn",
   params: { user: { type: "string", required: true } },
   run({ user }) {
     return quack.runAction<{ token: string }>("account.signIn", { user }).data
@@ -130,6 +131,7 @@ export const signIn = quack.recipe({
 })
 
 export const seed = quack.recipe({
+  name: "seed",
   run() {
     const { token } = quack.runRecipe(signIn, { user: "duck" })
     const id = quack.waitUntil(() => quack.runAction<{ id?: string }>("sync.status").data.id)
@@ -142,6 +144,44 @@ export const seed = quack.recipe({
 A param with `env: "QUACK_TOKEN"` takes that environment variable's value when the run leaves it out. quack shows it as `${QUACK_TOKEN}`, not its value, wherever it lists or logs the recipe.
 
 Run it with `quack --recipe greetAndGoBack name=Goose`, or find it in `quack`, which lists recipes with the actions and marks them `ƒ`. Type `$` there to list only the recipes.
+
+### Growing past one file
+
+When one file gets long, split the recipes into a dir and map a glob to it, with helpers next to it in a dir that no key names:
+
+```toml
+[recipes]
+'com\.example(\.debug)?' = ["features/*.ts"]
+```
+
+```ts
+// .quack/recipes/lib/accounts.ts
+import quack from "quack"
+
+export const signIn = quack.recipe({
+  name: "signIn",
+  params: { user: { type: "string", required: true } },
+  run({ user }) {
+    quack.runAction("account.signIn", { user })
+  },
+})
+```
+
+```ts
+// .quack/recipes/features/checkout.ts
+import quack from "quack"
+import { signIn } from "../lib/accounts"
+
+quack.recipe({
+  name: "checkout",
+  run() {
+    quack.runRecipe(signIn, { user: "duck" })
+    quack.runAction("cart.fill")
+  },
+})
+```
+
+quack lists a recipe only when a mapped file declares it, so the app gets `checkout` and not `signIn`. Importing a recipe from another file lets a recipe run it with `quack.runRecipe`, and never lists it, even when that file is mapped too: its recipes list from its own mapping.
 
 ## Use it with AI agents
 

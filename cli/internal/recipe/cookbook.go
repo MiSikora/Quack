@@ -21,7 +21,7 @@ import (
 	"quack/internal/wire"
 )
 
-// Cookbook holds the recipes of one app: those of every file that a [recipes] table maps the app to.
+// Cookbook holds the recipes of one app: those that every file a [recipes] table maps the app to declares itself.
 type Cookbook struct {
 	// Sorted by name.
 	Recipes []Recipe
@@ -35,7 +35,7 @@ func (c *Cookbook) Run(ctx context.Context, app step.App, actions []wire.Action,
 	if !ok {
 		return nil, fmt.Errorf("no recipe named %s for %s", name, app.Target().Package)
 	}
-	return c.scripts[r.script].run(ctx, app, actions, name, args, emit)
+	return c.scripts[r.File].run(ctx, app, actions, name, args, emit)
 }
 
 func (c *Cookbook) Find(name string) (Recipe, bool) {
@@ -56,24 +56,35 @@ func Load(dir, pkg string) (*Cookbook, []string, error) {
 	}
 	var paths, dirs []string
 	for _, t := range tables {
-		for _, path := range t.files(pkg) {
-			if slices.Contains(paths, path) {
-				continue
+		for _, mapped := range t.files(pkg) {
+			names := []string{mapped}
+			if strings.ContainsAny(mapped, "*?[") {
+				// parseEntry checked the pattern, which is the only error of Glob.
+				names, _ = fs.Glob(os.DirFS(t.dir), mapped)
+				names = slices.DeleteFunc(names, func(name string) bool {
+					info, err := os.Stat(filepath.Join(t.dir, name))
+					return err == nil && info.IsDir()
+				})
+				if len(names) == 0 {
+					warnings = append(warnings, fmt.Sprintf("%s: [recipes] maps %s to %s, which matches no files", t.file, pkg, mapped))
+				}
 			}
-			if problem := unreadable(path); problem != "" {
-				warnings = append(warnings, fmt.Sprintf("%s: [recipes] maps %s to %s, %s", t.file, pkg, filepath.Base(path), problem))
-				continue
-			}
-			paths = append(paths, path)
-			if !slices.Contains(dirs, t.dir) {
-				dirs = append(dirs, t.dir)
+			for _, name := range names {
+				path := filepath.Join(t.dir, name)
+				// A file can be a link, so files compare by their real paths.
+				if slices.ContainsFunc(paths, func(other string) bool { return realPath(other) == realPath(path) }) {
+					continue
+				}
+				if problem := unreadable(path); problem != "" {
+					warnings = append(warnings, fmt.Sprintf("%s: [recipes] maps %s to %s, %s", t.file, pkg, name, problem))
+					continue
+				}
+				paths = append(paths, path)
+				if !slices.Contains(dirs, t.dir) {
+					dirs = append(dirs, t.dir)
+				}
 			}
 		}
-	}
-	// A mapped file can be a link, which esbuild follows, so files compare by their real paths.
-	mapped := map[string]string{}
-	for _, path := range paths {
-		mapped[realPath(path)] = path
 	}
 	cookbook := &Cookbook{Recipes: []Recipe{}, scripts: map[string]*script{}}
 	for _, path := range paths {
@@ -82,14 +93,8 @@ func Load(dir, pkg string) (*Cookbook, []string, error) {
 			return nil, nil, err
 		}
 		for _, r := range s.recipes {
-			if file, ok := mapped[realPath(r.File)]; ok {
-				if file != path {
-					continue
-				}
-				r.File = file
-			}
 			if at := slices.IndexFunc(cookbook.Recipes, func(other Recipe) bool { return other.Name == r.Name }); at >= 0 {
-				return nil, nil, fmt.Errorf("recipe '%s' is in both %s and %s", r.Name, cookbook.Recipes[at].script, path)
+				return nil, nil, fmt.Errorf("recipe '%s' is in both %s and %s", r.Name, cookbook.Recipes[at].File, path)
 			}
 			cookbook.Recipes = append(cookbook.Recipes, r)
 		}
@@ -177,22 +182,18 @@ type table struct {
 
 type entry struct {
 	pattern *regexp.Regexp
-	files   []string
+	// Paths in the table's dir, each a file or a glob of files.
+	files []string
 }
 
 func (t table) files(pkg string) []string {
-	var paths []string
+	var names []string
 	for _, e := range t.entries {
-		if !e.pattern.MatchString(pkg) {
-			continue
-		}
-		for _, name := range e.files {
-			if path := filepath.Join(t.dir, name); !slices.Contains(paths, path) {
-				paths = append(paths, path)
-			}
+		if e.pattern.MatchString(pkg) {
+			names = append(names, e.files...)
 		}
 	}
-	return paths
+	return names
 }
 
 func readTables(dir string) ([]table, []string, error) {
@@ -277,10 +278,15 @@ func parseEntry(pattern string, value any) (entry, string) {
 	default:
 		return entry{}, "must map to a file name or an array of file names"
 	}
-	for _, name := range e.files {
-		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/"+string(filepath.Separator)) {
-			return entry{}, fmt.Sprintf("maps to '%s', which is not the name of a file in the recipes dir", name)
+	for i, name := range e.files {
+		if !filepath.IsLocal(name) || slices.Contains(strings.Split(filepath.ToSlash(name), "/"), "..") {
+			return entry{}, fmt.Sprintf("maps to '%s', which is not a path in the recipes dir", name)
 		}
+		if _, err := filepath.Match(name, ""); err != nil {
+			return entry{}, fmt.Sprintf("maps to '%s', which is not a valid glob", name)
+		}
+		// fs.Glob takes only clean paths, such as a.ts for ./a.ts.
+		e.files[i] = filepath.ToSlash(filepath.Clean(name))
 	}
 	return e, ""
 }

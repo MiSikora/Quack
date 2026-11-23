@@ -4,7 +4,7 @@ $ quack --recipe failShell
 › shell fail now
 --- stderr
 quack: the command exited with 1: Error: fail now
-    at run (io.mehow.quack.sample.ts:36:16)
+    at run (io.mehow.quack.sample.ts:41:16)
 --- device
 shell emulator-5554: query-receivers
 shell emulator-5554: get-current-user

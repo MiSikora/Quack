@@ -21,7 +21,7 @@ import (
 	"quack/internal/wire"
 )
 
-func TestLoadReadsTheExportedRecipesSortedByNameWithTheirParams(t *testing.T) {
+func TestLoadReadsTheRecipesSortedByNameWithTheirParams(t *testing.T) {
 	writeFile(t, "common.ts", `export function helper(): string { return "x" }`)
 	path := write(t, `
 import quack from "quack"
@@ -30,6 +30,7 @@ import { helper } from "./common"
 type Unused = { a: string }
 
 export const login = quack.recipe({
+  name: "login",
   description: "Log in",
   params: {
     user: { type: "string", default: "foo", hints: ["alice", "bob"], description: "Who" },
@@ -39,9 +40,9 @@ export const login = quack.recipe({
   },
   run() {},
 })
-export const clean = quack.recipe({ run() { helper() } })
+export const clean = quack.recipe({ name: "clean", run() { helper() } })
 export const notARecipe = 3
-const unexported = quack.recipe({ run() {} })
+const unexported = quack.recipe({ name: "unexported", run() {} })
 `)
 
 	s, err := loadApp(t)
@@ -50,40 +51,17 @@ const unexported = quack.recipe({ run() {} })
 		t.Fatal(err)
 	}
 	want := []Recipe{
-		{Name: "clean", File: path, script: path},
-		{Name: "login", Description: "Log in", File: path, script: path, Params: []wire.Param{
+		{Name: "clean", File: path},
+		{Name: "login", Description: "Log in", File: path, Params: []wire.Param{
 			{Name: "user", Description: "Who", Type: wire.ParamTypeString, Hints: []string{"alice", "bob"}, Presence: wire.Default{Values: []string{"foo"}}},
 			{Name: "count", Type: wire.ParamTypeInt, Presence: wire.Required{}},
 			{Name: "theme", Type: wire.ParamTypeEnum, Choices: []string{"light", "dark"}, Presence: wire.Optional{}},
 			{Name: "tags", Type: wire.ParamTypeStringList, Presence: wire.Default{Values: []string{"a", "b"}}},
 		}},
+		{Name: "unexported", File: path},
 	}
 	if !reflect.DeepEqual(s.Recipes, want) {
 		t.Errorf("got %+v, want %+v", s.Recipes, want)
-	}
-}
-
-func TestARecipeTakesTheNameItDeclaresOverItsExportsName(t *testing.T) {
-	s := load(t, `
-import quack from "quack"
-quack.recipe({ name: "app.reset", run() { console.log("reset") } })
-const skip = quack.recipe({ name: "onboarding.skip", run() {} })
-export { skip as skipOnboarding }
-export const open = quack.recipe({ run() {} })
-const helper = quack.recipe({ run() {} })`)
-	var logged []string
-
-	_, err := s.Run(context.Background(), newApp(), nil, "app.reset", nil, logTo(&logged))
-
-	var names []string
-	for _, r := range s.Recipes {
-		names = append(names, r.Name)
-	}
-	if want := []string{"app.reset", "onboarding.skip", "open"}; !reflect.DeepEqual(names, want) {
-		t.Errorf("names: got %v, want %v", names, want)
-	}
-	if want := []string{"reset"}; err != nil || !reflect.DeepEqual(logged, want) {
-		t.Errorf("run: got %v, %v, want %v", logged, err, want)
 	}
 }
 
@@ -91,7 +69,7 @@ func TestARecipeNameHoldsDigits(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 quack.recipe({ name: "seed100", run() {} })
-export const login2fa = quack.recipe({ run() {} })`)
+export const login2fa = quack.recipe({ name: "login2fa", run() {} })`)
 
 	var names []string
 	for _, r := range s.Recipes {
@@ -104,7 +82,7 @@ export const login2fa = quack.recipe({ run() {} })`)
 
 func TestLoadReadsAJavaScriptFile(t *testing.T) {
 	writeFile(t, "recipes.js", `import quack from "quack"
-export const clean = quack.recipe({ description: "Clean", run() {} })`)
+export const clean = quack.recipe({ name: "clean", description: "Clean", run() {} })`)
 	writeConfig(t, "[recipes]\n'.*' = \"recipes.js\"\n")
 
 	s, err := loadApp(t)
@@ -118,7 +96,7 @@ func TestLoadPassesOverExportsThatAreNoRecipes(t *testing.T) {
 	write(t, `import quack from "quack"
 export const label = "zażółć"
 export const count = 3
-export const clean = quack.recipe({ run() {} })`)
+export const clean = quack.recipe({ name: "clean", run() {} })`)
 
 	s, err := loadApp(t)
 
@@ -133,22 +111,24 @@ func TestLoadFailsSayingWhere(t *testing.T) {
 		{`import { b } from "lodash"; console.log(b)`, `io.mehow.quack.sample.ts:1:19: Could not resolve "lodash"`},
 		{`throw new Error("nope")`, "Error: nope\n    at io.mehow.quack.sample.ts:1:6"},
 		{`import quack from "quack"
-export const a = quack.recipe({ params: { x: { type: "nope" } }, run() {} })`, "TypeError: param 'x' has type 'nope', not one of string, int, long, double, boolean, string_list, enum"},
+export const a = quack.recipe({ name: "a", params: { x: { type: "nope" } }, run() {} })`, "TypeError: param 'x' has type 'nope', not one of string, int, long, double, boolean, string_list, enum"},
 		{`import quack from "quack"
-export const a = quack.recipe({ params: { x: { type: "enum" } }, run() {} })`, "TypeError: param 'x' is an enum without choices"},
+export const a = quack.recipe({ name: "a", params: { x: { type: "enum" } }, run() {} })`, "TypeError: param 'x' is an enum without choices"},
 		{`import quack from "quack"
-export const a = quack.recipe({ params: { x: { type: "int", default: "many" } }, run() {} })`, "TypeError: param 'x': its default is not a int"},
+export const a = quack.recipe({ name: "a", params: { x: { type: "int", default: "many" } }, run() {} })`, "TypeError: param 'x': its default is not a int"},
 		{`import quack from "quack"
-export const a = quack.recipe({ description: "no run" })`, "TypeError: recipe() takes a definition with a run function"},
+export const a = quack.recipe({ name: "a", description: "no run" })`, "TypeError: recipe() takes a definition with a run function"},
 		{`import quack from "quack"
-export const $a = quack.recipe({ run() {} })`, "recipe '$a': its name may hold only ASCII letters, digits, '_', '.' and '-', and must not start with '-'"},
+export const a = quack.recipe({ run() {} })`, "TypeError: recipe() takes a definition with a name"},
+		{`import quack from "quack"
+export const a = quack.recipe({ name: 3 as any, run() {} })`, "TypeError: recipe() takes a definition with a name"},
 		{`import quack from "quack"
 quack.openApp()`, `TypeError: the "quack" module runs steps only inside a recipe's run`},
 		{`import quack from "quack"
-quack.recipe({ name: "$a", run() {} })`, "recipe '$a': its name may hold only ASCII letters, digits, '_', '.' and '-', and must not start with '-'"},
+quack.recipe({ name: "$a", run() {} })`, "TypeError: recipe '$a': its name may hold only ASCII letters, digits, '_', '.' and '-', and must not start with '-'"},
 		{`import quack from "quack"
 quack.recipe({ name: "a", run() {} })
-export const a = quack.recipe({ run() {} })`, "two recipes are named 'a'"},
+export const a = quack.recipe({ name: "a", run() {} })`, "two recipes are named 'a'"},
 		{`import quack from "quack"
 quack.recipe({ name: "-reset", run() {} })`, "recipe '-reset': its name may hold only"},
 		{`import quack from "quack"
@@ -170,6 +150,7 @@ func TestRunRunsTheStepsInOrderAndEmitsTheirEventsNumbered(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
+  name: "r",
   run() {
     quack.openApp()
     const greeting = quack.runAction("app.greet", { name: "Bob", times: 2, loud: true, tag: ["a", "b"] })
@@ -220,6 +201,7 @@ func TestARecipeBranchesOnTheDataOfAnAction(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
+  name: "r",
   run() {
     const status = quack.runAction<{ loggedIn: boolean; tries: number[] }>("account.status")
     if (!status.data.loggedIn) quack.runAction("app.greet", { name: "tries " + status.data.tries.length })
@@ -247,6 +229,7 @@ func TestARunGetsItsArgsConvertedWithDefaults(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
+  name: "r",
   params: {
     text: { type: "string", default: "foo" },
     count: { type: "int" },
@@ -275,6 +258,7 @@ func TestARunFailsOnArgsItsParamsRefuse(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
+  name: "r",
   params: { user: { type: "string", required: true }, count: { type: "int" } },
   run() { throw new Error("ran") },
 })`)
@@ -309,6 +293,7 @@ export function fail() {
 import quack from "quack"
 import { fail } from "./common"
 export const r = quack.recipe({
+  name: "r",
   run() {
     fail()
   },
@@ -326,10 +311,10 @@ export const r = quack.recipe({
 	if !errors.As(err, &refused) || refused.Code != wire.ErrorCodeRejected || !errors.As(err, &thrown) {
 		t.Fatalf("got %v, want the app's error", err)
 	}
-	if want := []string{"fail (common.ts:4:18)", "run (" + filepath.Base(path) + ":5:9)"}; !reflect.DeepEqual(thrown.Stack, want) {
+	if want := []string{"fail (common.ts:4:18)", "run (" + filepath.Base(path) + ":6:9)"}; !reflect.DeepEqual(thrown.Stack, want) {
 		t.Errorf("stack: got %q, want %q", thrown.Stack, want)
 	}
-	if want := "[rejected] no way\n    at fail (common.ts:4:18)\n    at run (io.mehow.quack.sample.ts:5:9)"; err.Error() != want {
+	if want := "[rejected] no way\n    at fail (common.ts:4:18)\n    at run (io.mehow.quack.sample.ts:6:9)"; err.Error() != want {
 		t.Errorf("got %q, want %q", err.Error(), want)
 	}
 	if want := []step.Event{step.Started{Number: 1, Line: "fail"}, step.Failed{Number: 1, Err: refused}}; !errors.Is(err, refused) || !reflect.DeepEqual(events, want) {
@@ -341,6 +326,7 @@ func TestARecipeCatchesAFailedStep(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
+  name: "r",
   run() {
     try {
       quack.runAction("fail")
@@ -366,7 +352,7 @@ export const r = quack.recipe({
 func TestCancelingInterruptsARecipeWhereverItIs(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
-export const spin = quack.recipe({ run() { while (true) {} } })`)
+export const spin = quack.recipe({ name: "spin", run() { while (true) {} } })`)
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(20*time.Millisecond, cancel)
 
@@ -382,7 +368,7 @@ export const spin = quack.recipe({ run() { while (true) {} } })`)
 func TestCancelingBeforeTheRecipeStartsEndsItAsCanceled(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
-export const spin = quack.recipe({ run() { while (true) {} } })`)
+export const spin = quack.recipe({ name: "spin", run() { while (true) {} } })`)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -398,13 +384,14 @@ func TestWaitUntilChecksUntilTheCheckPassesOrTheTimeoutEnds(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 export const passes = quack.recipe({
+  name: "passes",
   run() {
     let checks = 0
     quack.waitUntil(() => ++checks === 3, { every: "5ms" })
     console.log("checks " + checks)
   },
 })
-export const times = quack.recipe({ run() { quack.waitUntil(() => false, { timeout: 30, every: 10 }) } })`)
+export const times = quack.recipe({ name: "times", run() { quack.waitUntil(() => false, { timeout: 30, every: 10 }) } })`)
 	var logged []string
 	var started []string
 	observer := func(e step.Event) {
@@ -429,7 +416,7 @@ func TestARecipeReadsTheAppTheDeviceAndTheEnvironment(t *testing.T) {
 	os.Unsetenv("QUACK_MISSING")
 	s := load(t, `
 import quack from "quack"
-export const r = quack.recipe({ run() { console.log(quack.app.package, quack.device.serial, quack.env.QUACK_NAME, quack.env.QUACK_MISSING) } })`)
+export const r = quack.recipe({ name: "r", run() { console.log(quack.app.package, quack.device.serial, quack.env.QUACK_NAME, quack.env.QUACK_MISSING) } })`)
 	var logged []string
 
 	_, err := s.Run(context.Background(), newApp(), nil, "r", nil, logTo(&logged))
@@ -445,6 +432,7 @@ func TestStepsShowTheEnvironmentVariablesTheRecipeReadByName(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
+  name: "r",
   run() {
     quack.shell("curl -H 'Authorization: " + quack.env.QUACK_TOKEN + "' -d Bob")
     quack.runAction("app.greet", { name: quack.env.QUACK_TOKEN + "-Bob" })
@@ -472,10 +460,12 @@ func TestAParamTakesItsEnvironmentVariableWhenTheRunLeavesItOut(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 export const set = quack.recipe({
+  name: "set",
   params: { code: { type: "string", required: true, env: "QUACK_CODE" } },
   run({ code }) { quack.runAction("app.greet", { name: code }) },
 })
 export const unset = quack.recipe({
+  name: "unset",
   params: { code: { type: "string", required: true, env: "QUACK_MISSING" } },
   run() {},
 })`)
@@ -506,6 +496,7 @@ func TestARecipeRunsAnotherAsAStepFollowedByItsStepsAndGetsWhatItReturned(t *tes
 	s := load(t, `
 import quack from "quack"
 export const login = quack.recipe({
+  name: "login",
   params: {
     user: { type: "string", required: true },
     pin: { type: "string", env: "QUACK_PIN" },
@@ -518,10 +509,11 @@ export const login = quack.recipe({
   },
 })
 export const outer = quack.recipe({
+  name: "outer",
   run() {
     const session = quack.runRecipe(login, { user: "bob", tags: ["a", "b c"], tries: undefined })
     console.log(JSON.stringify(session))
-    return [session.user, quack.runRecipe(quack.recipe({ run() {} }))]
+    return [session.user, quack.runRecipe(quack.recipe({ name: "inline", run() {} }))]
   },
 })`)
 	app := newApp()
@@ -549,7 +541,7 @@ export const outer = quack.recipe({
 		"2 notified greeting",
 		"2 ended Hello, bob!",
 		`2 {"user":"bob","tries":2,"tags":["a","b c"],"at":"1970-01-01T00:00:00.000Z"}`,
-		"3 › recipe",
+		"3 › recipe inline",
 		"3 ended ",
 	}
 	if err != nil || !reflect.DeepEqual(lines, want) {
@@ -569,6 +561,7 @@ const login = quack.recipe({
   run() { quack.runAction("fail") },
 })
 export const outer = quack.recipe({
+  name: "outer",
   run() {
     for (const args of [undefined, { user: "bob", nope: 1 }, { user: "bob", tries: "many" }, { user: "bob" }]) {
       try {
@@ -597,14 +590,14 @@ export const outer = quack.recipe({
 func TestRunRecipeTakesOnlyARecipeAndOnlyInsideARun(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
-export const named = quack.recipe({ run() { quack.runRecipe("named" as any) } })`)
+export const named = quack.recipe({ name: "named", run() { quack.runRecipe("named" as any) } })`)
 	if _, err := s.Run(context.Background(), newApp(), nil, "named", nil, ignore); err == nil || !strings.HasPrefix(err.Error(), "TypeError: runRecipe() takes a recipe that quack.recipe() returned") {
 		t.Errorf("by name: got %v", err)
 	}
 
 	write(t, `
 import quack from "quack"
-export const r = quack.recipe({ run() {} })
+export const r = quack.recipe({ name: "r", run() {} })
 quack.runRecipe(r)`)
 	if _, err := loadApp(t); err == nil || !strings.HasPrefix(err.Error(), "TypeError: the \"quack\" module runs steps only inside a recipe's run") {
 		t.Errorf("outside a run: got %v", err)
@@ -616,14 +609,15 @@ func TestRecipesThatRunEachOtherWithoutEndFailTheRun(t *testing.T) {
 import quack from "quack"
 const ping: any = quack.recipe({ name: "ping", run() { quack.runRecipe(pong) } })
 const pong: any = quack.recipe({ name: "pong", run() { quack.runRecipe(ping) } })
-export const self = quack.recipe({ run() { quack.runRecipe(self) } })
+export const self = quack.recipe({ name: "self", run() { quack.runRecipe(self) } })
 export const deep = quack.recipe({
+  name: "deep",
   run() {
     function down(n: number): number { return n === 0 ? 0 : down(n - 1) + 1 }
     return down(1e6)
   },
 })
-export const nested = quack.recipe({ run() { quack.runRecipe(deep) } })`)
+export const nested = quack.recipe({ name: "nested", run() { quack.runRecipe(deep) } })`)
 
 	for name, want := range map[string]string{
 		"ping":   "recipes run each other more than 100 deep",
@@ -640,9 +634,9 @@ export const nested = quack.recipe({ run() { quack.runRecipe(deep) } })`)
 func TestARecipeThatReturnsNothingJSONCanHoldReturnsNoData(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
-export const nothing = quack.recipe({ run() {} })
-export const fn = quack.recipe({ run() { return (() => 1) as any } })
-export const cycle = quack.recipe({ run() { const a: any = {}; a.a = a; return a } })`)
+export const nothing = quack.recipe({ name: "nothing", run() {} })
+export const fn = quack.recipe({ name: "fn", run() { return (() => 1) as any } })
+export const cycle = quack.recipe({ name: "cycle", run() { const a: any = {}; a.a = a; return a } })`)
 
 	for _, name := range []string{"nothing", "fn"} {
 		if data, err := s.Run(context.Background(), newApp(), nil, name, nil, ignore); data != nil || err != nil {
@@ -658,9 +652,10 @@ export const cycle = quack.recipe({ run() { const a: any = {}; a.a = a; return a
 func TestFailEndsTheRunWithItsMessageAloneUnlessTheRecipeCatchesIt(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
-const inner = quack.recipe({ run() { quack.fail("no account") } })
-export const uncaught = quack.recipe({ run() { quack.runRecipe(inner) } })
+const inner = quack.recipe({ name: "inner", run() { quack.fail("no account") } })
+export const uncaught = quack.recipe({ name: "uncaught", run() { quack.runRecipe(inner) } })
 export const caught = quack.recipe({
+  name: "caught",
   run() {
     try {
       quack.fail("no account")
@@ -686,6 +681,7 @@ func TestWaitUntilReturnsTheFirstTruthyValueOfTheCheck(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
+  name: "r",
   run() {
     const values = [0, "", null, undefined, NaN, false, { id: 7 }]
     const found = quack.waitUntil(() => values.shift(), { every: 1 })
@@ -728,6 +724,9 @@ func writeFile(t *testing.T, name, content string) string {
 		t.Fatal(err)
 	}
 	path := filepath.Join(Dir(), name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

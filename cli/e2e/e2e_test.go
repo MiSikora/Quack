@@ -201,6 +201,7 @@ var scenarios = []scenario{
 const sampleRecipes = `import quack from "quack"
 
 export const setup = quack.recipe({
+  name: "setup",
   description: "Create the account and greet",
   run() {
     quack.openApp()
@@ -211,6 +212,7 @@ export const setup = quack.recipe({
 })
 
 export const greet = quack.recipe({
+  name: "greet",
   params: { name: { type: "string", default: "Bob", hints: ["Alice", "Bob"], description: "Who to greet" } },
   run({ name }) {
     quack.runAction("app.greet", { name })
@@ -218,12 +220,14 @@ export const greet = quack.recipe({
 })
 
 export const greetEnv = quack.recipe({
+  name: "greetEnv",
   run() {
     quack.runAction("app.greet", { name: quack.env.QUACK_NAME ?? "nobody" })
   },
 })
 
 export const prepare = quack.recipe({
+  name: "prepare",
   run() {
     quack.shell("pm clear " + quack.app.package)
     quack.run("echo seeded " + quack.env.QUACK_NAME + " on $ANDROID_SERIAL")
@@ -232,6 +236,7 @@ export const prepare = quack.recipe({
 })
 
 export const failShell = quack.recipe({
+  name: "failShell",
   run() {
     quack.shell("fail now")
     quack.runAction("app.greet", { name: "Bob" })
@@ -239,6 +244,7 @@ export const failShell = quack.recipe({
 })
 
 export const failRun = quack.recipe({
+  name: "failRun",
   run() {
     quack.run("echo oops >&2; exit 3")
     quack.runAction("app.greet", { name: "Bob" })
@@ -246,6 +252,7 @@ export const failRun = quack.recipe({
 })
 
 export const clean = quack.recipe({
+  name: "clean",
   description: "Delete the account, then greet",
   run() {
     quack.runAction("account.delete")
@@ -254,6 +261,7 @@ export const clean = quack.recipe({
 })
 
 export const careful = quack.recipe({
+  name: "careful",
   description: "Delete the account if there is one, then greet",
   run() {
     try {
@@ -266,6 +274,7 @@ export const careful = quack.recipe({
 })
 
 export const typo = quack.recipe({
+  name: "typo",
   run() {
     const result = quack.runAction<{ user: { name: string } }>("app.greet", { name: "Bob" })
     console.log(result.data.user.name)
@@ -273,6 +282,7 @@ export const typo = quack.recipe({
 })
 
 export const login = quack.recipe({
+  name: "login",
   params: { user: { type: "string", required: true }, pin: { type: "string", env: "QUACK_PIN" } },
   run({ user }) {
     quack.runAction("app.greet", { name: user })
@@ -281,6 +291,7 @@ export const login = quack.recipe({
 })
 
 export const signIn = quack.recipe({
+  name: "signIn",
   description: "Log in as bob, then show the account",
   run() {
     const session = quack.runRecipe(login, { user: "bob" })
@@ -290,6 +301,7 @@ export const signIn = quack.recipe({
 })
 
 export const giveUp = quack.recipe({
+  name: "giveUp",
   run() {
     quack.runAction("app.greet", { name: "Bob" })
     quack.fail("there is nothing to sign in to")

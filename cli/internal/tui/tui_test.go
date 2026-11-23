@@ -82,7 +82,7 @@ func startNamespaces(t *testing.T) (*harness, *fakeApp) {
 import quack from "quack"
 
 quack.recipe({ name: "sync.backup", description: "Back up with a recipe", run() { console.log("recipe backed up") } })
-export const login = quack.recipe({ description: "Log in", run() {} })
+export const login = quack.recipe({ name: "login", description: "Log in", run() {} })
 `))
 	return h, app
 }
@@ -1198,10 +1198,11 @@ func TestDollarListsTheRecipesByName(t *testing.T) {
 import quack from "quack"
 
 export const login = quack.recipe({
+  name: "login",
   description: "Log in as the test user",
   run() { quack.runAction("app.greet", { name: "Bob" }) },
 })
-export const clean = quack.recipe({ run() { quack.runAction("account.delete") } })
+export const clean = quack.recipe({ name: "clean", run() { quack.runAction("account.delete") } })
 `))
 
 	h.typing("$")
@@ -1219,10 +1220,11 @@ func TestRecipesShareTheListWithTheActionsMarkedByADimF(t *testing.T) {
 import quack from "quack"
 
 export const login = quack.recipe({
+  name: "login",
   description: "Log in as the test user",
   run() { quack.runAction("app.greet", { name: "Bob" }) },
 })
-export const clean = quack.recipe({ run() { quack.runAction("account.delete") } })
+export const clean = quack.recipe({ name: "clean", run() { quack.runAction("account.delete") } })
 `))
 	h.waitFor("8/8")
 
@@ -1292,6 +1294,7 @@ func TestBoxOfAnActionPreviewsItsIdAndARecipesItsCommandLine(t *testing.T) {
 import quack from "quack"
 
 export const login = quack.recipe({
+  name: "login",
   description: "Log in",
   params: { user: { type: "string" } },
   run() {},
@@ -1335,7 +1338,7 @@ func TestBrokenRecipeFileSaysWhyAndLeavesTheActions(t *testing.T) {
 func TestRecipeWarningsGoIntoTheLogAndTheOtherRecipesLoad(t *testing.T) {
 	h := start(t, newFakeApp(), func(*model) {
 		path := writeRecipes(t, `import quack from "quack"
-export const clean = quack.recipe({ run() {} })`)
+export const clean = quack.recipe({ name: "clean", run() {} })`)
 		project := filepath.Dir(filepath.Dir(path))
 		mapping := "[recipes]\n'.*' = [\"io.mehow.quack.sample.ts\", \"gone.ts\"]\n"
 		if err := os.WriteFile(filepath.Join(project, "quack.toml"), []byte(mapping), 0o644); err != nil {
@@ -1355,6 +1358,7 @@ func TestEnterRunsARecipeWritingEachStepUnderItsCommandAndWhatItLogs(t *testing.
 import quack from "quack"
 
 export const setup = quack.recipe({
+  name: "setup",
   run() {
     quack.openApp()
     quack.wait("10ms")
@@ -1396,6 +1400,7 @@ const greet = quack.recipe({
 })
 
 export const setup = quack.recipe({
+  name: "setup",
   run() { return { greeting: quack.runRecipe(greet, { name: "Bob" }) } },
 })
 `))
@@ -1424,6 +1429,7 @@ func TestEnterOnARecipeWithARequiredParamOpensTheBoxWithItsHintsAndRunsWithTheAr
 import quack from "quack"
 
 export const login = quack.recipe({
+  name: "login",
   description: "Log in",
   params: {
     user: { type: "string", required: true, hints: ["alice", "bob"] },
@@ -1469,6 +1475,7 @@ func TestEnterOnARecipeWithOnlyOptionalParamsOpensTheBoxToo(t *testing.T) {
 import quack from "quack"
 
 export const pair = quack.recipe({
+  name: "pair",
   params: { code: { type: "string" } },
   run({ code }) { console.log("code", code ?? "from env") },
 })
@@ -1488,6 +1495,7 @@ func TestFailedRecipeEndsWithTheErrorAndWhereItThrew(t *testing.T) {
 import quack from "quack"
 
 export const clean = quack.recipe({
+  name: "clean",
   run() {
     quack.runAction("account.delete")
     quack.runAction("app.count")
@@ -1498,7 +1506,7 @@ export const clean = quack.recipe({
 	h.typing("$clean")
 	h.press("enter")
 
-	h.waitForLog("\n› --recipe clean\n› account.delete\n[rejected] there is no account · ", "\n    at run (io.mehow.quack.sample.ts:6:20)\n")
+	h.waitForLog("\n› --recipe clean\n› account.delete\n[rejected] there is no account · ", "\n    at run (io.mehow.quack.sample.ts:7:20)\n")
 	h.waitFor("type or ↑ to find an action")
 	if got, want := app.Calls(), []wire.Call{{Action: "account.delete"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
@@ -1514,6 +1522,7 @@ func TestARecipeThatCatchesAFailedStepGoesOn(t *testing.T) {
 import quack from "quack"
 
 export const careful = quack.recipe({
+  name: "careful",
   run() {
     try {
       quack.runAction("account.delete")
@@ -1540,6 +1549,7 @@ func TestFooterNamesTheRecipeAndItsStepAndCtrlCStopsTheRecipe(t *testing.T) {
 import quack from "quack"
 
 export const watch = quack.recipe({
+  name: "watch",
   run() {
     quack.wait("1ms")
     quack.runAction("account.watch")
@@ -1568,7 +1578,7 @@ func TestCtrlCStopsARecipeBetweenSteps(t *testing.T) {
 	h := start(t, newFakeApp(), withRecipes(t, `
 import quack from "quack"
 
-export const spin = quack.recipe({ run() { while (true) {} } })
+export const spin = quack.recipe({ name: "spin", run() { while (true) {} } })
 `))
 
 	h.typing("$spin")
@@ -1585,7 +1595,7 @@ func TestRecipesDoNotRunWhileARunRuns(t *testing.T) {
 	h := start(t, app, withRecipes(t, `
 import quack from "quack"
 
-export const clean = quack.recipe({ run() { quack.runAction("account.delete") } })
+export const clean = quack.recipe({ name: "clean", run() { quack.runAction("account.delete") } })
 `))
 	h.startWatch()
 
@@ -1605,7 +1615,7 @@ func TestReloadReadsTheRecipesAgain(t *testing.T) {
 	h.waitFor("No recipes", "0/0")
 
 	writeRecipes(t, `import quack from "quack"
-export const clean = quack.recipe({ run() {} })`)
+export const clean = quack.recipe({ name: "clean", run() {} })`)
 	h.press("ctrl+r")
 
 	h.waitForLog("reloaded 6 actions and 1 recipes")

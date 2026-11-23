@@ -44,16 +44,19 @@ recipes:
 
     [recipes]
     'io\.example\.app' = "recipes.ts"
-    'io\.example\..*' = ["common.ts", "debug.ts"]
+    'io\.example\..*' = ["common.ts", "features/*.ts"]
 
-  An app gets the recipes of every file it matches in both, and two recipes of one name fail them all. Files
-  may import other local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json
-  next to the recipes, so that editors check them, and with --app starts .quack/ in the current dir when there
-  is none. The terminal UI lists the recipes with the actions, marked ƒ, and $ lists only the recipes:
+  A path can be in a subdir, or a glob whose *, ? and [...] match within one dir. An app gets the recipes that
+  every file it matches in both declares itself, and two recipes of one name fail them all. Files may import
+  other local files, whose recipes run through quack.runRecipe() without being listed, but no packages.
+  quack --init-recipes writes quack.d.ts and tsconfig.json next to the recipes, so that editors check them,
+  and with --app starts .quack/ in the current dir when there is none. The terminal UI lists the recipes with
+  the actions, marked ƒ, and $ lists only the recipes:
 
     import quack from "quack"
 
     export const login = quack.recipe({
+      name: "login",
       description: "Log in as the test user",
       params: { user: { type: "string", default: "foo", hints: ["foo", "bar"] } },
       run({ user }) {

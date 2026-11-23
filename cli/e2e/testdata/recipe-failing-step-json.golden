@@ -1,7 +1,7 @@
 $ quack --json --recipe clean
 --- exit 1
 --- stdout
-{"code":"rejected","message":"there is no account\n    at run (io.mehow.quack.sample.ts:51:20)","step":1}
+{"code":"rejected","message":"there is no account\n    at run (io.mehow.quack.sample.ts:58:20)","step":1}
 --- stderr
 --- device
 shell emulator-5554: query-receivers

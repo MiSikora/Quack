@@ -378,11 +378,12 @@ func TestListRecipesGivesTheParamsOfEachRecipeThatMatchesTheFilter(t *testing.T)
 	path := writeRecipes(t, `
 import quack from "quack"
 export const fresh = quack.recipe({
+  name: "fresh",
   description: "Start over",
   params: { user: { type: "string", default: "alice", hints: ["alice", "bob"] }, count: { type: "int", required: true } },
   run() {},
 })
-export const gone = quack.recipe({ run() {} })`)
+export const gone = quack.recipe({ name: "gone", run() {} })`)
 	session := connect(t, source)
 
 	result := call(t, session, "list_recipes", map[string]any{"filter": "^fr"})
@@ -408,7 +409,7 @@ func TestListRecipesWithoutRecipesGivesNone(t *testing.T) {
 
 func TestListRecipesGivesTheProblemsThatLeftFilesOut(t *testing.T) {
 	path := writeRecipes(t, `import quack from "quack"
-export const fresh = quack.recipe({ run() {} })`)
+export const fresh = quack.recipe({ name: "fresh", run() {} })`)
 	mapping := "[recipes]\n'.*' = [\"io.mehow.quack.sample.ts\", \"gone.ts\"]\n"
 	if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "quack", "config.toml"), []byte(mapping), 0o644); err != nil {
 		t.Fatal(err)
@@ -427,6 +428,7 @@ func TestRunRecipeGivesWhatEachStepGaveAndWhatItLogged(t *testing.T) {
 	writeRecipes(t, `
 import quack from "quack"
 export const fresh = quack.recipe({
+  name: "fresh",
   params: { user: { type: "string", required: true } },
   run({ user }) {
     const created = quack.runAction<{ id: number }>("account.create", { username: user })
@@ -457,10 +459,12 @@ func TestRunRecipeGivesTheOtherRecipesItRanAsStepsAndWhatItReturned(t *testing.T
 	writeRecipes(t, `
 import quack from "quack"
 export const create = quack.recipe({
+  name: "create",
   params: { user: { type: "string", required: true } },
   run({ user }) { return quack.runAction<{ id: number }>("account.create", { username: user }).data },
 })
 export const fresh = quack.recipe({
+  name: "fresh",
   run() { return { account: quack.runRecipe(create, { user: "alice" }) } },
 })`)
 	session := connect(t, source)
@@ -478,6 +482,7 @@ func TestRunRecipeSendsStepsNotificationsAndLogsAsProgressWhenAskedTo(t *testing
 	writeRecipes(t, `
 import quack from "quack"
 export const fresh = quack.recipe({
+  name: "fresh",
   run() {
     quack.openApp()
     quack.runAction("account.create", { username: "alice" })
@@ -501,6 +506,7 @@ func TestRunRecipeEndsAtAStepThatFailsSayingWhere(t *testing.T) {
 	writeRecipes(t, `
 import quack from "quack"
 export const redo = quack.recipe({
+  name: "redo",
   run() {
     quack.runAction("account.create", { username: "alice" })
     quack.runAction("account.delete")
@@ -512,7 +518,7 @@ export const redo = quack.recipe({
 	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "redo"})
 
 	assertError(t, result, "› account.create username=alice\nCreating alice\nCreated alice\n› account.delete\nDeleting\n"+
-		"[rejected] there is no account\n    at run (io.mehow.quack.sample.ts:5:20)")
+		"[rejected] there is no account\n    at run (io.mehow.quack.sample.ts:6:20)")
 	if got := len(source.App.Calls()); got != 2 {
 		t.Errorf("the app got %d calls, want 2", got)
 	}
@@ -523,6 +529,7 @@ func TestRunRecipeGivesTheErrorOfAStepTheRecipeCaught(t *testing.T) {
 	writeRecipes(t, `
 import quack from "quack"
 export const careful = quack.recipe({
+  name: "careful",
   run() {
     try {
       quack.runAction("account.delete")
@@ -543,7 +550,7 @@ func TestRunRecipeRefusesArgsItsParamsRefuse(t *testing.T) {
 	source := newFakeSource()
 	writeRecipes(t, `
 import quack from "quack"
-export const fresh = quack.recipe({ params: { user: { type: "string", required: true } }, run() { quack.runAction("app.greet") } })`)
+export const fresh = quack.recipe({ name: "fresh", params: { user: { type: "string", required: true } }, run() { quack.runAction("app.greet") } })`)
 	session := connect(t, source)
 
 	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "fresh"})
@@ -558,6 +565,7 @@ func TestRunRecipeAsksTheUserForMissingRequiredParams(t *testing.T) {
 	writeRecipes(t, `
 import quack from "quack"
 export const fresh = quack.recipe({
+  name: "fresh",
   params: {
     count: { type: "int", required: true },
     rate: { type: "double", required: true },

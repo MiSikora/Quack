@@ -19,12 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `quack.runRecipe(recipe, args)` runs another recipe and returns what it returned. Its steps follow a `recipe <name>` step, and what it throws, the call throws.
 - A recipe can return a value JSON holds. The CLI prints it after the last step, `--json` as a last `ok` line with `data`, and the terminal UI as the run's data.
 - `quack.fail(message)` throws an error that ends the run with the message alone, without the recipe's stack.
+- A `[recipes]` value can name a file in a subdir of `recipes/`, such as `features/login.ts`, or a glob, such as `features/*.ts`. A glob that matches no files is a warning.
 
 #### Changed
 - Typing in a param with hints in the terminal UI selects the best matching hint, so that enter picks it. ↓ goes back to the text as typed.
 - The terminal UI lists recipes with the actions, marked `ƒ` after their names, and `$` lists only the recipes. A recipe and an action of the same name both show. The terminal UI writes a recipe's command line as `--recipe <name>` instead of `$<name>`.
 - ↑ on an empty prompt in the terminal UI lists the actions and recipes sorted by id, and groups the ones that share a namespace, such as `sync.`. Enter or → opens a group, and ← or backspace goes back. Typing still searches them all.
 - A recipe's name follows the same rule as an action's id, and a recipes file with another name fails to load.
+- A recipe needs a `name`. `quack.recipe()` throws without one, and an export no longer names a recipe.
+- An app gets only the recipes that a mapped file declares itself. A recipe that a file imports runs through `quack.runRecipe()` and is not listed for the importing file.
 - `quack.waitUntil` keeps checking while the check returns a falsy value, and returns the first truthy one instead of nothing.
 - Recipes live in a project's `.quack/recipes/` or in `$XDG_CONFIG_HOME/quack/recipes/`, and a `[recipes]` table in `.quack/quack.toml` or `config.toml` maps the apps whose packages a regex matches to files there, instead of one `<package>.ts` file per app. An app gets the recipes of every file it matches. `--init-recipes` and `/init-recipes` start `.quack/`.
 - Only `--init-recipes` and `/init-recipes` write `quack.d.ts` and `tsconfig.json`. Loading recipes warns when they are out of date instead of rewriting them. They carry a version that changes only with the recipe API, so a project that a newer quack wrote them in says to upgrade quack, and `--init-recipes` leaves them alone.
@@ -41,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `run_recipe` gives what the recipe returned as `data`.
 
 #### Changed
-- Recipes load from `.quack/` and `config.toml`, as in the CLI. `list_recipes` gives the file each recipe is written in, which may be one that a mapped file imports, and the problems that left files out, instead of one `file` for the app.
+- Recipes load from `.quack/` and `config.toml`, as in the CLI. `list_recipes` gives the file each recipe is in and the problems that left files out, instead of one `file` for the app.
 
 #### Fixed
 - A recipes file that exports a string with letters outside ASCII loads instead of crashing `quack-mcp`.
