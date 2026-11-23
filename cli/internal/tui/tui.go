@@ -359,6 +359,11 @@ func (m *model) pressPicker(msg tea.KeyPressMsg) tea.Cmd {
 		case !p.quiet:
 			p.quiet = true
 			p.clear()
+		case p.startup && p.input.Value() == "":
+			// Esc first clears the text. The picker then stays hidden, as the picker of a dropped app does, and
+			// /pick-device shows it again.
+			p.startup = false
+			p.clear()
 		default:
 			p.clear()
 		}
@@ -872,7 +877,7 @@ func (m *model) footer() string {
 	case m.refused.showing:
 		return m.refused.text
 	case m.picking():
-		return m.picker.keys(m.app != nil || !m.picker.quiet)
+		return m.picker.keys(m.app != nil || !m.picker.quiet || m.picker.startup)
 	case m.runs.active != nil:
 		return m.runs.footer()
 	case m.box != nil:

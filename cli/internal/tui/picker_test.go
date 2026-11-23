@@ -29,13 +29,26 @@ func TestOneDeviceWithTwoAppsStartsAtThePackageStepWithoutBack(t *testing.T) {
 	h := startPicking(t, source, client.Target{}, client.Wake)
 
 	h.waitFor("  com.duckduckgo.mobile", "▸ io.mehow.quack.sample", "> pick an app", "2/2",
-		"enter pick · ↑↓ select · ctrl+c quit")
+		"enter pick · ↑↓ select · esc close · ctrl+c quit")
 	if lines := h.panel(); slices.ContainsFunc(lines, isTitle) {
 		t.Errorf("the panel is %q, want the title hidden under the list", lines)
 	}
+}
+
+func TestEscClosesThePickerOfTheStartAndPickDeviceShowsItAgain(t *testing.T) {
+	source := newFakeSource(newFakeApp(), device("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
+	h := startPicking(t, source, client.Target{}, client.Wake)
+	h.waitFor("> pick an app", "2/2")
+
 	h.press("esc")
-	h.waitForRunning()
-	h.waitFor("> pick an app")
+
+	h.waitFor("> / for commands", "/ for commands · ctrl+c quit")
+	h.typing("/toggle-data")
+	h.press("enter")
+	h.waitForLog("hiding the JSON data of notifications and results")
+	h.typing("/pick-device")
+	h.press("enter")
+	h.waitFor("▸ io.mehow.quack.sample", "> pick an app", "esc close")
 }
 
 func TestTwoDevicesStartAtTheDeviceStepAndAnAppAloneOnItStarts(t *testing.T) {
