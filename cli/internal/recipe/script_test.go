@@ -494,6 +494,33 @@ export const r = quack.recipe({ run() { console.log(quack.app.package, quack.dev
 	}
 }
 
+func TestStepsShowTheEnvironmentVariablesTheRecipeReadByName(t *testing.T) {
+	t.Setenv("QUACK_TOKEN", "s3cret")
+	t.Setenv("QUACK_UNREAD", "Bob")
+	s := load(t, `
+import quack from "quack"
+export const r = quack.recipe({
+  run() {
+    quack.shell("curl -H 'Authorization: " + quack.env.QUACK_TOKEN + "' -d Bob")
+    quack.runAction("app.greet", { name: quack.env.QUACK_TOKEN + "-Bob" })
+  },
+})`)
+	app := &fakeApp{}
+	var started []string
+
+	err := s.Run(context.Background(), app, "r", nil, Observer{Started: func(step Step) { started = append(started, Line(step, nil)) }})
+
+	if want := []string{"shell curl -H 'Authorization: ${QUACK_TOKEN}' -d Bob", "app.greet name='${QUACK_TOKEN}-Bob'"}; err != nil || !reflect.DeepEqual(started, want) {
+		t.Errorf("started: got %v, %v, want %v", started, err, want)
+	}
+	if want := []string{"curl -H 'Authorization: s3cret' -d Bob"}; !reflect.DeepEqual(app.commands, want) {
+		t.Errorf("commands: got %v, want %v", app.commands, want)
+	}
+	if want := []string{"app.greet name=s3cret-Bob"}; !reflect.DeepEqual(app.calls, want) {
+		t.Errorf("calls: got %v, want %v", app.calls, want)
+	}
+}
+
 func TestExpandArgsReplacesVariables(t *testing.T) {
 	t.Setenv("QUACK_NAME", "Bob")
 	os.Unsetenv("QUACK_MISSING")

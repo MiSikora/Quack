@@ -185,6 +185,7 @@ type runtime struct {
 	app      App
 	observer Observer
 	recipes  map[goja.Value]declaredRecipe
+	env      *environment
 }
 
 type declaredRecipe struct {
@@ -194,6 +195,7 @@ type declaredRecipe struct {
 
 func newRuntime(s *Script, ctx context.Context, app App, observer Observer) *runtime {
 	r := &runtime{script: s, vm: goja.New(), ctx: ctx, app: app, observer: observer, recipes: map[goja.Value]declaredRecipe{}}
+	r.env = newEnvironment(r.vm)
 	r.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	return r
 }
@@ -215,7 +217,7 @@ func (r *runtime) load() (*goja.Object, error) {
 		"waitUntil": r.waitUntil,
 		"app":       map[string]string{"package": target.Package},
 		"device":    map[string]string{"serial": string(target.Device)},
-		"env":       environment(),
+		"env":       vm.NewDynamicObject(r.env),
 	} {
 		_ = quack.Set(name, value)
 	}
@@ -358,8 +360,9 @@ func (r *runtime) do(step Step, collect func(string)) wire.MessageResult {
 	if r.app == nil {
 		panic(r.vm.NewTypeError("the \"quack\" module runs steps only inside a recipe's run"))
 	}
+	shown := r.env.hide(step)
 	if r.observer.Started != nil {
-		r.observer.Started(step)
+		r.observer.Started(shown)
 	}
 	result, err := Do(r.ctx, r.app, step, func(message string) {
 		if collect != nil {
@@ -371,12 +374,12 @@ func (r *runtime) do(step Step, collect func(string)) wire.MessageResult {
 	})
 	if err != nil {
 		if r.observer.Failed != nil {
-			r.observer.Failed(step, err)
+			r.observer.Failed(shown, err)
 		}
 		panic(r.vm.NewGoError(err))
 	}
 	if r.observer.Ended != nil {
-		r.observer.Ended(step, result)
+		r.observer.Ended(shown, result)
 	}
 	return result
 }
@@ -586,14 +589,72 @@ func bundle(path string) (string, error) {
 	return string(result.OutputFiles[0].Contents), nil
 }
 
-func environment() map[string]string {
-	env := map[string]string{}
+// Remembers the variables the recipe reads, so that its steps show them by name, as the recipe would write them.
+type environment struct {
+	vm     *goja.Runtime
+	values map[string]string
+	read   map[string]string
+}
+
+func newEnvironment(vm *goja.Runtime) *environment {
+	e := &environment{vm: vm, values: map[string]string{}, read: map[string]string{}}
 	for _, entry := range os.Environ() {
 		if name, value, ok := strings.Cut(entry, "="); ok {
-			env[name] = value
+			e.values[name] = value
 		}
 	}
-	return env
+	return e
+}
+
+func (e *environment) Get(name string) goja.Value {
+	value, ok := e.values[name]
+	if !ok {
+		return goja.Undefined()
+	}
+	e.read[name] = value
+	return e.vm.ToValue(value)
+}
+
+func (e *environment) Set(string, goja.Value) bool { return false }
+
+func (e *environment) Has(name string) bool {
+	_, ok := e.values[name]
+	return ok
+}
+
+func (e *environment) Delete(string) bool { return false }
+
+func (e *environment) Keys() []string { return slices.Sorted(maps.Keys(e.values)) }
+
+func (e *environment) hide(step Step) Step {
+	var pairs []string
+	// Longest first, so that a value inside another does not split it.
+	for _, name := range slices.SortedFunc(maps.Keys(e.read), func(a, b string) int { return len(e.read[b]) - len(e.read[a]) }) {
+		if e.read[name] != "" {
+			pairs = append(pairs, e.read[name], "${"+name+"}")
+		}
+	}
+	if pairs == nil {
+		return step
+	}
+	replacer := strings.NewReplacer(pairs...)
+	switch step := step.(type) {
+	case Call:
+		args := make(map[string]wire.RawArg, len(step.Args))
+		for key, values := range step.Args {
+			args[key] = slices.Clone(values)
+			for i, value := range values {
+				args[key][i] = replacer.Replace(value)
+			}
+		}
+		step.Args = args
+		return step
+	case Shell:
+		return Shell{replacer.Replace(step.Command)}
+	case Run:
+		return Run{replacer.Replace(step.Command)}
+	}
+	return step
 }
 
 func exists(path string) bool {

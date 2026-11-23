@@ -1,7 +1,7 @@
 $ quack --recipe greetEnv
 --- exit 0
 --- stdout
-› app.greet name=Bob
+› app.greet name='${QUACK_NAME}'
 Hello, Bob!
 --- stderr
 --- device

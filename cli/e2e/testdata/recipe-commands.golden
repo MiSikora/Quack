@@ -3,9 +3,9 @@ $ quack --recipe prepare
 --- stdout
 › shell pm clear io.mehow.quack.sample
 ran pm clear io.mehow.quack.sample
-› run echo seeded Bob on $ANDROID_SERIAL
+› run echo seeded ${QUACK_NAME} on $ANDROID_SERIAL
 seeded Bob on emulator-5554
-› app.greet name=Bob
+› app.greet name='${QUACK_NAME}'
 Hello, Bob!
 --- stderr
 --- device
