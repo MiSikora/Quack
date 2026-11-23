@@ -66,23 +66,64 @@ export type Args<P extends Record<string, Param>> = {
     : ParamTypes[P[K]["type"]] | undefined
 }
 
+/**
+ * The args quack.runRecipe() takes for a recipe: a required param without a default must be given, and any other may
+ * be left out. Its environment variable does not stand in for a required param here.
+ */
+export type RunArgs<P extends Record<string, Param>> = {
+  [K in keyof P as P[K] extends { required: true } ? (P[K] extends { default: unknown } ? never : K) : never]: ParamTypes[P[K]["type"]]
+} & {
+  [K in keyof P as P[K] extends { required: true } ? (P[K] extends { default: unknown } ? K : never) : K]?: ParamTypes[P[K]["type"]]
+}
+
+/**
+ * What a recipe's run may return: a value JSON can hold, or nothing. A property that is undefined is left out, as
+ * JSON.stringify leaves it out. Unlike JsonValue, it takes an interface's objects too.
+ */
+export type Returnable<T> = T extends null | boolean | number | string | undefined | void
+  ? T
+  : T extends Date | ((...args: never[]) => unknown)
+    ? never
+    : T extends readonly (infer U)[]
+      ? readonly Returnable<U>[]
+      : T extends object
+        ? { [K in keyof T]: Returnable<T[K]> }
+        : never
+
 declare const recipeBrand: unique symbol
 
-/** A recipe, which quack lists by its name. */
-export interface Recipe {
-  readonly [recipeBrand]: true
+/** A recipe, which quack lists by its name. P is its params, and R what its run returns. */
+export interface Recipe<P extends Record<string, Param> = {}, R = void> {
+  readonly [recipeBrand]: { params: P; returns: R }
 }
 
 /** What recipes run through: import quack from "quack", then call quack.runAction(), quack.openApp() and the rest. */
 export interface Quack {
-  /** Declares a recipe. One without a name is listed only when exported, by the name of its export. */
-  recipe<const P extends Record<string, Param> = {}>(definition: {
+  /**
+   * Declares a recipe. One without a name is listed only when exported, by the name of its export. What run returns
+   * goes through JSON: quack prints it after the recipe's last step, and quack.runRecipe() returns it.
+   */
+  recipe<const P extends Record<string, Param> = {}, R = void>(definition: {
     /** The name quack lists the recipe by, such as app.reset. */
     name?: string
     description?: string
     params?: P
-    run(args: Args<P>): void
-  }): Recipe
+    run(args: Args<P>): R & NoInfer<Returnable<R>>
+  }): Recipe<P, R>
+
+  /**
+   * Runs another recipe with args, as a run of it from the command line would, and returns what its run returned
+   * after a trip through JSON, so that a Date comes back as a string. Its steps follow a step of its own, and whatever
+   * it throws, the call throws.
+   */
+  runRecipe<P extends Record<string, Param>, R>(
+    recipe: Recipe<P, R>,
+    ...args: [keyof P] extends [never]
+      ? [args?: Record<string, never>]
+      : {} extends RunArgs<P>
+        ? [args?: RunArgs<P>]
+        : [args: RunArgs<P>]
+  ): R
 
   /**
    * Runs an action of the app with args, and returns what it returned. Throws when the app has no such action, refuses
@@ -106,10 +147,16 @@ export interface Quack {
   wait(duration: Duration): void
 
   /**
-   * Calls check until it returns true, every 500ms unless every says otherwise. Throws when check does not return true
-   * within timeout, 10s unless timeout says otherwise.
+   * Calls check until it returns a truthy value, every 500ms unless every says otherwise, and returns that value. Throws
+   * when check returns only false, null, undefined, 0, "" or NaN within timeout, 10s unless timeout says otherwise.
    */
-  waitUntil(check: () => boolean, options?: { timeout?: Duration; every?: Duration }): void
+  waitUntil<T>(check: () => T, options?: { timeout?: Duration; every?: Duration }): Exclude<T, false | null | undefined | 0 | "">
+
+  /**
+   * Throws an Error with message. When the recipe does not catch it, the run fails with message alone, without where
+   * the recipe was.
+   */
+  fail(message: string): never
 
   /** The app the recipe runs against. */
   readonly app: { readonly package: string }

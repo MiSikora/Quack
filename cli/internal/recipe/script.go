@@ -1,6 +1,7 @@
 package recipe
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -143,15 +144,16 @@ func writeOwned() ([]string, error) {
 	return written, nil
 }
 
-// Ending ctx interrupts the recipe wherever it is.
-func (s *Script) Run(ctx context.Context, app App, name string, args map[string]wire.RawArg, observer Observer) error {
+// Run returns what the recipe's run returned as JSON, or nil when it returned undefined. Ending ctx interrupts the
+// recipe wherever it is.
+func (s *Script) Run(ctx context.Context, app App, name string, args map[string]wire.RawArg, observer Observer) (json.RawMessage, error) {
 	at := slices.IndexFunc(s.Recipes, func(r Recipe) bool { return r.Name == name })
 	if at < 0 {
-		return fmt.Errorf("no recipe named %s in %s", name, s.Path)
+		return nil, fmt.Errorf("no recipe named %s in %s", name, s.Path)
 	}
-	values, err := recipeArgs(s.Recipes[at], args)
+	raw, err := recipeArgs(s.Recipes[at], args)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	r := newRuntime(s, ctx, app, observer)
 	// Steps show the variables of params by name too, as if the recipe read them.
@@ -160,20 +162,21 @@ func (s *Script) Run(ctx context.Context, app App, name string, args map[string]
 	}
 	exports, err := r.load()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// The bundle's exports are getters, which an interrupt would panic out of, so the recipe is found first.
 	named, err := r.named(exports)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	run := named[slices.IndexFunc(named, func(d declaredRecipe) bool { return d.Name == name })].run
 	stop := context.AfterFunc(ctx, func() { r.vm.Interrupt(canceled) })
 	defer stop()
-	if _, err := run(goja.Undefined(), r.vm.ToValue(values)); err != nil {
-		return r.thrown(err)
+	returned, err := run(goja.Undefined(), r.vm.ToValue(argValues(s.Recipes[at], raw)))
+	if err != nil {
+		return nil, r.thrown(err)
 	}
-	return nil
+	return r.stringify(returned, name)
 }
 
 var canceled = &client.CallError{Message: "canceled"}
@@ -185,17 +188,19 @@ type runtime struct {
 	ctx      context.Context
 	app      App
 	observer Observer
-	recipes  map[goja.Value]declaredRecipe
+	recipes  map[*goja.Object]declaredRecipe
 	env      *environment
 }
 
 type declaredRecipe struct {
 	Recipe
 	run goja.Callable
+	// The name of the first export that holds a recipe without a name of its own.
+	exported string
 }
 
 func newRuntime(s *Script, ctx context.Context, app App, observer Observer) *runtime {
-	r := &runtime{script: s, vm: goja.New(), ctx: ctx, app: app, observer: observer, recipes: map[goja.Value]declaredRecipe{}}
+	r := &runtime{script: s, vm: goja.New(), ctx: ctx, app: app, observer: observer, recipes: map[*goja.Object]declaredRecipe{}}
 	r.env = newEnvironment(r.vm)
 	r.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	return r
@@ -211,6 +216,8 @@ func (r *runtime) load() (*goja.Object, error) {
 	for name, value := range map[string]any{
 		"recipe":    r.recipe,
 		"runAction": r.runAction,
+		"runRecipe": r.runRecipe,
+		"fail":      func(message string) { panic(r.vm.NewGoError(&failure{message})) },
 		"openApp":   func() { r.do(OpenApp{}, nil) },
 		"shell":     func(command string) string { return r.do(Shell{command}, nil).Message },
 		"run":       func(command string) string { return r.do(Run{command}, nil).Message },
@@ -299,7 +306,12 @@ func (r *runtime) named(exports *goja.Object) ([]declaredRecipe, error) {
 		}
 	}
 	for _, key := range exports.Keys() {
-		if declared, ok := r.recipes[exports.Get(key)]; ok && declared.Name == "" {
+		handle, _ := exports.Get(key).(*goja.Object)
+		if declared, ok := r.recipes[handle]; ok && declared.Name == "" {
+			if declared.exported == "" {
+				declared.exported = key
+				r.recipes[handle] = declared
+			}
 			declared.Name = key
 			named = append(named, declared)
 		}
@@ -387,22 +399,77 @@ type notification struct {
 }
 
 func (r *runtime) runAction(id string, args map[string]any) actionResult {
-	call := Call{Action: id}
-	for key, value := range args {
-		values, ok := rawValues(value)
-		if !ok {
-			panic(r.vm.NewTypeError(fmt.Sprintf("arg '%s' must be a string, a number, a boolean, or an array of strings", key)))
-		}
-		if call.Args == nil {
-			call.Args = map[string]wire.RawArg{}
-		}
-		call.Args[key] = values
-	}
+	call := Call{Action: id, Args: r.rawArgs(args)}
 	notifications := []notification{}
 	result := r.do(call, func(n wire.Notification) {
 		notifications = append(notifications, notification{Message: n.Message, Data: r.parse(n.Data)})
 	})
 	return actionResult{Message: result.Message, Data: r.parse(result.Data), Notifications: notifications}
+}
+
+// nil without args.
+func (r *runtime) rawArgs(args map[string]any) map[string]wire.RawArg {
+	var raw map[string]wire.RawArg
+	for key, value := range args {
+		values, ok := rawValues(value)
+		if !ok {
+			panic(r.vm.NewTypeError(fmt.Sprintf("arg '%s' must be a string, a number, a boolean, or an array of strings", key)))
+		}
+		if raw == nil {
+			raw = map[string]wire.RawArg{}
+		}
+		raw[key] = values
+	}
+	return raw
+}
+
+// The recipe's step comes before the steps of the recipe it runs, so that observers see only steps one after
+// another. An arg that is undefined counts as left out, as an optional param's value in args is.
+func (r *runtime) runRecipe(handle goja.Value, args map[string]any) goja.Value {
+	object, _ := handle.(*goja.Object)
+	declared, ok := r.recipes[object]
+	if !ok {
+		panic(r.vm.NewTypeError("runRecipe() takes a recipe that quack.recipe() returned"))
+	}
+	r.requireRun()
+	declared.Name = cmp.Or(declared.Name, declared.exported)
+	maps.DeleteFunc(args, func(_ string, value any) bool { return value == nil })
+	raw, err := recipeArgs(declared.Recipe, r.rawArgs(args))
+	if err != nil {
+		panic(r.vm.NewGoError(err))
+	}
+	for _, variable := range declared.env {
+		r.env.Get(variable)
+	}
+	r.do(RunRecipe{declared.Recipe, raw}, nil)
+	returned, err := declared.run(goja.Undefined(), r.vm.ToValue(argValues(declared.Recipe, raw)))
+	if err != nil {
+		panic(err)
+	}
+	data, err := r.stringify(returned, declared.Name)
+	if err != nil {
+		panic(r.vm.NewGoError(err))
+	}
+	if data == nil {
+		return goja.Undefined()
+	}
+	return r.parse(data)
+}
+
+// nil for undefined, and for what JSON.stringify leaves out, such as a function.
+func (r *runtime) stringify(value goja.Value, name string) (json.RawMessage, error) {
+	stringify, _ := goja.AssertFunction(r.vm.Get("JSON").ToObject(r.vm).Get("stringify"))
+	text, err := stringify(goja.Undefined(), value)
+	if err != nil {
+		if err = r.thrown(err); err == canceled {
+			return nil, err
+		}
+		return nil, fmt.Errorf("recipe '%s' returned a value that JSON cannot hold: %w", name, err)
+	}
+	if goja.IsUndefined(text) {
+		return nil, nil
+	}
+	return json.RawMessage(text.String()), nil
 }
 
 // null for nil data. JSON.parse keeps the keys in the app's order, which Go maps do not. The app sends valid JSON.
@@ -415,10 +482,14 @@ func (r *runtime) parse(data json.RawMessage) goja.Value {
 	return value
 }
 
-func (r *runtime) do(step Step, collect func(wire.Notification)) wire.MessageResult {
+func (r *runtime) requireRun() {
 	if r.app == nil {
 		panic(r.vm.NewTypeError("the \"quack\" module runs steps only inside a recipe's run"))
 	}
+}
+
+func (r *runtime) do(step Step, collect func(wire.Notification)) wire.MessageResult {
+	r.requireRun()
 	shown := r.env.hide(step)
 	if r.observer.Started != nil {
 		r.observer.Started(shown)
@@ -443,8 +514,8 @@ func (r *runtime) do(step Step, collect func(wire.Notification)) wire.MessageRes
 	return result
 }
 
-// Its waits between checks are no steps of their own.
-func (r *runtime) waitUntil(check goja.Callable, options *goja.Object) {
+// It returns the first value of check that is truthy. Its waits between checks are no steps of their own.
+func (r *runtime) waitUntil(check goja.Callable, options *goja.Object) goja.Value {
 	timeout, every := 10*time.Second, 500*time.Millisecond
 	if options != nil {
 		if value := options.Get("timeout"); value != nil && !goja.IsUndefined(value) {
@@ -461,14 +532,12 @@ func (r *runtime) waitUntil(check goja.Callable, options *goja.Object) {
 			panic(err)
 		}
 		if done.ToBoolean() {
-			return
+			return done
 		}
 		if time.Now().Add(every).After(deadline) {
 			panic(r.vm.NewGoError(fmt.Errorf("waitUntil: the check did not pass within %s", timeout)))
 		}
-		if r.app == nil {
-			panic(r.vm.NewTypeError("the \"quack\" module runs steps only inside a recipe's run"))
-		}
+		r.requireRun()
 		if _, err := Do(r.ctx, r.app, Wait{every}, nil); err != nil {
 			panic(r.vm.NewGoError(err))
 		}
@@ -494,6 +563,13 @@ func (r *runtime) duration(value goja.Value, what string) time.Duration {
 	return d
 }
 
+// What quack.fail throws. It ends the run with its message alone, without where the recipe was.
+type failure struct {
+	message string
+}
+
+func (f *failure) Error() string { return f.message }
+
 // A goja interrupt is the run's ctx ending.
 func (r *runtime) thrown(err error) error {
 	var interrupted *goja.InterruptedError
@@ -505,6 +581,10 @@ func (r *runtime) thrown(err error) error {
 		return err
 	}
 	cause := exception.Unwrap()
+	var failed *failure
+	if errors.As(cause, &failed) {
+		return failed
+	}
 	if cause == nil {
 		cause = errors.New(exception.Value().String())
 	}
@@ -523,8 +603,9 @@ func (r *runtime) thrown(err error) error {
 	return &ScriptError{Err: cause, Stack: stack}
 }
 
-// A param without a value and without a default stays out.
-func recipeArgs(r Recipe, args map[string]wire.RawArg) (map[string]any, error) {
+// The args the recipe runs with, which parse as its params' types. A param without a value and without a default
+// stays out.
+func recipeArgs(r Recipe, args map[string]wire.RawArg) (map[string]wire.RawArg, error) {
 	fail := func(format string, a ...any) error {
 		return wire.Error{Code: wire.ErrorCodeInvalidArgs, Message: fmt.Sprintf("recipe '%s': ", r.Name) + fmt.Sprintf(format, a...)}
 	}
@@ -533,7 +614,7 @@ func recipeArgs(r Recipe, args map[string]wire.RawArg) (map[string]any, error) {
 			return nil, fail("unknown argument '%s'", key)
 		}
 	}
-	values := map[string]any{}
+	values := map[string]wire.RawArg{}
 	for _, p := range r.Params {
 		raw, given := args[p.Name]
 		if !given {
@@ -560,9 +641,20 @@ func recipeArgs(r Recipe, args map[string]wire.RawArg) (map[string]any, error) {
 				return nil, fail("'%s' expects %s, got '%s'", p.Name, expected(p), value)
 			}
 		}
-		values[p.Name] = argValue(p, raw)
+		values[p.Name] = raw
 	}
 	return values, nil
+}
+
+// The values of the args that recipeArgs gave, as run gets them.
+func argValues(r Recipe, args map[string]wire.RawArg) map[string]any {
+	values := map[string]any{}
+	for _, p := range r.Params {
+		if raw, given := args[p.Name]; given {
+			values[p.Name] = argValue(p, raw)
+		}
+	}
+	return values
 }
 
 func argValue(p wire.Param, raw wire.RawArg) any {
@@ -700,16 +792,22 @@ func (e *environment) hide(step Step) Step {
 		return step
 	}
 	replacer := strings.NewReplacer(pairs...)
-	switch step := step.(type) {
-	case Call:
-		args := make(map[string]wire.RawArg, len(step.Args))
-		for key, values := range step.Args {
-			args[key] = slices.Clone(values)
+	replace := func(args map[string]wire.RawArg) map[string]wire.RawArg {
+		replaced := make(map[string]wire.RawArg, len(args))
+		for key, values := range args {
+			replaced[key] = slices.Clone(values)
 			for i, value := range values {
-				args[key][i] = replacer.Replace(value)
+				replaced[key][i] = replacer.Replace(value)
 			}
 		}
-		step.Args = args
+		return replaced
+	}
+	switch step := step.(type) {
+	case Call:
+		step.Args = replace(step.Args)
+		return step
+	case RunRecipe:
+		step.Args = replace(step.Args)
 		return step
 	case Shell:
 		return Shell{replacer.Replace(step.Command)}

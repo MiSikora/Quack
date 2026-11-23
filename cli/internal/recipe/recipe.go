@@ -46,6 +46,13 @@ type Run struct {
 	Command string
 }
 
+// Args are the ones the recipe runs with, defaults included. The recipe's own steps follow it, as if the caller
+// took them.
+type RunRecipe struct {
+	Recipe Recipe
+	Args   map[string]wire.RawArg
+}
+
 type CommandError struct {
 	Exit int
 	// stderr, or stdout when stderr is empty.
@@ -59,11 +66,12 @@ func (e *CommandError) Error() string {
 	return fmt.Sprintf("the command exited with %d: %s", e.Exit, e.Output)
 }
 
-func (Call) step()    {}
-func (OpenApp) step() {}
-func (Wait) step()    {}
-func (Shell) step()   {}
-func (Run) step()     {}
+func (Call) step()      {}
+func (OpenApp) step()   {}
+func (Wait) step()      {}
+func (Shell) step()     {}
+func (Run) step()       {}
+func (RunRecipe) step() {}
 
 type App interface {
 	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
@@ -158,6 +166,9 @@ func Line(step Step, actions []wire.Action) string {
 		return "shell " + step.Command
 	case Run:
 		return "run " + step.Command
+	case RunRecipe:
+		// A recipe that has no name is neither named nor exported, and shows by its args alone.
+		return CommandLine(wire.Action{ID: strings.TrimSpace("recipe " + step.Recipe.Name), Params: step.Recipe.Params}, step.Args)
 	}
 	return ""
 }

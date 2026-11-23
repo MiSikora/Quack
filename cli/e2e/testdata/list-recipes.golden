@@ -11,16 +11,27 @@ failRun
 
 failShell
 
+giveUp
+
 greet
     name=<string>
         Default: Bob. Who to greet.
 
 greetEnv
 
+login
+    user=<string>
+        Required.
+
+    pin=<string>
+
 prepare
 
 setup
     Create the account and greet.
+
+signIn
+    Log in as bob, then show the account.
 
 typo
 --- stderr

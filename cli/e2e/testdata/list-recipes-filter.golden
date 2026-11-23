@@ -3,6 +3,9 @@ $ quack --list-recipes ^s
 --- stdout
 setup
     Create the account and greet.
+
+signIn
+    Log in as bob, then show the account.
 --- stderr
 --- device
 shell emulator-5554: query-receivers

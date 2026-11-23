@@ -1,0 +1,18 @@
+$ quack --json --recipe signIn
+--- exit 0
+--- stdout
+{"code":"ok","message":"","step":1}
+{"code":"ok","message":"Hello, bob!","step":2}
+{"code":"log","message":"signed in: bob","step":2}
+{"code":"ok","message":"Signed in as alice","data":{"username":"alice","tags":["a","b"]},"step":3}
+{"code":"ok","message":"","data":{"user":"bob","signedIn":true,"account":{"username":"alice","tags":["a","b"]}}}
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.greet","args":{"name":"bob"}}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"account.show"}

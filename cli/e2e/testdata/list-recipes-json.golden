@@ -1,7 +1,7 @@
 $ quack --json --list-recipes
 --- exit 0
 --- stdout
-[{"name":"careful","description":"Delete the account if there is one, then greet","params":[]},{"name":"clean","description":"Delete the account, then greet","params":[]},{"name":"failRun","description":"","params":[]},{"name":"failShell","description":"","params":[]},{"name":"greet","description":"","params":[{"name":"name","type":"string","description":"Who to greet","required":false,"default":"Bob"}]},{"name":"greetEnv","description":"","params":[]},{"name":"prepare","description":"","params":[]},{"name":"setup","description":"Create the account and greet","params":[]},{"name":"typo","description":"","params":[]}]
+[{"name":"careful","description":"Delete the account if there is one, then greet","params":[]},{"name":"clean","description":"Delete the account, then greet","params":[]},{"name":"failRun","description":"","params":[]},{"name":"failShell","description":"","params":[]},{"name":"giveUp","description":"","params":[]},{"name":"greet","description":"","params":[{"name":"name","type":"string","description":"Who to greet","required":false,"default":"Bob"}]},{"name":"greetEnv","description":"","params":[]},{"name":"login","description":"","params":[{"name":"user","type":"string","description":"","required":true},{"name":"pin","type":"string","description":"","required":false}]},{"name":"prepare","description":"","params":[]},{"name":"setup","description":"Create the account and greet","params":[]},{"name":"signIn","description":"Log in as bob, then show the account","params":[]},{"name":"typo","description":"","params":[]}]
 --- stderr
 --- device
 shell emulator-5554: query-receivers

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -221,6 +222,9 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 		m.log.add(m.runs.stepFailed(msg))
 		return m.activity.listen()
 	case runEnded:
+		if m.hideData {
+			msg.data = nil
+		}
 		if lines := m.runs.ended(msg); lines != "" {
 			m.log.add(lines)
 		}
@@ -400,17 +404,17 @@ func (m *model) choose() tea.Cmd {
 
 func (m *model) start(r runnable, args map[string]wire.RawArg) tea.Cmd {
 	app, script := m.app, m.script
-	work := func(ctx context.Context, observer recipe.Observer) error {
+	work := func(ctx context.Context, observer recipe.Observer) (json.RawMessage, error) {
 		step := recipe.Call{Action: r.ID, Args: args}
 		observer.Started(step)
 		result, err := recipe.Do(ctx, app, step, observer.Notified)
 		if err == nil {
 			observer.Ended(step, result)
 		}
-		return err
+		return nil, err
 	}
 	if r.recipe {
-		work = func(ctx context.Context, observer recipe.Observer) error {
+		work = func(ctx context.Context, observer recipe.Observer) (json.RawMessage, error) {
 			return script.Run(ctx, app, r.ID, args, observer)
 		}
 	}

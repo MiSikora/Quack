@@ -109,7 +109,7 @@ export const open = quack.recipe({ run() {} })
 const helper = quack.recipe({ run() {} })`)
 	var logged []string
 
-	err := s.Run(context.Background(), &fakeApp{}, "app.reset", nil, Observer{Logged: func(text string) { logged = append(logged, text) }})
+	_, err := s.Run(context.Background(), &fakeApp{}, "app.reset", nil, Observer{Logged: func(text string) { logged = append(logged, text) }})
 
 	var names []string
 	for _, r := range s.Recipes {
@@ -126,6 +126,19 @@ const helper = quack.recipe({ run() {} })`)
 func TestLoadReadsAJavaScriptFile(t *testing.T) {
 	writeFile(t, pkg+".js", `import quack from "quack"
 export const clean = quack.recipe({ description: "Clean", run() {} })`)
+
+	s, err := Load(pkg)
+
+	if err != nil || len(s.Recipes) != 1 || s.Recipes[0].Name != "clean" {
+		t.Errorf("got %+v, %v", s, err)
+	}
+}
+
+func TestLoadPassesOverExportsThatAreNoRecipes(t *testing.T) {
+	writeFile(t, pkg+".ts", `import quack from "quack"
+export const label = "zażółć"
+export const count = 3
+export const clean = quack.recipe({ run() {} })`)
 
 	s, err := Load(pkg)
 
@@ -230,7 +243,7 @@ func TestInitWithAPackageStartsItsRecipesFileWithARecipeThatRuns(t *testing.T) {
 		t.Fatalf("starter: got %+v, %v", s, err)
 	}
 	app := &fakeApp{}
-	if err := s.Run(context.Background(), app, "open", nil, Observer{}); err != nil || !reflect.DeepEqual(app.starts, []client.StartMode{client.OpenApp}) {
+	if _, err := s.Run(context.Background(), app, "open", nil, Observer{}); err != nil || !reflect.DeepEqual(app.starts, []client.StartMode{client.OpenApp}) {
 		t.Errorf("open: got %v and starts %v", err, app.starts)
 	}
 	if written, err := Init(pkg); err != nil || len(written) != 0 {
@@ -276,7 +289,7 @@ export const r = quack.recipe({
 		Logged:   func(text string) { events = append(events, "logged "+text) },
 	}
 
-	err := s.Run(context.Background(), app, "r", nil, observer)
+	_, err := s.Run(context.Background(), app, "r", nil, observer)
 
 	want := []string{
 		"› /open-app", "ended ",
@@ -311,7 +324,7 @@ export const r = quack.recipe({
 
 	var logged []string
 
-	if err := s.Run(context.Background(), app, "r", nil, Observer{Logged: func(text string) { logged = append(logged, text) }}); err != nil {
+	if _, err := s.Run(context.Background(), app, "r", nil, Observer{Logged: func(text string) { logged = append(logged, text) }}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -342,7 +355,7 @@ export const r = quack.recipe({
 })`)
 	var logged []string
 
-	err := s.Run(context.Background(), &fakeApp{}, "r", map[string]wire.RawArg{
+	_, err := s.Run(context.Background(), &fakeApp{}, "r", map[string]wire.RawArg{
 		"count": {"3"}, "size": {"9007199254740993"}, "ratio": {"0.5"}, "flag": {"true"}, "theme": {"dark"}, "tag": {"x", "y"},
 	}, Observer{Logged: func(text string) { logged = append(logged, text) }})
 
@@ -368,14 +381,14 @@ export const r = quack.recipe({
 		{map[string]wire.RawArg{"user": {"a", "b"}}, "recipe 'r': 'user' given more than once"},
 		{map[string]wire.RawArg{"user": {"a"}, "count": {"many"}}, "recipe 'r': 'count' expects int, got 'many'"},
 	} {
-		err := s.Run(context.Background(), &fakeApp{}, "r", c.args, Observer{})
+		_, err := s.Run(context.Background(), &fakeApp{}, "r", c.args, Observer{})
 
 		var refused wire.Error
 		if !errors.As(err, &refused) || refused.Code != wire.ErrorCodeInvalidArgs || refused.Message != c.want {
 			t.Errorf("%v: got %v, want %s", c.args, err, c.want)
 		}
 	}
-	if err := s.Run(context.Background(), &fakeApp{}, "nope", nil, Observer{}); err == nil || !strings.HasPrefix(err.Error(), "no recipe named nope in ") {
+	if _, err := s.Run(context.Background(), &fakeApp{}, "nope", nil, Observer{}); err == nil || !strings.HasPrefix(err.Error(), "no recipe named nope in ") {
 		t.Errorf("unknown recipe: got %v", err)
 	}
 }
@@ -401,7 +414,7 @@ export const r = quack.recipe({
 	var ended []Step
 	var failed []error
 
-	err = s.Run(context.Background(), &fakeApp{}, "r", nil, Observer{
+	_, err = s.Run(context.Background(), &fakeApp{}, "r", nil, Observer{
 		Ended:  func(step Step, _ wire.MessageResult) { ended = append(ended, step) },
 		Failed: func(_ Step, err error) { failed = append(failed, err) },
 	})
@@ -439,7 +452,7 @@ export const r = quack.recipe({
 })`)
 	var events []string
 
-	err := s.Run(context.Background(), &fakeApp{}, "r", nil, Observer{
+	_, err := s.Run(context.Background(), &fakeApp{}, "r", nil, Observer{
 		Started: func(step Step) { events = append(events, "› "+Line(step, nil)) },
 		Failed:  func(_ Step, err error) { events = append(events, "failed "+err.Error()) },
 		Logged:  func(text string) { events = append(events, text) },
@@ -458,7 +471,7 @@ export const spin = quack.recipe({ run() { while (true) {} } })`)
 	time.AfterFunc(20*time.Millisecond, cancel)
 
 	started := time.Now()
-	err := s.Run(ctx, &fakeApp{}, "spin", nil, Observer{})
+	_, err := s.Run(ctx, &fakeApp{}, "spin", nil, Observer{})
 
 	var call *client.CallError
 	if !errors.As(err, &call) || err.Error() != "canceled" || time.Since(started) > 5*time.Second {
@@ -473,7 +486,7 @@ export const spin = quack.recipe({ run() { while (true) {} } })`)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := s.Run(ctx, &fakeApp{}, "spin", nil, Observer{})
+	_, err := s.Run(ctx, &fakeApp{}, "spin", nil, Observer{})
 
 	var call *client.CallError
 	if !errors.As(err, &call) || err.Error() != "canceled" {
@@ -496,10 +509,10 @@ export const times = quack.recipe({ run() { quack.waitUntil(() => false, { timeo
 	var started []Step
 	observer := Observer{Logged: func(text string) { logged = append(logged, text) }, Started: func(step Step) { started = append(started, step) }}
 
-	if err := s.Run(context.Background(), &fakeApp{}, "passes", nil, observer); err != nil || !reflect.DeepEqual(logged, []string{"checks 3"}) {
+	if _, err := s.Run(context.Background(), &fakeApp{}, "passes", nil, observer); err != nil || !reflect.DeepEqual(logged, []string{"checks 3"}) {
 		t.Errorf("passes: got %v, %v", logged, err)
 	}
-	err := s.Run(context.Background(), &fakeApp{}, "times", nil, observer)
+	_, err := s.Run(context.Background(), &fakeApp{}, "times", nil, observer)
 	if err == nil || !strings.HasPrefix(err.Error(), "waitUntil: the check did not pass within 30ms") {
 		t.Errorf("times: got %v", err)
 	}
@@ -516,7 +529,7 @@ import quack from "quack"
 export const r = quack.recipe({ run() { console.log(quack.app.package, quack.device.serial, quack.env.QUACK_NAME, quack.env.QUACK_MISSING) } })`)
 	var logged []string
 
-	err := s.Run(context.Background(), &fakeApp{}, "r", nil, Observer{Logged: func(text string) { logged = append(logged, text) }})
+	_, err := s.Run(context.Background(), &fakeApp{}, "r", nil, Observer{Logged: func(text string) { logged = append(logged, text) }})
 
 	if want := []string{"io.mehow.quack.sample emulator-5554 Bob undefined"}; err != nil || !reflect.DeepEqual(logged, want) {
 		t.Errorf("got %v, %v, want %v", logged, err, want)
@@ -537,7 +550,7 @@ export const r = quack.recipe({
 	app := &fakeApp{}
 	var started []string
 
-	err := s.Run(context.Background(), app, "r", nil, Observer{Started: func(step Step) { started = append(started, Line(step, nil)) }})
+	_, err := s.Run(context.Background(), app, "r", nil, Observer{Started: func(step Step) { started = append(started, Line(step, nil)) }})
 
 	if want := []string{"shell curl -H 'Authorization: ${QUACK_TOKEN}' -d Bob", "app.greet name='${QUACK_TOKEN}-Bob'"}; err != nil || !reflect.DeepEqual(started, want) {
 		t.Errorf("started: got %v, %v, want %v", started, err, want)
@@ -566,7 +579,7 @@ export const unset = quack.recipe({
 	app := &fakeApp{}
 	var started []string
 
-	err := s.Run(context.Background(), app, "set", nil, Observer{Started: func(step Step) { started = append(started, Line(step, nil)) }})
+	_, err := s.Run(context.Background(), app, "set", nil, Observer{Started: func(step Step) { started = append(started, Line(step, nil)) }})
 
 	if want := (wire.Default{Values: []string{"${QUACK_CODE}"}}); !reflect.DeepEqual(s.Recipes[0].Params[0].Presence, want) {
 		t.Errorf("set presence: got %v, want %v", s.Recipes[0].Params[0].Presence, want)
@@ -580,8 +593,172 @@ export const unset = quack.recipe({
 	if want := (wire.Required{}); !reflect.DeepEqual(s.Recipes[1].Params[0].Presence, want) {
 		t.Errorf("unset presence: got %v, want %v", s.Recipes[1].Params[0].Presence, want)
 	}
-	if err := s.Run(context.Background(), app, "unset", nil, Observer{}); err == nil || !strings.HasSuffix(err.Error(), "missing argument 'code'") {
+	if _, err := s.Run(context.Background(), app, "unset", nil, Observer{}); err == nil || !strings.HasSuffix(err.Error(), "missing argument 'code'") {
 		t.Errorf("unset: got %v", err)
+	}
+}
+
+func TestARecipeRunsAnotherAsAStepFollowedByItsStepsAndGetsWhatItReturned(t *testing.T) {
+	t.Setenv("QUACK_PIN", "1234")
+	s := load(t, `
+import quack from "quack"
+export const login = quack.recipe({
+  params: {
+    user: { type: "string", required: true },
+    pin: { type: "string", env: "QUACK_PIN" },
+    tries: { type: "int", default: 2 },
+    tags: { type: "string_list" },
+  },
+  run({ user, tries, tags }) {
+    quack.runAction("app.greet", { name: user })
+    return { user, tries, tags, at: new Date(0), skip: () => 1 }
+  },
+})
+export const outer = quack.recipe({
+  run() {
+    const session = quack.runRecipe(login, { user: "bob", tags: ["a", "b c"], tries: undefined })
+    console.log(JSON.stringify(session))
+    return [session.user, quack.runRecipe(quack.recipe({ run() {} }))]
+  },
+})`)
+	app := &fakeApp{}
+	var events []string
+
+	data, err := s.Run(context.Background(), app, "outer", nil, Observer{
+		Started: func(step Step) { events = append(events, "› "+Line(step, nil)) },
+		Ended:   func(_ Step, result wire.MessageResult) { events = append(events, "ended "+result.Message) },
+		Logged:  func(text string) { events = append(events, text) },
+	})
+
+	want := []string{
+		"› recipe login user=bob pin='${QUACK_PIN}' tries=2 tags=a tags='b c'",
+		"ended ",
+		"› app.greet name=bob",
+		"ended Hello, bob!",
+		`{"user":"bob","tries":2,"tags":["a","b c"],"at":"1970-01-01T00:00:00.000Z"}`,
+		"› recipe",
+		"ended ",
+	}
+	if err != nil || !reflect.DeepEqual(events, want) {
+		t.Errorf("got %q, %v, want %q", events, err, want)
+	}
+	if string(data) != `["bob",null]` {
+		t.Errorf("data: got %s", data)
+	}
+}
+
+func TestRunRecipeTakesArgsAsARunDoesAndThrowsWhatTheOtherRecipeThrows(t *testing.T) {
+	s := load(t, `
+import quack from "quack"
+const login = quack.recipe({
+  name: "login",
+  params: { user: { type: "string", required: true }, tries: { type: "int" } },
+  run() { quack.runAction("fail") },
+})
+export const outer = quack.recipe({
+  run() {
+    for (const args of [undefined, { user: "bob", nope: 1 }, { user: "bob", tries: "many" }, { user: "bob" }]) {
+      try {
+        quack.runRecipe(login, args as any)
+      } catch (e) {
+        console.log((e as Error).message)
+      }
+    }
+  },
+})`)
+	var logged []string
+
+	_, err := s.Run(context.Background(), &fakeApp{}, "outer", nil, Observer{Logged: func(text string) { logged = append(logged, text) }})
+
+	want := []string{
+		"[invalid_args] recipe 'login': missing argument 'user'",
+		"[invalid_args] recipe 'login': unknown argument 'nope'",
+		"[invalid_args] recipe 'login': 'tries' expects int, got 'many'",
+		"[rejected] no way",
+	}
+	if err != nil || !reflect.DeepEqual(logged, want) {
+		t.Errorf("got %q, %v, want %q", logged, err, want)
+	}
+}
+
+func TestRunRecipeTakesOnlyARecipeAndOnlyInsideARun(t *testing.T) {
+	s := load(t, `
+import quack from "quack"
+export const named = quack.recipe({ run() { quack.runRecipe("named" as any) } })`)
+	if _, err := s.Run(context.Background(), &fakeApp{}, "named", nil, Observer{}); err == nil || !strings.HasPrefix(err.Error(), "TypeError: runRecipe() takes a recipe that quack.recipe() returned") {
+		t.Errorf("by name: got %v", err)
+	}
+
+	write(t, `
+import quack from "quack"
+export const r = quack.recipe({ run() {} })
+quack.runRecipe(r)`)
+	if _, err := Load(pkg); err == nil || !strings.HasPrefix(err.Error(), "TypeError: the \"quack\" module runs steps only inside a recipe's run") {
+		t.Errorf("outside a run: got %v", err)
+	}
+}
+
+func TestARecipeThatReturnsNothingJSONCanHoldReturnsNoData(t *testing.T) {
+	s := load(t, `
+import quack from "quack"
+export const nothing = quack.recipe({ run() {} })
+export const fn = quack.recipe({ run() { return (() => 1) as any } })
+export const cycle = quack.recipe({ run() { const a: any = {}; a.a = a; return a } })`)
+
+	for _, name := range []string{"nothing", "fn"} {
+		if data, err := s.Run(context.Background(), &fakeApp{}, name, nil, Observer{}); data != nil || err != nil {
+			t.Errorf("%s: got %s, %v, want no data", name, data, err)
+		}
+	}
+	_, err := s.Run(context.Background(), &fakeApp{}, "cycle", nil, Observer{})
+	if err == nil || !strings.HasPrefix(err.Error(), "recipe 'cycle' returned a value that JSON cannot hold: TypeError") {
+		t.Errorf("cycle: got %v", err)
+	}
+}
+
+func TestFailEndsTheRunWithItsMessageAloneUnlessTheRecipeCatchesIt(t *testing.T) {
+	s := load(t, `
+import quack from "quack"
+const inner = quack.recipe({ run() { quack.fail("no account") } })
+export const uncaught = quack.recipe({ run() { quack.runRecipe(inner) } })
+export const caught = quack.recipe({
+  run() {
+    try {
+      quack.fail("no account")
+    } catch (e) {
+      console.log("caught " + (e as Error).message + " " + (e instanceof Error))
+    }
+  },
+})`)
+	var logged []string
+	observer := Observer{Logged: func(text string) { logged = append(logged, text) }}
+
+	_, err := s.Run(context.Background(), &fakeApp{}, "uncaught", nil, observer)
+	var thrown *ScriptError
+	if err == nil || err.Error() != "no account" || errors.As(err, &thrown) {
+		t.Errorf("uncaught: got %#v, want the message without a stack", err)
+	}
+	if _, err := s.Run(context.Background(), &fakeApp{}, "caught", nil, observer); err != nil || !reflect.DeepEqual(logged, []string{"caught no account true"}) {
+		t.Errorf("caught: got %q, %v", logged, err)
+	}
+}
+
+func TestWaitUntilReturnsTheFirstTruthyValueOfTheCheck(t *testing.T) {
+	s := load(t, `
+import quack from "quack"
+export const r = quack.recipe({
+  run() {
+    const values = [0, "", null, undefined, NaN, false, { id: 7 }]
+    const found = quack.waitUntil(() => values.shift(), { every: 1 })
+    console.log(JSON.stringify(found), values.length)
+  },
+})`)
+	var logged []string
+
+	_, err := s.Run(context.Background(), &fakeApp{}, "r", nil, Observer{Logged: func(text string) { logged = append(logged, text) }})
+
+	if want := []string{`{"id":7} 0`}; err != nil || !reflect.DeepEqual(logged, want) {
+		t.Errorf("got %q, %v, want %q", logged, err, want)
 	}
 }
 

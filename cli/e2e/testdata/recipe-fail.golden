@@ -1,0 +1,14 @@
+$ quack --recipe giveUp
+--- exit 1
+--- stdout
+› app.greet name=Bob
+Hello, Bob!
+--- stderr
+quack: there is nothing to sign in to
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.greet","args":{"name":"Bob"}}

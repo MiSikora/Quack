@@ -165,6 +165,11 @@ var scenarios = []scenario{
 	{name: "recipe-commands-json", args: []string{"--json", "--recipe", "prepare"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Bob"}},
 	{name: "recipe-failing-shell", args: []string{"--recipe", "failShell"}, recipes: sampleRecipes},
 	{name: "recipe-failing-run-json", args: []string{"--json", "--recipe", "failRun"}, recipes: sampleRecipes},
+	{name: "recipe-runs-recipe", args: []string{"--recipe", "signIn"}, recipes: sampleRecipes, env: []string{"QUACK_PIN=1234"}},
+	{name: "recipe-runs-recipe-json", args: []string{"--json", "--recipe", "signIn"}, recipes: sampleRecipes, env: []string{"QUACK_PIN=1234"}},
+	{name: "recipe-returns", args: []string{"--recipe", "login", "user=alice"}, recipes: sampleRecipes},
+	{name: "recipe-fail", args: []string{"--recipe", "giveUp"}, recipes: sampleRecipes},
+	{name: "recipe-fail-json", args: []string{"--json", "--recipe", "giveUp"}, recipes: sampleRecipes},
 	{name: "recipe-unknown", args: []string{"--recipe", "nope"}, recipes: sampleRecipes},
 	{name: "recipe-without-file", args: []string{"--recipe", "setup"}},
 	{name: "recipe-broken-file", args: []string{"--recipe", "setup"}, recipes: "export const setup = (\n"},
@@ -257,6 +262,30 @@ export const typo = quack.recipe({
   run() {
     const result = quack.runAction<{ user: { name: string } }>("app.greet", { name: "Bob" })
     console.log(result.data.user.name)
+  },
+})
+
+export const login = quack.recipe({
+  params: { user: { type: "string", required: true }, pin: { type: "string", env: "QUACK_PIN" } },
+  run({ user }) {
+    quack.runAction("app.greet", { name: user })
+    return { user, signedIn: true }
+  },
+})
+
+export const signIn = quack.recipe({
+  description: "Log in as bob, then show the account",
+  run() {
+    const session = quack.runRecipe(login, { user: "bob" })
+    console.log("signed in: " + session.user)
+    return { ...session, account: quack.runAction("account.show").data }
+  },
+})
+
+export const giveUp = quack.recipe({
+  run() {
+    quack.runAction("app.greet", { name: "Bob" })
+    quack.fail("there is nothing to sign in to")
   },
 })
 `

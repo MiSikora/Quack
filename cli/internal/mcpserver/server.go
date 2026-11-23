@@ -203,9 +203,11 @@ type runRecipeInput struct {
 	App    string                     `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
 }
 
+// Data is what the recipe returned, and absent when it returned nothing.
 type runRecipeOutput struct {
-	Steps []stepOutput `json:"steps"`
-	Log   []string     `json:"log"`
+	Steps []stepOutput    `json:"steps"`
+	Log   []string        `json:"log"`
+	Data  json.RawMessage `json:"data,omitempty"`
 }
 
 // A failed step has an error instead, which the recipe caught when it went on.
@@ -417,7 +419,7 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 		report(line)
 	}
 	var done stepOutput
-	err = script.Run(ctx, app, in.Recipe, args, recipe.Observer{
+	out.Data, err = script.Run(ctx, app, in.Recipe, args, recipe.Observer{
 		Started: func(step recipe.Step) {
 			done = stepOutput{Step: recipe.Line(step, actions), Notifications: []notificationOutput{}}
 			print("› " + done.Step)

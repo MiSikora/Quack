@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -49,8 +50,10 @@ type (
 		run *run
 		err error
 	}
+	// data is what a recipe returned.
 	runEnded struct {
 		run      *run
+		data     json.RawMessage
 		err      error
 		canceled bool
 	}
@@ -72,21 +75,26 @@ func newRuns() runs {
 	return runs{spinner: spinner.New(spinner.WithSpinner(spinner.Dot)), now: time.Now}
 }
 
-func (r *runs) start(activity activity, started *run, actions []wire.Action, work func(context.Context, recipe.Observer) error) (string, tea.Cmd) {
+// A recipe's step that runs another recipe has no outcome of its own: the other recipe's steps are its outcome.
+func (r *runs) start(activity activity, started *run, actions []wire.Action, work func(context.Context, recipe.Observer) (json.RawMessage, error)) (string, tea.Cmd) {
 	ctx, cancel := context.WithCancel(activity.ctx)
 	started.started, started.cancel = r.now(), cancel
 	r.active = started
 	observer := recipe.Observer{
 		Started:  func(step recipe.Step) { activity.send(stepStarted{started, recipe.Line(step, actions)}) },
 		Notified: func(notification wire.Notification) { activity.send(runNotification{notification}) },
-		Ended:    func(_ recipe.Step, result wire.MessageResult) { activity.send(stepEnded{started, result}) },
-		Failed:   func(_ recipe.Step, err error) { activity.send(stepFailed{started, err}) },
-		Logged:   func(text string) { activity.send(logged{text}) },
+		Ended: func(step recipe.Step, result wire.MessageResult) {
+			if _, nested := step.(recipe.RunRecipe); !nested {
+				activity.send(stepEnded{started, result})
+			}
+		},
+		Failed: func(_ recipe.Step, err error) { activity.send(stepFailed{started, err}) },
+		Logged: func(text string) { activity.send(logged{text}) },
 	}
 	do := func() tea.Msg {
 		defer cancel()
-		err := work(ctx, observer)
-		activity.send(runEnded{started, err, ctx.Err() != nil})
+		data, err := work(ctx, observer)
+		activity.send(runEnded{started, data, err, ctx.Err() != nil})
 		return nil
 	}
 	header := ""
@@ -126,6 +134,8 @@ func (r *runs) ended(e runEnded) string {
 	r.active = nil
 	var first, rest string
 	switch {
+	case e.err == nil && e.data != nil:
+		return indent(wire.MessageResult{Data: e.data}.IndentedData())
 	case e.err == nil:
 		return ""
 	case e.canceled:

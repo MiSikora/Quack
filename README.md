@@ -100,6 +100,26 @@ quack.recipe({
 
 A recipe can run actions (`quack.runAction`), open the app (`quack.openApp`), wait (`quack.wait`, `quack.waitUntil`), and run commands on the phone (`quack.shell`) or on your computer (`quack.run`). A step that fails throws, so the recipe stops unless it catches the error. Recipes can import your own files, but not npm packages.
 
+Recipes build on each other. `quack.runRecipe` runs another recipe with args and returns what it returned. Its steps show under a `recipe <name>` line, as if the caller took them. A recipe can return any value JSON holds, and `quack --recipe` prints it after the last step. `quack.waitUntil` returns the first truthy value of its check, and `quack.fail("message")` ends the run with that message:
+
+```ts
+export const signIn = quack.recipe({
+  params: { user: { type: "string", required: true } },
+  run({ user }) {
+    return quack.runAction<{ token: string }>("account.signIn", { user }).data
+  },
+})
+
+export const seed = quack.recipe({
+  run() {
+    const { token } = quack.runRecipe(signIn, { user: "duck" })
+    const id = quack.waitUntil(() => quack.runAction<{ id?: string }>("sync.status").data.id)
+    if (!token) quack.fail("signing in gave no token")
+    return { token, id }
+  },
+})
+```
+
 A param with `env: "QUACK_TOKEN"` takes that environment variable's value when the run leaves it out. quack shows it as `${QUACK_TOKEN}`, not its value, wherever it lists or logs the recipe.
 
 Run it with `quack --recipe greetAndGoBack name=Goose`, or find it in `quack`, which lists recipes with the actions and marks them `ƒ`. Type `$` there to list only the recipes.

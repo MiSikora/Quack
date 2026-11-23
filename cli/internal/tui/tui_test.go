@@ -1364,6 +1364,40 @@ export const setup = quack.recipe({
 	}
 }
 
+func TestARecipeThatRunsAnotherShowsItsStepsAndWhatItReturnedUnlessDataIsHidden(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app, withRecipes(t, `
+import quack from "quack"
+
+const greet = quack.recipe({
+  name: "greet",
+  params: { name: { type: "string", required: true } },
+  run({ name }) { return quack.runAction("app.greet", { name }).message },
+})
+
+export const setup = quack.recipe({
+  run() { return { greeting: quack.runRecipe(greet, { name: "Bob" }) } },
+})
+`))
+
+	h.typing("$setup")
+	h.press("enter")
+	h.waitForLog("\n› --recipe setup\n› recipe greet name=Bob\n› app.greet name=Bob\nHello, Bob! · ",
+		"\n  {\n    \"greeting\": \"Hello, Bob!\"\n  }")
+	h.waitFor("> find an action")
+	h.typing("/toggle-data")
+	h.press("enter")
+	h.waitForLog("hiding the JSON data of notifications and results")
+	h.typing("$setup")
+	h.press("enter")
+
+	h.waitForLog("hiding the JSON data of notifications and results\n\n› --recipe setup\n› recipe greet name=Bob\n› app.greet name=Bob\nHello, Bob! · ")
+	h.waitFor("> find an action")
+	if _, after, _ := strings.Cut(h.logText(), "hiding the JSON data"); strings.Contains(after, "greeting") {
+		t.Errorf("got the data after /toggle-data hid it:\n%s", after)
+	}
+}
+
 func TestEnterOnARecipeWithARequiredParamOpensTheBoxWithItsHintsAndRunsWithTheArgs(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app, withRecipes(t, `

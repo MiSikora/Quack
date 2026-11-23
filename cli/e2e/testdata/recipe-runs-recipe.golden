@@ -1,0 +1,37 @@
+$ quack --recipe signIn
+--- exit 0
+--- stdout
+› recipe login user=bob pin='${QUACK_PIN}'
+› app.greet name=bob
+Hello, bob!
+signed in: bob
+› account.show
+Signed in as alice
+{
+  "username": "alice",
+  "tags": [
+    "a",
+    "b"
+  ]
+}
+{
+  "user": "bob",
+  "signedIn": true,
+  "account": {
+    "username": "alice",
+    "tags": [
+      "a",
+      "b"
+    ]
+  }
+}
+--- stderr
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.greet","args":{"name":"bob"}}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"account.show"}

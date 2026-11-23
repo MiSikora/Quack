@@ -432,6 +432,27 @@ export const fresh = quack.recipe({
 	}
 }
 
+func TestRunRecipeGivesTheOtherRecipesItRanAsStepsAndWhatItReturned(t *testing.T) {
+	source := newFakeSource()
+	writeRecipes(t, `
+import quack from "quack"
+export const create = quack.recipe({
+  params: { user: { type: "string", required: true } },
+  run({ user }) { return quack.runAction<{ id: number }>("account.create", { username: user }).data },
+})
+export const fresh = quack.recipe({
+  run() { return { account: quack.runRecipe(create, { user: "alice" }) } },
+})`)
+	session := connect(t, source)
+
+	result := call(t, session, "run_recipe", map[string]any{"recipe": "fresh"})
+
+	assertStructured(t, result, `{"steps":[`+
+		`{"step":"recipe create user=alice","notifications":[],"message":""},`+
+		`{"step":"account.create username=alice","notifications":[{"message":"Creating alice","data":{"username":"alice"}}],"message":"Created alice","data":{"id":7}}],`+
+		`"log":[],"data":{"account":{"id":7}}}`)
+}
+
 func TestRunRecipeSendsStepsNotificationsAndLogsAsProgressWhenAskedTo(t *testing.T) {
 	source := newFakeSource()
 	writeRecipes(t, `

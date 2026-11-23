@@ -24,7 +24,8 @@ func (e *stepError) Error() string { return e.err.Error() }
 
 func (e *stepError) Unwrap() error { return e.err }
 
-// A step error that the recipe catches prints as that step's outcome only once the recipe goes on.
+// A step error that the recipe catches prints as that step's outcome only once the recipe goes on. What the recipe
+// returned prints after its last step, as an action's data does.
 func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wire.RawArg, terminal Terminal, json bool) error {
 	ctx := context.Background()
 	_, actions, err := app.Describe(ctx)
@@ -40,7 +41,7 @@ func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wi
 			failure = nil
 		}
 	}
-	err = s.Run(ctx, app, name, args, recipe.Observer{
+	data, err := s.Run(ctx, app, name, args, recipe.Observer{
 		Started: func(started recipe.Step) {
 			caught()
 			step++
@@ -68,7 +69,15 @@ func runRecipe(app client.App, s *recipe.Script, name string, args map[string]wi
 		return &stepError{failure.step, err}
 	}
 	caught()
-	return err
+	switch {
+	case err != nil || data == nil:
+		return err
+	case json:
+		printJSON(terminal.Out, outcomeJSON{Code: codeOK, Data: data})
+	default:
+		fmt.Fprintln(terminal.Out, wire.MessageResult{Data: data}.IndentedData())
+	}
+	return nil
 }
 
 func printFailure(terminal Terminal, json bool, failed *stepError) {
@@ -82,7 +91,7 @@ func printFailure(terminal Terminal, json bool, failed *stepError) {
 
 func hasMessage(step recipe.Step) bool {
 	switch step.(type) {
-	case recipe.OpenApp, recipe.Wait:
+	case recipe.OpenApp, recipe.Wait, recipe.RunRecipe:
 		return false
 	}
 	return true
