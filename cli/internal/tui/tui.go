@@ -57,8 +57,10 @@ type model struct {
 	hello   wire.Hello
 	prompt  prompt
 	// The picker keeps its text and selection under the box.
-	box       *paramBox
-	runs      runs
+	box  *paramBox
+	runs runs
+	// Leaves the JSON data of notifications and results out of the log, from the next line on.
+	hideData  bool
 	script    *recipe.Script
 	quit      notice
 	copied    notice
@@ -197,9 +199,15 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 		m.log.add(m.runs.stepStarted(msg))
 		return m.activity.listen()
 	case runNotification:
+		if m.hideData {
+			msg.notification.Data = nil
+		}
 		m.log.add(notificationLines(msg.notification))
 		return m.activity.listen()
 	case stepEnded:
+		if m.hideData {
+			msg.result.Data = nil
+		}
 		m.log.add(m.runs.stepEnded(msg))
 		return m.activity.listen()
 	case stepFailed:
@@ -445,6 +453,16 @@ func (m *model) initRecipes() tea.Cmd {
 		m.log.add(statusStyle.Render("the recipes of " + pkg + " are set up already in " + recipe.Path(pkg)))
 	}
 	m.setRecipes(loadRecipes(pkg))
+	return nil
+}
+
+func (m *model) toggleData() tea.Cmd {
+	m.hideData = !m.hideData
+	line := "showing the JSON data of notifications and results"
+	if m.hideData {
+		line = "hiding the JSON data of notifications and results"
+	}
+	m.log.add(statusStyle.Render(line))
 	return nil
 }
 
@@ -807,6 +825,7 @@ func commands() []command {
 		{"/pick-app", "", "Pick another app on this device", (*model).pickApp},
 		{"/pick-device", "", "Pick another device", (*model).pickDevice},
 		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", (*model).reload},
+		{"/toggle-data", "", "Show or hide the JSON data of notifications and results", (*model).toggleData},
 	}
 }
 

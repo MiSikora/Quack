@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Library: `Terminal.send` takes optional `json`, data that the CLI prints after the notification's message, MCP returns with it, and recipes read. JSON that does not parse fails the call.
 - MCP: `start_action` starts an action without waiting for it to end, for actions that wait on something outside the call such as another device. `read_run` follows the run's notifications while it runs and gives its end, `cancel_run` cancels it, and `list_runs` lists the runs of the session.
+- CLI: `/toggle-data` in the terminal UI hides the JSON data of notifications and results, or shows it again.
 
 ### Changed
 - Library: `QuackAction.Terminal` is a plain interface, so a test builds one with an `object` expression instead of a lambda.

@@ -460,7 +460,7 @@ func TestSlashListsTheCommands(t *testing.T) {
 
 	h.typing("/")
 
-	h.waitFor("/reload", "/pick-device", "/pick-app", "/open-app", "/init-recipes", "/exit", "/clear", "▸ /cancel", "8/8")
+	h.waitFor("/toggle-data", "/reload", "/pick-device", "/pick-app", "/open-app", "/init-recipes", "/exit", "/clear", "▸ /cancel", "9/9")
 	h.waitForNo("app.greet")
 	h.typing("x")
 	h.waitFor("▸ /exit")
@@ -790,6 +790,26 @@ func TestDataOfANotificationPrintsIndentedUnderIt(t *testing.T) {
 		"    {\n" +
 		"      \"code\": \"abc123\"\n" +
 		"    }\nPaired · ")
+}
+
+func TestToggleDataHidesTheDataOfNotificationsAndResultsUntilToggledBack(t *testing.T) {
+	app := newFakeApp()
+	app.setActions(append(app.actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	h := start(t, app)
+
+	h.typing("/toggle-data")
+	h.press("enter")
+	h.waitForLog("hiding the JSON data of notifications and results")
+	h.typing("sync.pair")
+	h.press("enter")
+	h.waitForLog("\n› sync.pair\n  Pairing code\nPaired · ")
+	h.typing("/toggle-data")
+	h.press("enter")
+	h.waitForLog("showing the JSON data of notifications and results")
+	h.typing("sync.pair")
+	h.press("enter")
+
+	h.waitForLog("\n› sync.pair\n  Pairing code\n    {\n      \"code\": \"abc123\"\n    }\nPaired · ")
 }
 
 func TestOutputKeepsItsOrder(t *testing.T) {
