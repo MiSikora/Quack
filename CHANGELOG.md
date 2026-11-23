@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- CLI: a recipe can declare its `name`, so that it needs no export.
 - CLI: a recipe param with `env: "NAME"` takes that environment variable's value when the run leaves it out, and shows as `${NAME}`.
 
 ### Changed

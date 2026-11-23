@@ -99,6 +99,30 @@ const unexported = quack.recipe({ run() {} })
 	}
 }
 
+func TestARecipeTakesTheNameItDeclaresOverItsExportsName(t *testing.T) {
+	s := load(t, `
+import quack from "quack"
+quack.recipe({ name: "app.reset", run() { console.log("reset") } })
+const skip = quack.recipe({ name: "onboarding.skip", run() {} })
+export { skip as skipOnboarding }
+export const open = quack.recipe({ run() {} })
+const helper = quack.recipe({ run() {} })`)
+	var logged []string
+
+	err := s.Run(context.Background(), &fakeApp{}, "app.reset", nil, Observer{Logged: func(text string) { logged = append(logged, text) }})
+
+	var names []string
+	for _, r := range s.Recipes {
+		names = append(names, r.Name)
+	}
+	if want := []string{"app.reset", "onboarding.skip", "open"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("names: got %v, want %v", names, want)
+	}
+	if want := []string{"reset"}; err != nil || !reflect.DeepEqual(logged, want) {
+		t.Errorf("run: got %v, %v, want %v", logged, err, want)
+	}
+}
+
 func TestLoadReadsAJavaScriptFile(t *testing.T) {
 	writeFile(t, pkg+".js", `import quack from "quack"
 export const clean = quack.recipe({ description: "Clean", run() {} })`)
@@ -127,6 +151,11 @@ export const a = quack.recipe({ description: "no run" })`, "TypeError: recipe() 
 export const $a = quack.recipe({ run() {} })`, "recipe '$a': its name must not start with '$'"},
 		{`import quack from "quack"
 quack.openApp()`, `TypeError: the "quack" module runs steps only inside a recipe's run`},
+		{`import quack from "quack"
+quack.recipe({ name: "$a", run() {} })`, "recipe '$a': its name must not start with '$'"},
+		{`import quack from "quack"
+quack.recipe({ name: "a", run() {} })
+export const a = quack.recipe({ run() {} })`, "two recipes are named 'a'"},
 	} {
 		write(t, c.file)
 

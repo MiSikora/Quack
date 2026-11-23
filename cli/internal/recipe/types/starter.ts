@@ -1,7 +1,8 @@
 import quack from "quack"
 
-// Each exported recipe runs as $<export name> in the terminal UI, and as quack --recipe <export name>.
-export const open = quack.recipe({
+// Each recipe runs as $<name> in the terminal UI, and as quack --recipe <name>.
+quack.recipe({
+  name: "open",
   description: "Show the app's main screen",
   run() {
     quack.openApp()

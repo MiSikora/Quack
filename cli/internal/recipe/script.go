@@ -104,14 +104,12 @@ func Load(pkg string) (*Script, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, name := range slices.Sorted(slices.Values(exports.Keys())) {
-		if declared, ok := r.recipes[exports.Get(name)]; ok {
-			if !isName(name) {
-				return nil, fmt.Errorf("%s: recipe '%s': its name must not start with '$'", path, name)
-			}
-			declared.Name = name
-			s.Recipes = append(s.Recipes, declared.Recipe)
-		}
+	named, err := r.named(exports)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	for _, declared := range named {
+		s.Recipes = append(s.Recipes, declared.Recipe)
 	}
 	return s, nil
 }
@@ -170,7 +168,11 @@ func (s *Script) Run(ctx context.Context, app App, name string, args map[string]
 		return err
 	}
 	// The bundle's exports are getters, which an interrupt would panic out of, so the recipe is found first.
-	run := r.recipes[exports.Get(name)].run
+	named, err := r.named(exports)
+	if err != nil {
+		return err
+	}
+	run := named[slices.IndexFunc(named, func(d declaredRecipe) bool { return d.Name == name })].run
 	stop := context.AfterFunc(ctx, func() { r.vm.Interrupt(canceled) })
 	defer stop()
 	if _, err := run(goja.Undefined(), r.vm.ToValue(values)); err != nil {
@@ -267,6 +269,9 @@ func (r *runtime) recipe(definition *goja.Object) goja.Value {
 	if description := definition.Get("description"); description != nil && !goja.IsUndefined(description) {
 		declared.Description = description.String()
 	}
+	if name := definition.Get("name"); name != nil && !goja.IsUndefined(name) {
+		declared.Name = name.String()
+	}
 	if params := definition.Get("params"); params != nil && !goja.IsUndefined(params) {
 		object := params.ToObject(vm)
 		for _, name := range object.Keys() {
@@ -290,6 +295,32 @@ func (r *runtime) recipe(definition *goja.Object) goja.Value {
 }
 
 // The variable comes back only while it is set, and the param then shows it as its default.
+// A recipe without a name of its own takes the name of each export that holds it, and is left out without one.
+func (r *runtime) named(exports *goja.Object) ([]declaredRecipe, error) {
+	var named []declaredRecipe
+	for _, declared := range r.recipes {
+		if declared.Name != "" {
+			named = append(named, declared)
+		}
+	}
+	for _, key := range exports.Keys() {
+		if declared, ok := r.recipes[exports.Get(key)]; ok && declared.Name == "" {
+			declared.Name = key
+			named = append(named, declared)
+		}
+	}
+	slices.SortFunc(named, func(a, b declaredRecipe) int { return strings.Compare(a.Name, b.Name) })
+	for i, declared := range named {
+		if !isName(declared.Name) {
+			return nil, fmt.Errorf("recipe '%s': its name must not start with '$'", declared.Name)
+		}
+		if i > 0 && named[i-1].Name == declared.Name {
+			return nil, fmt.Errorf("two recipes are named '%s'", declared.Name)
+		}
+	}
+	return named, nil
+}
+
 func param(name string, declaration any) (wire.Param, string, error) {
 	fields, ok := declaration.(map[string]any)
 	if !ok {

@@ -77,12 +77,13 @@ quack --init-recipes --app <app package>
 
 or type `/init-recipes` in `quack`.
 
-Each exported recipe gets its name from its export:
+Each recipe gets the name it declares, or else the name of its export:
 
 ```ts
 import quack from "quack"
 
-export const greetAndGoBack = quack.recipe({
+quack.recipe({
+  name: "greetAndGoBack",
   description: "Open the app, say hello, then press back",
   params: { name: { type: "string", default: "Duck", hints: ["Duck", "Goose"] } },
   run({ name }) {

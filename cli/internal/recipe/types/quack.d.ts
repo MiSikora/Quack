@@ -62,15 +62,17 @@ export type Args<P extends Record<string, Param>> = {
 
 declare const recipeBrand: unique symbol
 
-/** A recipe, which quack lists by the name of the export that holds it. */
+/** A recipe, which quack lists by its name. */
 export interface Recipe {
   readonly [recipeBrand]: true
 }
 
 /** What recipes run through: import quack from "quack", then call quack.runAction(), quack.openApp() and the rest. */
 export interface Quack {
-  /** Declares a recipe. Export it to list it: its name is the name of the export. */
+  /** Declares a recipe. One without a name is listed only when exported, by the name of its export. */
   recipe<const P extends Record<string, Param> = {}>(definition: {
+    /** The name quack lists the recipe by, such as app.reset. */
+    name?: string
     description?: string
     params?: P
     run(args: Args<P>): void
