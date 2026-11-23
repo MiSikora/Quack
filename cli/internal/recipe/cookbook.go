@@ -15,8 +15,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pelletier/go-toml/v2"
-
 	"quack/internal/config"
 	"quack/internal/wire"
 )
@@ -213,28 +211,9 @@ func parseTable(doc []byte, file, dir string, onlyRecipes bool) (table, []string
 	var decoded struct {
 		Recipes any `toml:"recipes"`
 	}
-	decoder := toml.NewDecoder(bytes.NewReader(doc))
-	if onlyRecipes {
-		decoder.DisallowUnknownFields()
-	}
-	var warnings []string
-	var unknown *toml.StrictMissingError
-	var syntax *toml.DecodeError
-	switch err := decoder.Decode(&decoded); {
-	case errors.As(err, &unknown):
-		for _, e := range unknown.Errors {
-			row, _ := e.Position()
-			warnings = append(warnings, fmt.Sprintf("%s:%d: unknown key '%s'", file, row, strings.Join(e.Key(), ".")))
-		}
-		// A plain decode reads the recipes whatever the strict one left out.
-		if err := toml.Unmarshal(doc, &decoded); err != nil {
-			return table{}, nil, fmt.Errorf("%s: %w", file, err)
-		}
-	case errors.As(err, &syntax):
-		row, column := syntax.Position()
-		return table{}, nil, fmt.Errorf("%s:%d:%d: %s", file, row, column, strings.TrimPrefix(syntax.Error(), "toml: "))
-	case err != nil:
-		return table{}, nil, fmt.Errorf("%s: %w", file, err)
+	warnings, err := config.Decode(doc, file, onlyRecipes, &decoded)
+	if err != nil {
+		return table{}, nil, err
 	}
 	if decoded.Recipes == nil {
 		return t, warnings, nil

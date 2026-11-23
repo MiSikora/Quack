@@ -56,21 +56,9 @@ func Parse(doc []byte) (Config, []string) {
 		GroupNamespaces any `toml:"group-namespaces"`
 		Recipes         any `toml:"recipes"`
 	}
-	decoder := toml.NewDecoder(bytes.NewReader(doc))
-	decoder.DisallowUnknownFields()
-	var problems []string
-	var unknown *toml.StrictMissingError
-	var syntax *toml.DecodeError
-	switch err := decoder.Decode(&known); {
-	case errors.As(err, &unknown):
-		for _, e := range unknown.Errors {
-			problems = append(problems, at(&e, fmt.Sprintf("unknown key '%s'", strings.Join(e.Key(), "."))))
-		}
-	case errors.As(err, &syntax):
-		row, column := syntax.Position()
-		return Default(), []string{fmt.Sprintf("%s:%d:%d: %s", filepath.Base(Path()), row, column, strings.TrimPrefix(syntax.Error(), "toml: "))}
-	case err != nil:
-		return Default(), []string{filepath.Base(Path()) + ": " + err.Error()}
+	problems, err := Decode(doc, filepath.Base(Path()), true, &known)
+	if err != nil {
+		return Default(), []string{err.Error()}
 	}
 	var showData struct {
 		Value *bool `toml:"show-data"`
@@ -95,6 +83,35 @@ func decodeKey(doc []byte, holder any, decoded **bool, setting *bool) []string {
 		*setting = **decoded
 	}
 	return nil
+}
+
+// Decode decodes doc, which file names, into v. Strict reports each key that v lacks as a problem at its row, and the
+// rest of doc still decodes. A syntax error says where in file it is.
+func Decode(doc []byte, file string, strict bool, v any) ([]string, error) {
+	decoder := toml.NewDecoder(bytes.NewReader(doc))
+	if strict {
+		decoder.DisallowUnknownFields()
+	}
+	var problems []string
+	var unknown *toml.StrictMissingError
+	var syntax *toml.DecodeError
+	switch err := decoder.Decode(v); {
+	case errors.As(err, &unknown):
+		for _, e := range unknown.Errors {
+			row, _ := e.Position()
+			problems = append(problems, fmt.Sprintf("%s:%d: unknown key '%s'", file, row, strings.Join(e.Key(), ".")))
+		}
+		// A plain decode reads whatever the strict one left out.
+		if err := toml.Unmarshal(doc, v); err != nil {
+			return nil, fmt.Errorf("%s: %w", file, err)
+		}
+	case errors.As(err, &syntax):
+		row, column := syntax.Position()
+		return nil, fmt.Errorf("%s:%d:%d: %s", file, row, column, strings.TrimPrefix(syntax.Error(), "toml: "))
+	case err != nil:
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	return problems, nil
 }
 
 func at(err *toml.DecodeError, text string) string {
