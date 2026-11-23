@@ -85,16 +85,7 @@ func loadScript(path string) (*script, error) {
 
 // The script declares the recipe named name.
 func (s *script) run(ctx context.Context, app App, name string, args map[string]wire.RawArg, observer Observer) (json.RawMessage, error) {
-	at := slices.IndexFunc(s.recipes, func(r Recipe) bool { return r.Name == name })
-	raw, err := recipeArgs(s.recipes[at], args)
-	if err != nil {
-		return nil, err
-	}
 	r := newRuntime(s, ctx, app, observer)
-	// Steps show the variables of params by name too, as if the recipe read them.
-	for _, variable := range s.recipes[at].env {
-		r.env.Get(variable)
-	}
 	exports, err := r.load()
 	if err != nil {
 		return nil, err
@@ -104,14 +95,37 @@ func (s *script) run(ctx context.Context, app App, name string, args map[string]
 	if err != nil {
 		return nil, err
 	}
-	run := named[slices.IndexFunc(named, func(d declaredRecipe) bool { return d.Name == name })].run
+	declared := named[slices.IndexFunc(named, func(d declaredRecipe) bool { return d.Name == name })]
 	stop := context.AfterFunc(ctx, func() { r.vm.Interrupt(canceled) })
 	defer stop()
-	returned, err := run(goja.Undefined(), r.vm.ToValue(argValues(s.recipes[at], raw)))
-	if err != nil {
-		return nil, r.thrown(err)
+	data, threw, err := r.call(declared, args, false)
+	if threw != nil {
+		return nil, r.thrown(threw)
 	}
-	return r.stringify(returned, name)
+	return data, err
+}
+
+// call runs the recipe with args, which it checks against the recipe's params first. A nested call shows the recipe
+// as a step before the recipe's own steps. threw is what the recipe's run threw, as goja has it, and err any other
+// failure.
+func (r *runtime) call(declared declaredRecipe, args map[string]wire.RawArg, nested bool) (data json.RawMessage, threw, err error) {
+	raw, err := recipeArgs(declared.Recipe, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Steps show the variables of params by name too, as if the recipe read them.
+	for _, variable := range declared.env {
+		r.env.Get(variable)
+	}
+	if nested {
+		r.do(RunRecipe{declared.Recipe, raw}, nil)
+	}
+	returned, threw := declared.run(goja.Undefined(), r.vm.ToValue(argValues(declared.Recipe, raw)))
+	if threw != nil {
+		return nil, threw, nil
+	}
+	data, err = r.stringify(returned, declared.Name)
+	return data, nil, err
 }
 
 var canceled = &client.CallError{Message: "canceled"}
@@ -395,19 +409,10 @@ func (r *runtime) runRecipe(handle goja.Value, args map[string]any) goja.Value {
 	defer func() { r.depth-- }()
 	declared.Name = cmp.Or(declared.Name, declared.exported)
 	maps.DeleteFunc(args, func(_ string, value any) bool { return value == nil })
-	raw, err := recipeArgs(declared.Recipe, r.rawArgs(args))
-	if err != nil {
-		panic(r.vm.NewGoError(err))
+	data, threw, err := r.call(declared, r.rawArgs(args), true)
+	if threw != nil {
+		panic(threw)
 	}
-	for _, variable := range declared.env {
-		r.env.Get(variable)
-	}
-	r.do(RunRecipe{declared.Recipe, raw}, nil)
-	returned, err := declared.run(goja.Undefined(), r.vm.ToValue(argValues(declared.Recipe, raw)))
-	if err != nil {
-		panic(err)
-	}
-	data, err := r.stringify(returned, declared.Name)
 	if err != nil {
 		panic(r.vm.NewGoError(err))
 	}
