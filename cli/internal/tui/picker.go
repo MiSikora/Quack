@@ -160,6 +160,31 @@ func (p *picker) showing(devices []seenDevice) bool {
 	return !p.quiet || p.connecting != nil || p.startup && slices.ContainsFunc(p.allRows(devices), func(r pickRow) bool { return r.ok })
 }
 
+// alarm is the words of status that tell of no device, or of devices without a quack-enabled app, rather than of
+// devices that quack cannot use yet. It is "" when there are none.
+func (p *picker) alarm(devices []seenDevice, listed bool) string {
+	rows := p.allRows(devices)
+	switch {
+	case !listed:
+		return ""
+	case len(devices) == 0 && p.want == client.Target{}:
+		return "no device"
+	case len(devices) == 0:
+		return ""
+	case p.step == packageStep && len(rows) == 0 && p.want.Package == "":
+		return noApp
+	case p.step == packageStep:
+		return ""
+	case slices.ContainsFunc(rows, func(r pickRow) bool { return r.ok || r.note == "looking for apps…" }):
+		return ""
+	case slices.ContainsFunc(rows, func(r pickRow) bool { return r.note == noApp }):
+		return noApp
+	}
+	return ""
+}
+
+const noApp = "no quack-enabled app"
+
 // status says what a quiet picker waits for, as the rows would.
 func (p *picker) status(devices []seenDevice, listed bool) string {
 	rows := p.allRows(devices)

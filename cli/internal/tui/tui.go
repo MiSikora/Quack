@@ -42,6 +42,7 @@ type Source interface {
 	// Track returns when ctx ends, or with the error that ended it.
 	Track(ctx context.Context, send func([]adb.Listing)) error
 	Inspect(listing adb.Listing) (client.Device, error)
+	Packages(device adb.Device) ([]string, error)
 	Connect(target client.Target, mode client.StartMode, status io.Writer) (App, error)
 }
 
@@ -266,13 +267,10 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 		return tea.Batch(m.list(msg.listings), m.activity.listen())
 	case inspected:
 		m.inspected(msg)
-		return m.advance()
+		return tea.Batch(m.checkApp(), m.advance())
 	case polled:
 		m.polling = false
-		if m.picker == nil {
-			return nil
-		}
-		return tea.Batch(m.inspectAll(), m.poll())
+		return tea.Batch(m.inspectPicked(), m.poll())
 	case connected:
 		return tea.Batch(m.connected(msg), m.activity.listen())
 	case noticeEnded:
@@ -691,17 +689,7 @@ func (m *model) list(listings []adb.Listing) tea.Cmd {
 		}
 	}
 	if m.app != nil && m.deviceIndex(m.target.Device) < 0 {
-		m.log.add(statusStyle.Render(string(m.target.Device) + " disconnected"))
-		m.runs.stop()
-		m.app = nil
-		m.picker = nil
-		m.refused.showing = false
-		m.prompt.clear()
-		m.prompt.connect(false)
-		m.prompt.setActions(nil)
-		m.setRecipes(recipes{})
-		// Only the start picks by itself, so that a device that comes back does not take over the prompt.
-		cmds = append(cmds, m.openPicker(func(p *picker) { p.quiet = true }))
+		cmds = append(cmds, m.drop(string(m.target.Device)+" disconnected"))
 	}
 	if p := m.picker; p != nil && p.step == packageStep && m.deviceIndex(p.device) < 0 {
 		p.toStep(deviceStep)
@@ -713,13 +701,69 @@ func (m *model) inspect(listing adb.Listing) tea.Cmd {
 	if listing.State != adb.Ready {
 		return nil
 	}
+	source := m.source
+	return m.ask(listing.Device, func() (client.Device, error) { return source.Inspect(listing) })
+}
+
+func (m *model) ask(serial adb.Device, inspect func() (client.Device, error)) tea.Cmd {
 	m.asked++
-	asked, source := m.asked, m.source
-	m.pending[listing.Device] = asked
+	asked := m.asked
+	m.pending[serial] = asked
 	return func() tea.Msg {
-		device, err := source.Inspect(listing)
-		return inspected{listing.Device, device, asked, err}
+		device, err := inspect()
+		return inspected{serial, device, asked, err}
 	}
+}
+
+// While an app is connected, only its device is asked, and only for its apps, so that an app that leaves it is seen.
+func (m *model) inspectPicked() tea.Cmd {
+	if m.picker != nil {
+		return m.inspectAll()
+	}
+	i := m.deviceIndex(m.target.Device)
+	if i < 0 {
+		return nil
+	}
+	if _, waiting := m.pending[m.target.Device]; waiting {
+		return nil
+	}
+	seen := m.devices[i]
+	if !seen.inspected || seen.State != adb.Ready {
+		return m.inspect(seen.Listing)
+	}
+	source := m.source
+	return m.ask(seen.Device.Device, func() (client.Device, error) {
+		device := seen.Device
+		packages, err := source.Packages(device.Device)
+		device.Packages = packages
+		return device, err
+	})
+}
+
+// An app that its device no longer lists, such as one that was uninstalled, goes as if its device went.
+func (m *model) checkApp() tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	i := m.deviceIndex(m.target.Device)
+	if i < 0 || !m.devices[i].inspected || slices.Contains(m.devices[i].Packages, m.target.Package) {
+		return nil
+	}
+	return m.drop(m.target.Package + " left " + string(m.target.Device))
+}
+
+// Only the start picks by itself, so that a device or an app that comes back does not take over the prompt.
+func (m *model) drop(line string) tea.Cmd {
+	m.log.add(statusStyle.Render(line))
+	m.runs.stop()
+	m.app = nil
+	m.picker = nil
+	m.refused.showing = false
+	m.prompt.clear()
+	m.prompt.connect(false)
+	m.prompt.setActions(nil)
+	m.setRecipes(recipes{})
+	return m.openPicker(func(p *picker) { p.quiet = true })
 }
 
 func (m *model) inspectAll() tea.Cmd {
@@ -834,11 +878,13 @@ func (m *model) footer() string {
 
 func (m *model) title() string {
 	if m.app == nil && m.picker != nil {
-		style := statusStyle
-		if m.listed && len(m.devices) == 0 {
-			style = problemStyle
+		status := " · " + m.picker.status(m.devices, m.listed)
+		alarm := m.picker.alarm(m.devices, m.listed)
+		before, after, found := strings.Cut(status, alarm)
+		if alarm == "" || !found {
+			return selectedStyle.Render("quack") + statusStyle.Render(status)
 		}
-		return selectedStyle.Render("quack") + style.Render(" · "+m.picker.status(m.devices, m.listed))
+		return selectedStyle.Render("quack") + statusStyle.Render(before) + problemStyle.Render(alarm) + statusStyle.Render(after)
 	}
 	if m.app == nil {
 		return selectedStyle.Render("quack")
@@ -900,6 +946,10 @@ func (clientSource) Track(ctx context.Context, send func([]adb.Listing)) error {
 
 func (clientSource) Inspect(listing adb.Listing) (client.Device, error) {
 	return client.Inspect(listing)
+}
+
+func (clientSource) Packages(device adb.Device) ([]string, error) {
+	return client.Packages(device)
 }
 
 func (s clientSource) Connect(target client.Target, mode client.StartMode, status io.Writer) (App, error) {

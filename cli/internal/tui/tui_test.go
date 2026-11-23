@@ -2426,14 +2426,15 @@ const timeout = 5 * time.Second
 type fakeSource struct {
 	app *fakeApp
 
-	mu         sync.Mutex
-	devices    []client.Device
-	apps       map[client.Target]*fakeApp
-	send       func([]adb.Listing)
-	started    []string
-	failTracks int
-	held       map[client.Target]chan struct{}
-	inspected  int
+	mu             sync.Mutex
+	devices        []client.Device
+	apps           map[client.Target]*fakeApp
+	send           func([]adb.Listing)
+	started        []string
+	failTracks     int
+	held           map[client.Target]chan struct{}
+	inspected      int
+	listedPackages int
 }
 
 func newFakeSource(app *fakeApp, devices ...client.Device) *fakeSource {
@@ -2475,6 +2476,18 @@ func (s *fakeSource) Inspect(listing adb.Listing) (client.Device, error) {
 	return client.Device{}, errors.New(string(listing.Device) + " is not connected")
 }
 
+func (s *fakeSource) Packages(device adb.Device) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.listedPackages++
+	for _, d := range s.devices {
+		if d.Device == device {
+			return d.Packages, nil
+		}
+	}
+	return nil, errors.New(string(device) + " is not connected")
+}
+
 func (s *fakeSource) Connect(target client.Target, mode client.StartMode, status io.Writer) (App, error) {
 	s.mu.Lock()
 	held := s.held[target]
@@ -2505,6 +2518,12 @@ func (s *fakeSource) inspects() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.inspected
+}
+
+func (s *fakeSource) packageLists() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listedPackages
 }
 
 func (s *fakeSource) starts() []string {

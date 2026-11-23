@@ -118,9 +118,7 @@ func TestNoAppLeavesTheCommandsThatNeedNone(t *testing.T) {
 	source.devices = nil
 	h := startPicking(t, source, client.Target{}, client.Wake)
 	h.waitFor("quack · no device · waiting for one to connect", "> / for commands")
-	if !strings.Contains(h.raw(), problemStyle.Render(" · no device · waiting for one to connect")) {
-		t.Errorf("no device is not red in:\n%q", h.raw())
-	}
+	h.checkRed(" · ", "no device", " · waiting for one to connect")
 
 	h.typing("/")
 
@@ -135,13 +133,15 @@ func TestNoAppSaysWhyInTheInfoLine(t *testing.T) {
 	for _, tc := range []struct {
 		devices []client.Device
 		want    string
+		red     string
 	}{
-		{nil, "quack · no device · waiting for one to connect"},
-		{[]client.Device{device("emulator-5554", "Pixel 8", "device")}, "quack · Pixel 8 · emulator-5554 · no quack-enabled app"},
-		{[]client.Device{device("R5CT20ABCDE", "", "unauthorized")}, "quack · R5CT20ABCDE · unauthorized · accept the USB debugging prompt"},
+		{nil, "quack · no device · waiting for one to connect", "no device"},
+		{[]client.Device{device("emulator-5554", "Pixel 8", "device")}, "quack · Pixel 8 · emulator-5554 · no quack-enabled app", "no quack-enabled app"},
+		{[]client.Device{device("R5CT20ABCDE", "", "unauthorized")}, "quack · R5CT20ABCDE · unauthorized · accept the USB debugging prompt", ""},
 		{
 			[]client.Device{device("emulator-5554", "Pixel 8", "device"), device("R5CT20ABCDE", "", "unauthorized")},
 			"quack · 2 devices · no quack-enabled app · /pick-device to see them",
+			"no quack-enabled app",
 		},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
@@ -151,7 +151,23 @@ func TestNoAppSaysWhyInTheInfoLine(t *testing.T) {
 			h := startPicking(t, source, client.Target{}, client.Wake)
 
 			h.waitFor(tc.want, "> / for commands")
+			before, after, _ := strings.Cut(strings.TrimPrefix(tc.want, "quack"), tc.red)
+			if tc.red == "" {
+				before, after = "", strings.TrimPrefix(tc.want, "quack")
+			}
+			h.checkRed(before, tc.red, after)
 		})
+	}
+}
+
+func TestFlagsThatMatchNoDeviceYetAreNotRed(t *testing.T) {
+	source := newFakeSource(newFakeApp(), device("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"))
+
+	h := startPicking(t, source, client.Target{Device: "3A251FDH2000XY"}, client.Wake)
+
+	h.waitFor("quack · waiting for 3A251FDH2000XY", "> / for commands")
+	if !strings.Contains(h.raw(), statusStyle.Render(" · waiting for 3A251FDH2000XY")) {
+		t.Errorf("the status is not dimmed in:\n%q", h.raw())
 	}
 }
 
@@ -352,6 +368,52 @@ func TestDisconnectWaitsForPickDevice(t *testing.T) {
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")
 }
 
+func TestConnectedAppIsPolledOnlyForItsDevicesApps(t *testing.T) {
+	source := newFakeSource(newFakeApp())
+	h := startPicking(t, source, client.Target{}, client.Wake)
+	h.waitFor("type or ↑ to find an action")
+	inspects := source.inspects()
+	h.keepPolling()
+
+	lists := func() string { return strconv.Itoa(source.packageLists()) }
+	h.wait(lists, func(n string) bool { got, _ := strconv.Atoi(n); return got >= 2 }, "2 package lists")
+
+	if got := source.inspects(); got != inspects {
+		t.Errorf("got %d inspects while connected, want %d", got, inspects)
+	}
+}
+
+func TestUninstalledAppGoesAsIfItsDeviceWent(t *testing.T) {
+	app := newFakeApp()
+	source := newFakeSource(app)
+	h := startPicking(t, source, client.Target{}, client.Wake)
+	h.waitFor("type or ↑ to find an action")
+	h.typing("account.watch")
+	h.press("enter")
+	h.waitFor("account.watch · ctrl+c cancel action")
+	h.keepPolling()
+
+	source.install("emulator-5554")
+
+	h.waitForLog("io.mehow.quack.sample left emulator-5554")
+	h.waitFor("quack · Pixel 8 · emulator-5554 · no quack-enabled app", "> / for commands")
+	h.checkRed(" · Pixel 8 · emulator-5554 · ", "no quack-enabled app", "")
+	select {
+	case <-app.canceled(0):
+	case <-time.After(timeout):
+		t.Error("the run was not stopped")
+	}
+	h.typing("/")
+	h.waitFor("/pick-device", "5/5")
+
+	h.press("esc")
+	source.install("emulator-5554", "io.mehow.quack.sample")
+	h.waitFor("quack · Pixel 8 · emulator-5554 · 1 app · /pick-device to connect")
+	if got := source.starts(); len(got) != 1 {
+		t.Errorf("started %q, want only the first pick", got)
+	}
+}
+
 func TestDisconnectSaysWhichDevicesCanBePicked(t *testing.T) {
 	source := newFakeSource(newFakeApp())
 	h := startPicking(t, source, client.Target{}, client.Wake)
@@ -542,5 +604,26 @@ func TestLostTrackOfTheDevicesSaysSoOnceAndTracksAgain(t *testing.T) {
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")
 	if log := h.logText(); strings.Count(log, "lost track of the devices: EOF") != 1 {
 		t.Errorf("the log says the lost track %d times, want once:\n%s", strings.Count(log, "lost track of the devices: EOF"), log)
+	}
+}
+
+// checkRed checks that the info line shows red between dimmed before and after, or all dimmed without red.
+func (h *harness) checkRed(before, red, after string) {
+	h.t.Helper()
+	var want string
+	for _, part := range []struct {
+		text string
+		red  bool
+	}{{before, false}, {red, true}, {after, false}} {
+		switch {
+		case part.text == "":
+		case part.red:
+			want += problemStyle.Render(part.text)
+		default:
+			want += statusStyle.Render(part.text)
+		}
+	}
+	if !strings.Contains(h.raw(), selectedStyle.Render("quack")+want) {
+		h.t.Errorf("the info line is not %q, %q in red, then %q in:\n%q", before, red, after, h.raw())
 	}
 }

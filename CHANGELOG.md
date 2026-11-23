@@ -28,8 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `quack.waitUntil` keeps checking while the check returns a falsy value, and returns the first truthy one instead of nothing.
 - Recipes live in a project's `.quack/recipes/` or in `$XDG_CONFIG_HOME/quack/recipes/`, and a `[recipes]` table in `.quack/quack.toml` or `config.toml` maps the apps whose packages a regex matches to files there, instead of one `<package>.ts` file per app. An app gets the recipes of every file it matches. `--init-recipes` and `/init-recipes` start `.quack/`.
 - Only `--init-recipes` and `/init-recipes` write `quack.d.ts` and `tsconfig.json`. Loading recipes warns when they are out of date instead of rewriting them.
-- While no app is connected, the terminal UI keeps its prompt with the commands that need no app, such as `/pick-device`, instead of waiting in the device picker. The line over the prompt says why there is no app, in red when no device is connected.
+- While no app is connected, the terminal UI keeps its prompt with the commands that need no app, such as `/pick-device`, instead of waiting in the device picker. The line over the prompt says why there is no app, in red when there is no device or no quack-enabled app.
 - The terminal UI picks a device and an app by itself only until the first app connects. After a device disconnects, `/pick-device` picks the next one.
+- The terminal UI notices when the connected app is uninstalled, and goes on as when its device disconnects.
 
 #### Fixed
 - A recipes file that exports a string with letters outside ASCII loads instead of crashing quack.
