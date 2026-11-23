@@ -370,7 +370,7 @@ func (m *model) choose() tea.Cmd {
 	case c.command != nil:
 		m.prompt.clear()
 		return c.command.run(m)
-	case hasRequired(c.action):
+	case asks(c.action):
 		return m.openBox(c.action)
 	case m.runs.active != nil:
 		return m.refused.show(m.clock, refusedDuringRun)
@@ -838,7 +838,11 @@ func (r recipes) list() []recipe.Recipe {
 	return r.script.Recipes
 }
 
-func hasRequired(action wire.Action) bool {
+// A recipe's optional params tend to be what the user runs it with, while an action's are the exception.
+func asks(action wire.Action) bool {
+	if strings.HasPrefix(action.ID, "$") {
+		return len(action.Params) > 0
+	}
 	for _, p := range action.Params {
 		if _, ok := p.Presence.(wire.Required); ok {
 			return true

@@ -1026,6 +1026,24 @@ export const login = quack.recipe({
 	}
 }
 
+func TestEnterOnARecipeWithOnlyOptionalParamsOpensTheBoxToo(t *testing.T) {
+	h := start(t, newFakeApp(), withRecipes(t, `
+import quack from "quack"
+
+export const pair = quack.recipe({
+  params: { code: { type: "string" } },
+  run({ code }) { console.log("code", code ?? "from env") },
+})
+`))
+
+	h.typing("$pair")
+	h.press("enter")
+	h.waitFor("▸ code", "› $pair\n")
+	h.press("enter")
+
+	h.waitForLog("\n› $pair\ncode from env\n")
+}
+
 func TestFailedRecipeEndsWithTheErrorAndWhereItThrew(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app, withRecipes(t, `

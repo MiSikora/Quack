@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- CLI: enter on a recipe with params in the terminal UI opens its params box even when they are all optional.
+
 ### Fixed
 - CLI: a recipe's steps show the environment variables it reads as `${NAME}` again, instead of their values, in the terminal UI, the CLI's output and MCP.
 
