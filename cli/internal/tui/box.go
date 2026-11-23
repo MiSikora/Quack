@@ -11,15 +11,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 
-	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
 type paramBox struct {
-	action  wire.Action
-	fields  []boxField
-	focused int
-	width   int
+	runnable runnable
+	fields   []boxField
+	focused  int
+	width    int
 }
 
 type boxField struct {
@@ -52,9 +51,9 @@ type choiceField struct {
 	chosen  int
 }
 
-func newParamBox(action wire.Action, width int) *paramBox {
-	b := &paramBox{action: action}
-	for _, p := range action.Params {
+func newParamBox(r runnable, width int) *paramBox {
+	b := &paramBox{runnable: r}
+	for _, p := range r.Params {
 		b.fields = append(b.fields, boxField{param: p, field: newField(p)})
 	}
 	b.resize(width)
@@ -227,11 +226,11 @@ func (b *paramBox) hintsView(text *textField, rows int) []string {
 	return append(append([]string{b.header()}, hints...), row)
 }
 
-func (b *paramBox) preview() string { return "› " + recipe.CommandLine(b.action, b.args()) }
+func (b *paramBox) preview() string { return "› " + b.runnable.commandLine(b.args()) }
 
 func (b *paramBox) header() string {
-	header := commandStyle.Render(b.action.ID)
-	if description := firstLine(b.action.Description); description != "" {
+	header := commandStyle.Render(b.runnable.ID) + statusStyle.Render(b.runnable.suffix())
+	if description := firstLine(b.runnable.Description); description != "" {
 		header += statusStyle.Render(" · " + description)
 	}
 	return header

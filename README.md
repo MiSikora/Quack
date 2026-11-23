@@ -102,7 +102,7 @@ A recipe can run actions (`quack.runAction`), open the app (`quack.openApp`), wa
 
 A param with `env: "QUACK_TOKEN"` takes that environment variable's value when the run leaves it out. quack shows it as `${QUACK_TOKEN}`, not its value, wherever it lists or logs the recipe.
 
-Run it with `quack --recipe greetAndGoBack name=Goose`, or type `$greetAndGoBack` in `quack`.
+Run it with `quack --recipe greetAndGoBack name=Goose`, or find it in `quack`, which lists recipes with the actions and marks them `ƒ`. Type `$` there to list only the recipes.
 
 ## Use it with AI agents
 

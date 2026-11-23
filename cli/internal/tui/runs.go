@@ -23,8 +23,7 @@ type runs struct {
 }
 
 type run struct {
-	id      string
-	recipe  bool
+	runnable
 	step    string
 	started time.Time
 	// Kept so that the run's end does not repeat the error of the step that ended it.
@@ -92,7 +91,7 @@ func (r *runs) start(activity activity, started *run, actions []wire.Action, wor
 	}
 	header := ""
 	if started.recipe {
-		header = "\n" + commandStyle.Render("› "+started.id)
+		header = "\n" + commandStyle.Render("› "+started.commandLine(nil))
 	}
 	return header, tea.Batch(do, r.spinner.Tick)
 }
@@ -176,7 +175,7 @@ func (r *runs) tick(msg tea.Msg) tea.Cmd {
 func (r *runs) footer() string {
 	// The spinner's frames end with a space of their own.
 	a := r.active
-	line := strings.TrimSpace(r.spinner.View()) + " " + a.id
+	line := strings.TrimSpace(r.spinner.View()) + " " + a.ID + a.suffix()
 	if a.recipe && a.step != "" {
 		line += " · " + a.step
 	}

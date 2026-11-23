@@ -67,7 +67,7 @@ func header(version string) string {
 	lines := strings.Split(duckView(), "\n")
 	text := []string{
 		selectedStyle.Render("quack") + statusStyle.Render(" "+version),
-		statusStyle.Render("type to find an action · $ recipes · / commands"),
+		statusStyle.Render("type to find an action or a recipe · $ recipes only · / commands"),
 	}
 	for i, t := range text {
 		lines[i] += strings.Repeat(" ", len(duck[0])-ansi.StringWidth(lines[i])+2) + t

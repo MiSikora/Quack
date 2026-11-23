@@ -40,8 +40,8 @@ recipes:
   what they return. The recipes of an app are the exports of $XDG_CONFIG_HOME/quack/recipes/<package>.ts, or of
   ~/.config/quack/recipes/<package>.ts when XDG_CONFIG_HOME is unset or empty, or of the .js file there. The
   file may import local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json there,
-  so that editors check recipes, and with --app a starter file of the app. The terminal UI runs a recipe as
-  $<name>:
+  so that editors check recipes, and with --app a starter file of the app. The terminal UI lists the recipes
+  with the actions, marked ƒ, and $ lists only the recipes:
 
     import quack from "quack"
 

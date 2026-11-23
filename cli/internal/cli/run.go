@@ -105,8 +105,8 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		"  what they return. The recipes of an app are the exports of $XDG_CONFIG_HOME/quack/recipes/<package>.ts, or of\n" +
 		"  ~/.config/quack/recipes/<package>.ts when XDG_CONFIG_HOME is unset or empty, or of the .js file there. The\n" +
 		"  file may import local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json there,\n" +
-		"  so that editors check recipes, and with --app a starter file of the app. The terminal UI runs a recipe as\n" +
-		"  $<name>:\n\n" +
+		"  so that editors check recipes, and with --app a starter file of the app. The terminal UI lists the recipes\n" +
+		"  with the actions, marked ƒ, and $ lists only the recipes:\n\n" +
 		"    import quack from \"quack\"\n\n" +
 		"    export const login = quack.recipe({\n" +
 		"      description: \"Log in as the test user\",\n" +

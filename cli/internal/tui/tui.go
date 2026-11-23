@@ -137,7 +137,7 @@ func newModel(source Source, activity activity, want client.Target, mode client.
 		mode:      mode,
 		picker:    newPicker(want, 0),
 		clock:     wallClock{},
-		prompt:    prompt{input: newInput("find an action, $ for recipes, / for commands")},
+		prompt:    prompt{input: newInput("find an action or a recipe, $ for recipes only, / for commands"), grouped: true},
 		runs:      newRuns(),
 		clipboard: clipboard.WriteAll,
 		header:    header(version),
@@ -281,8 +281,8 @@ func (m *model) press(msg tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		return m.choose()
 	case "tab":
-		if c, ok := m.prompt.selection(); ok && c.command == nil && len(c.action.Params) > 0 {
-			return m.openBox(c.action)
+		if c, ok := m.prompt.selection(); ok && c.command == nil && len(c.runnable.Params) > 0 {
+			return m.openBox(c.runnable)
 		}
 		return nil
 	case "esc":
@@ -343,10 +343,10 @@ func (m *model) pressBox(msg tea.KeyPressMsg) tea.Cmd {
 	case m.runs.active != nil:
 		return tea.Batch(cmd, m.refused.show(m.clock, refusedDuringRun))
 	}
-	action, args := m.box.action, m.box.args()
+	r, args := m.box.runnable, m.box.args()
 	m.box = nil
 	m.prompt.clear()
-	return tea.Batch(m.start(action, args), m.prompt.input.Focus())
+	return tea.Batch(m.start(r, args), m.prompt.input.Focus())
 }
 
 // A second ctrl+c while the action stops asks to quit too, so that an action that does not stop cannot keep quack
@@ -375,23 +375,26 @@ func (m *model) choose() tea.Cmd {
 	switch {
 	case !ok:
 		return nil
+	case c.group:
+		m.prompt.openGroup(c.id)
+		return nil
 	case c.command != nil:
 		m.prompt.clear()
 		return c.command.run(m)
-	case len(c.action.Params) > 0:
-		return m.openBox(c.action)
+	case len(c.runnable.Params) > 0:
+		return m.openBox(c.runnable)
 	case m.runs.active != nil:
 		return m.refused.show(m.clock, refusedDuringRun)
 	default:
 		m.prompt.clear()
-		return m.start(c.action, nil)
+		return m.start(c.runnable, nil)
 	}
 }
 
-func (m *model) start(action wire.Action, args map[string]wire.RawArg) tea.Cmd {
-	app, script, r := m.app, m.script, &run{id: action.ID}
+func (m *model) start(r runnable, args map[string]wire.RawArg) tea.Cmd {
+	app, script := m.app, m.script
 	work := func(ctx context.Context, observer recipe.Observer) error {
-		step := recipe.Call{Action: action.ID, Args: args}
+		step := recipe.Call{Action: r.ID, Args: args}
 		observer.Started(step)
 		result, err := recipe.Do(ctx, app, step, observer.Notified)
 		if err == nil {
@@ -399,19 +402,18 @@ func (m *model) start(action wire.Action, args map[string]wire.RawArg) tea.Cmd {
 		}
 		return err
 	}
-	if name, ok := strings.CutPrefix(action.ID, "$"); ok {
-		r.recipe = true
+	if r.recipe {
 		work = func(ctx context.Context, observer recipe.Observer) error {
-			return script.Run(ctx, app, name, args, observer)
+			return script.Run(ctx, app, r.ID, args, observer)
 		}
 	}
-	header, cmd := m.runs.start(m.activity, r, m.prompt.actions, work)
+	header, cmd := m.runs.start(m.activity, &run{runnable: r}, m.prompt.actions, work)
 	m.log.add(header)
 	return cmd
 }
 
-func (m *model) openBox(action wire.Action) tea.Cmd {
-	m.box = newParamBox(action, m.width)
+func (m *model) openBox(r runnable) tea.Cmd {
+	m.box = newParamBox(r, m.width)
 	m.prompt.input.Blur()
 	return m.box.init()
 }

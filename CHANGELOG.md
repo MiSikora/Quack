@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - CLI: typing in a param with hints in the terminal UI selects the best matching hint, so that enter picks it. ↓ goes back to the text as typed.
+- CLI: the terminal UI lists recipes with the actions, marked `ƒ` after their names, and `$` lists only the recipes. A recipe and an action of the same name both show. The terminal UI writes a recipe's command line as `--recipe <name>` instead of `$<name>`.
+- CLI: ↑ on an empty prompt in the terminal UI lists the actions and recipes sorted by id, and groups the ones that share a namespace, such as `sync.`. Enter or → opens a group, and ← or backspace goes back. Typing still searches them all.
 
 ## [0.1.4] - 2026-11-23
 

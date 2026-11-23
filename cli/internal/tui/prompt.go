@@ -19,18 +19,29 @@ type prompt struct {
 	actions    []wire.Action
 	recipes    []recipe.Recipe
 	recipePath string
-	browsing   bool
-	selected   int
-	width      int
+	// Browsing lists the runnables of an empty prompt, sorted by id. With grouped, the ids that share a namespace with
+	// another go into its group, and group names the group that browsing shows, or is empty at the top level.
+	browsing bool
+	grouped  bool
+	group    string
+	selected int
+	width    int
 }
 
+// An action or a recipe. A recipe's id is its name.
+type runnable struct {
+	wire.Action
+	recipe bool
+}
+
+// A runnable, a command, or a group of runnables whose id is their namespace.
 type choice struct {
 	id          string
 	description string
-	// A recipe comes as an action whose id is its name after '$', so that it opens the box as an action does.
-	action  wire.Action
-	command *command
-	matched []int
+	runnable    runnable
+	command     *command
+	group       bool
+	matched     []int
 }
 
 func newInput(placeholder string) textinput.Model {
@@ -47,22 +58,21 @@ func newInput(placeholder string) textinput.Model {
 func (p *prompt) choices() ([]choice, int) {
 	text := strings.TrimSpace(p.input.Value())
 	var all []choice
-	switch {
-	case strings.HasPrefix(text, "$"):
-		for _, r := range p.recipes {
-			action := wire.Action{ID: "$" + r.Name, Description: r.Description, Params: r.Params}
-			all = append(all, choice{id: action.ID, description: action.Description, action: action})
-		}
+	switch query, recipes := strings.CutPrefix(text, "$"); {
+	case recipes:
+		text = query
+		all = p.runnables(false)
 	case strings.HasPrefix(text, "/"):
 		for _, c := range commands() {
 			all = append(all, choice{id: c.name, description: c.description, command: &c})
 		}
 	default:
-		for _, a := range p.actions {
-			all = append(all, choice{id: a.ID, description: a.Description, action: a})
-		}
+		all = p.runnables(true)
 	}
-	if text == "" || text == "$" || text == "/" {
+	if text == "" && p.browsing {
+		return p.browse(all), len(all)
+	}
+	if text == "" || text == "/" {
 		return all, len(all)
 	}
 	ids := make([]string, len(all))
@@ -76,6 +86,63 @@ func (p *prompt) choices() ([]choice, int) {
 		matches = append(matches, c)
 	}
 	return matches, len(all)
+}
+
+// The recipes come first, so that a recipe wins a tie with an action of the same name.
+func (p *prompt) runnables(actions bool) []choice {
+	var all []choice
+	for _, r := range p.recipes {
+		all = append(all, runnableChoice(runnable{wire.Action{ID: r.Name, Description: r.Description, Params: r.Params}, true}))
+	}
+	if actions {
+		for _, a := range p.actions {
+			all = append(all, runnableChoice(runnable{Action: a}))
+		}
+	}
+	return all
+}
+
+// The recipe of an id sorts before its action, as all lists the recipes first.
+func (p *prompt) browse(all []choice) []choice {
+	all = slices.Clone(all)
+	slices.SortStableFunc(all, func(a, b choice) int { return strings.Compare(a.id, b.id) })
+	if p.group != "" {
+		return slices.DeleteFunc(all, func(c choice) bool { return !strings.HasPrefix(c.id, p.group) })
+	}
+	if !p.grouped {
+		return all
+	}
+	sizes := map[string]int{}
+	for _, c := range all {
+		if ns, ok := namespace(c.id); ok {
+			sizes[ns]++
+		}
+	}
+	var rows []choice
+	for _, c := range all {
+		ns, ok := namespace(c.id)
+		switch {
+		case !ok || sizes[ns] < 2:
+			rows = append(rows, c)
+		case !slices.ContainsFunc(rows, func(row choice) bool { return row.group && row.id == ns }):
+			rows = append(rows, choice{id: ns, description: strconv.Itoa(sizes[ns]), group: true})
+		}
+	}
+	slices.SortStableFunc(rows, func(a, b choice) int { return strings.Compare(a.id, b.id) })
+	return rows
+}
+
+// The text up to the first '.', with the '.'.
+func namespace(id string) (string, bool) {
+	i := strings.IndexByte(id, '.')
+	if i < 0 {
+		return "", false
+	}
+	return id[:i+1], true
+}
+
+func runnableChoice(r runnable) choice {
+	return choice{id: r.ID, description: r.Description, runnable: r}
 }
 
 func (p *prompt) open() bool { return p.input.Value() != "" || p.browsing }
@@ -102,14 +169,36 @@ func (p *prompt) update(msg tea.KeyPressMsg) tea.Cmd {
 	case "down", "ctrl+n":
 		p.selected = max(0, p.selected-1)
 		return nil
+	case "right":
+		if c, ok := p.selection(); ok && c.group {
+			p.openGroup(c.id)
+			return nil
+		}
+	case "left", "backspace":
+		if p.group != "" && p.input.Value() == "" {
+			p.closeGroup()
+			return nil
+		}
 	}
 	text := p.input.Value()
 	var cmd tea.Cmd
 	p.input, cmd = p.input.Update(msg)
 	if p.input.Value() != text {
-		p.selected, p.browsing = 0, false
+		p.selected, p.browsing, p.group = 0, false, ""
 	}
 	return cmd
+}
+
+func (p *prompt) openGroup(group string) {
+	p.group, p.selected = group, 0
+}
+
+// The group's row stays selected, so that ← undoes →.
+func (p *prompt) closeGroup() {
+	group := p.group
+	p.group, p.selected = "", 0
+	choices, _ := p.choices()
+	p.selected = max(0, slices.IndexFunc(choices, func(c choice) bool { return c.group && c.id == group }))
 }
 
 func (p *prompt) forward(msg tea.Msg) tea.Cmd {
@@ -121,7 +210,7 @@ func (p *prompt) forward(msg tea.Msg) tea.Cmd {
 func (p *prompt) clear() bool {
 	had := p.open()
 	p.input.SetValue("")
-	p.selected, p.browsing = 0, false
+	p.selected, p.browsing, p.group = 0, false, ""
 	return had
 }
 
@@ -143,7 +232,7 @@ func (p *prompt) keepSelection(change func()) {
 	}
 	choices, _ := p.choices()
 	for i, c := range choices {
-		if c.id == selected.id {
+		if c.command == nil && c.id == selected.id && c.group == selected.group && c.runnable.recipe == selected.runnable.recipe {
 			p.selected = i
 		}
 	}
@@ -151,14 +240,18 @@ func (p *prompt) keepSelection(change func()) {
 
 func (p *prompt) resize(width int) {
 	p.width = width
-	widest := len(strconv.Itoa(max(len(p.actions), len(p.recipes), len(commands()))))
+	widest := len(strconv.Itoa(max(len(p.actions)+len(p.recipes), len(commands()))))
 	p.input.SetWidth(max(1, width-ansi.StringWidth(p.input.Prompt)-2*widest-3))
 }
 
 func (p *prompt) view() string {
 	choices, total := p.choices()
-	counter := statusStyle.Render(strconv.Itoa(len(choices)) + "/" + strconv.Itoa(total))
-	line := p.input.View()
+	counter := strconv.Itoa(len(choices)) + "/" + strconv.Itoa(total)
+	if p.browsing && p.group != "" {
+		counter = p.group + " " + counter
+	}
+	counter = statusStyle.Render(counter)
+	line := ansi.Truncate(p.input.View(), p.width-ansi.StringWidth(counter)-1, "")
 	return line + strings.Repeat(" ", max(1, p.width-ansi.StringWidth(line)-ansi.StringWidth(counter))) + counter
 }
 
@@ -180,7 +273,13 @@ func (p *prompt) list(rows int) []string {
 }
 
 func (p *prompt) keys() string {
-	if p.open() {
+	c, ok := p.selection()
+	switch {
+	case ok && c.group:
+		return "enter or → open · ↑↓ select · esc close · ctrl+c cancel/quit"
+	case p.browsing && p.group != "":
+		return "enter run · tab params · ↑↓ select · ← back · esc close · ctrl+c cancel/quit"
+	case p.open():
 		return "enter run · tab params · ↑↓ select · esc close · ctrl+c cancel/quit"
 	}
 	return "type or ↑ to find an action · ctrl+o open app · ctrl+c cancel/quit"
@@ -190,7 +289,7 @@ func (p *prompt) rows(choices []choice, count int) []string {
 	first := max(0, p.selected-count+1)
 	idWidth := 0
 	for _, c := range choices {
-		idWidth = max(idWidth, ansi.StringWidth(c.id))
+		idWidth = max(idWidth, ansi.StringWidth(c.id+c.suffix()))
 	}
 	var rows []string
 	for i, c := range choices[first : first+count] {
@@ -198,11 +297,36 @@ func (p *prompt) rows(choices []choice, count int) []string {
 		if first+i == p.selected {
 			marker, style = selectedStyle.Render("▸ "), selectedStyle
 		}
-		padding := strings.Repeat(" ", idWidth-ansi.StringWidth(c.id)+3)
-		row := marker + highlight(c.id, c.matched, style) + padding + statusStyle.Render(firstLine(c.description))
+		padding := strings.Repeat(" ", idWidth-ansi.StringWidth(c.id+c.suffix())+3)
+		row := marker + highlight(c.id, c.matched, style) + statusStyle.Render(c.suffix()) + padding +
+			statusStyle.Render(firstLine(c.description))
 		rows = append(rows, ansi.Truncate(row, p.width, "…"))
 	}
 	return rows
+}
+
+func (c choice) suffix() string {
+	if c.command != nil {
+		return ""
+	}
+	return c.runnable.suffix()
+}
+
+// The mark of a recipe after its name, unstyled.
+func (r runnable) suffix() string {
+	if r.recipe {
+		return " ƒ"
+	}
+	return ""
+}
+
+// The command line that runs it with args.
+func (r runnable) commandLine(args map[string]wire.RawArg) string {
+	line := recipe.CommandLine(r.Action, args)
+	if r.recipe {
+		return "--recipe " + line
+	}
+	return line
 }
 
 func highlight(id string, matched []int, style lipgloss.Style) string {

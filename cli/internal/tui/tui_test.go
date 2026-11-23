@@ -33,7 +33,7 @@ func TestPanelShowsABlankRowTheTitleTheInputAndTheKeysAtRest(t *testing.T) {
 		"",
 		"quack · io.mehow.quack.sample 1.0 · emulator-5554",
 		strings.Repeat("─", 100),
-		"> find an action, $ for recipes, / for commands",
+		"> find an action or a recipe, $ for recipes only, / for commands",
 		strings.Repeat("─", 100),
 		" type or ↑ to find an action · ctrl+o open app · ctrl+c cancel/quit",
 	})
@@ -42,28 +42,154 @@ func TestPanelShowsABlankRowTheTitleTheInputAndTheKeysAtRest(t *testing.T) {
 	}
 }
 
-func TestUpOnEmptyTextListsEveryActionBestLastUnderARuleAndEscClosesIt(t *testing.T) {
+func TestUpOnEmptyTextListsTheNamespacesUnderARuleAndEscClosesIt(t *testing.T) {
 	h := start(t, newFakeApp())
 
 	h.press("up")
 
 	checkPanel(t, h, []string{
 		strings.Repeat("─", 100),
-		"  app.count        Count to 50",
-		"  account.watch    Print the account each time it changes, until stopped",
-		"  account.delete   Delete the account",
-		"  account.create   Create the account",
-		"  app.params       Show the parsed value of each param type",
-		"▸ app.greet        Say hello",
+		"  app.       3",
+		"▸ account.   3",
 		strings.Repeat("─", 100),
-		"> find an action, $ for recipes, / for commands",
+		"> find an action or a recipe, $ for recipes only, / for commands",
 		strings.Repeat("─", 100),
-		" enter run · tab params · ↑↓ select · esc close · ctrl+c cancel/quit",
+		" enter or → open · ↑↓ select · esc close · ctrl+c cancel/quit",
 	})
+	if lines := h.panel(); !strings.HasSuffix(lines[4], " 2/6") {
+		t.Errorf("the input line is %q, want the counter of the rows at its end", lines[4])
+	}
 	h.press("esc")
 	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
 	h.press("down")
 	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
+}
+
+// Groups of 3 and 3 actions, a group of a recipe and two actions, a dotted id alone in its namespace, and two ids
+// without a dot.
+func startNamespaces(t *testing.T) (*harness, *fakeApp) {
+	app := newFakeApp()
+	app.setActions(append(app.actions(),
+		wire.Action{ID: "sync.restore", Description: "Restore a backup"},
+		wire.Action{ID: "sync.backup", Description: "Back up"},
+		wire.Action{ID: "feature.toggle", Description: "Toggle a feature"},
+		wire.Action{ID: "ping", Description: "Ping the app"},
+	))
+	h := start(t, app, withRecipes(t, `
+import quack from "quack"
+
+quack.recipe({ name: "sync.backup", description: "Back up with a recipe", run() { console.log("recipe backed up") } })
+export const login = quack.recipe({ description: "Log in", run() {} })
+`))
+	return h, app
+}
+
+func TestBrowsingGroupsTheIdsThatShareANamespaceWithAnother(t *testing.T) {
+	h, _ := startNamespaces(t)
+
+	h.press("up")
+
+	checkPanel(t, h, []string{
+		strings.Repeat("─", 100),
+		"  sync.            3",
+		"  ping             Ping the app",
+		"  login ƒ          Log in",
+		"  feature.toggle   Toggle a feature",
+		"  app.             3",
+		"▸ account.         3",
+		strings.Repeat("─", 100),
+		"> find an action or a recipe, $ for recipes only, / for commands",
+		strings.Repeat("─", 100),
+		" enter or → open · ↑↓ select · esc close · ctrl+c cancel/quit",
+	})
+	if lines := h.panel(); !strings.HasSuffix(lines[8], " 6/12") {
+		t.Errorf("the input line is %q, want the counter of the rows at its end", lines[8])
+	}
+	h.press("up", "up")
+	h.waitFor("▸ feature.toggle", "enter run · tab params")
+}
+
+func TestEnterOrRightOpensAGroupWithTheRecipeFirstAndLeftOrBackspaceGoesBackToIt(t *testing.T) {
+	h, _ := startNamespaces(t)
+	h.press("up", "up", "up", "up", "up", "up")
+	h.waitFor("▸ sync.")
+
+	h.press("enter")
+	checkPanel(t, h, []string{
+		strings.Repeat("─", 100),
+		"  sync.restore    Restore a backup",
+		"  sync.backup     Back up",
+		"▸ sync.backup ƒ   Back up with a recipe",
+		strings.Repeat("─", 100),
+		"> find an action or a recipe, $ for recipes only, / for commands",
+		strings.Repeat("─", 100),
+		" enter run · tab params · ↑↓ select · ← back · esc close · ctrl+c cancel/quit",
+	})
+	if lines := h.panel(); !strings.HasSuffix(lines[5], " sync. 3/12") {
+		t.Errorf("the input line is %q, want the group and the counter at its end", lines[5])
+	}
+	h.press("left")
+	h.waitFor("▸ sync.", "  ping", "6/12")
+	h.waitForNo("sync.restore")
+	h.press("right")
+	h.waitFor("▸ sync.backup ƒ", "sync. 3/12")
+	h.press("backspace")
+	h.waitFor("▸ sync.", "6/12", "enter or → open")
+}
+
+func TestEnterInAGroupRunsTheSelectedRecipeOrAction(t *testing.T) {
+	h, app := startNamespaces(t)
+	h.press("up", "up", "up", "up", "up", "up", "enter")
+	h.waitFor("▸ sync.backup ƒ")
+
+	h.press("enter")
+	h.waitForLog("\n› --recipe sync.backup\nrecipe backed up\n")
+	h.waitFor("type or ↑ to find an action")
+	if got := app.received(); len(got) != 0 {
+		t.Errorf("calls: got %v, want none", got)
+	}
+	h.press("up", "up", "up", "up", "up", "up", "enter", "up")
+	h.waitFor("▸ sync.backup     Back up")
+	h.press("enter")
+
+	h.waitForLog("\n› sync.backup\n")
+	if got, want := app.received(), []wire.Call{{Action: "sync.backup"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestTypingInAGroupSearchesEverythingAndForgetsTheGroup(t *testing.T) {
+	h, _ := startNamespaces(t)
+	h.press("up", "up", "up", "up", "up", "up", "enter")
+	h.waitFor("▸ sync.backup ƒ", "sync. 3/12")
+
+	h.typing("acc")
+	h.waitFor("▸ account.", "> acc", "3/12")
+	h.waitForNo("sync.")
+	h.press("backspace", "backspace", "backspace")
+	h.waitFor("type or ↑ to find an action")
+	h.press("up")
+	h.waitFor("▸ account.         3", "6/12")
+}
+
+func TestEscInAGroupClosesTheListAndUpStartsAtTheTop(t *testing.T) {
+	h, _ := startNamespaces(t)
+	h.press("up", "enter")
+	h.waitFor("▸ account.create", "account. 3/12")
+
+	h.press("esc")
+	h.waitFor("> find an action", "type or ↑ to find an action")
+	h.press("up")
+
+	h.waitFor("  app.             3", "▸ account.         3", "6/12")
+}
+
+func TestBrowsingWithoutGroupsListsEveryIdSorted(t *testing.T) {
+	h := start(t, newFakeApp(), flat)
+
+	h.press("up")
+
+	h.waitFor("  app.params", "  app.greet", "  app.count", "  account.watch", "  account.delete", "▸ account.create", "6/6")
 }
 
 func TestEnterAndTabDoNothingWhileNoListShows(t *testing.T) {
@@ -87,7 +213,7 @@ func TestBackspaceToEmptyTextClosesTheList(t *testing.T) {
 	h.press("backspace")
 	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
 	h.press("up")
-	h.waitFor("▸ app.greet", "esc close")
+	h.waitFor("▸ account.", "esc close")
 	h.typing("a")
 	h.press("backspace")
 	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
@@ -126,7 +252,8 @@ func TestNoMatchIsTheOnlyRowOfTheList(t *testing.T) {
 func TestBoxShowsOverTheInputWhichPreviewsTheCall(t *testing.T) {
 	h := start(t, newFakeApp())
 
-	h.press("up", "tab")
+	h.typing("app.greet")
+	h.press("tab")
 	h.waitFor("▸ name")
 
 	lines := h.panel()
@@ -142,7 +269,7 @@ func TestBoxShowsOverTheInputWhichPreviewsTheCall(t *testing.T) {
 }
 
 func TestListCoversTheBottomOfTheLogWithoutMovingIt(t *testing.T) {
-	h := start(t, newFakeApp())
+	h := start(t, newFakeApp(), flat)
 	h.typing("app.count")
 	h.press("enter")
 	h.waitForLog("  50\nCounted · ")
@@ -151,13 +278,13 @@ func TestListCoversTheBottomOfTheLogWithoutMovingIt(t *testing.T) {
 	before := strings.Split(h.view(), "\n")
 
 	h.press("up")
-	h.waitFor("▸ app.greet")
+	h.waitFor("▸ account.create")
 
 	after := strings.Split(h.view(), "\n")
 	if len(after) != 30 || !reflect.DeepEqual(after[:19], before[:19]) || after[19] != strings.Repeat("─", 100) {
 		t.Errorf("the list moved the log:\n%s", h.view())
 	}
-	if !strings.HasPrefix(after[20], "  app.count") || !strings.HasPrefix(after[25], "▸ app.greet") {
+	if !strings.HasPrefix(after[20], "  app.params") || !strings.HasPrefix(after[25], "▸ account.create") {
 		t.Errorf("the list is not right over the input:\n%s", h.view())
 	}
 	h.program.Send(tea.MouseWheelMsg{X: 10, Y: 5, Button: tea.MouseWheelUp})
@@ -174,12 +301,12 @@ func TestListCoversTheBottomOfTheLogWithoutMovingIt(t *testing.T) {
 }
 
 func TestMouseOverTheListSelectsNothing(t *testing.T) {
-	h := start(t, newFakeApp())
+	h := start(t, newFakeApp(), flat)
 	h.typing("app.count")
 	h.press("enter")
 	h.waitForLog("  50\nCounted · ")
 	h.press("up")
-	h.waitFor("▸ app.greet")
+	h.waitFor("▸ account.create")
 
 	for range 2 {
 		h.mouse(tea.MouseClickMsg{X: 4, Y: 22, Button: tea.MouseLeft})
@@ -274,7 +401,7 @@ func TestLogStartsAtTheTopWithTheDuckAndTheVersionByIt(t *testing.T) {
 			t.Errorf("log row %d is %q, want the duck", i, row)
 		}
 	}
-	if !strings.HasSuffix(rows[0], "  quack dev") || !strings.HasSuffix(rows[1], "  type to find an action · $ recipes · / commands") {
+	if !strings.HasSuffix(rows[0], "  quack dev") || !strings.HasSuffix(rows[1], "  type to find an action or a recipe · $ recipes only · / commands") {
 		t.Errorf("the first rows are %q and %q, want quack's version and what to type by the duck", rows[0], rows[1])
 	}
 	want := []string{"switched to io.mehow.quack.sample on Pixel 8 · emulator-5554", "", "› account.delete"}
@@ -423,18 +550,18 @@ func TestDoubleClickCopiesTheWordAndAClickClearsTheSelection(t *testing.T) {
 }
 
 func TestListScrollsToKeepTheSelectionInSight(t *testing.T) {
-	h := start(t, newFakeApp())
+	h := start(t, newFakeApp(), flat)
 	// A list of 5 rows, so that the 6 actions scroll.
 	h.resize(100, 10)
 	h.press("up")
 	h.waitForOverlayRows(5)
 
-	h.waitFor("  account.watch", "  account.delete", "  account.create", "  app.params", "▸ app.greet")
+	h.waitFor("  app.greet", "  app.count", "  account.watch", "  account.delete", "▸ account.create")
 	h.press("up", "up", "up", "up", "up", "up")
-	h.waitFor("▸ app.count", "  account.watch")
-	h.waitForNo("app.greet")
+	h.waitFor("▸ app.params", "  account.delete")
+	h.waitForNo("account.create")
 	h.press("down")
-	h.waitFor("▸ account.watch")
+	h.waitFor("▸ app.greet")
 }
 
 func TestUpMovesToTheNextMatchAndDownBackToTheBest(t *testing.T) {
@@ -505,7 +632,8 @@ func TestEnterOnAnActionWithARequiredParamOpensTheBox(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
 
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 
 	h.waitFor("app.greet · Say hello", "▸ name", "Required. Who to greet", "  times", "Default: 1.", "› app.greet")
 	h.typing("Bob Smith")
@@ -526,7 +654,8 @@ func TestMissingRequiredParamBlocksTheRunAndTurnsItsNoteRed(t *testing.T) {
 	h := start(t, app)
 	red := lipgloss.NewStyle().Foreground(lipgloss.Red).Render("Required. Who to greet")
 
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 	h.waitFor("▸ name")
 	h.press("enter")
 	h.waitFor("▸ times")
@@ -629,7 +758,8 @@ func TestBoxSendsOnlyTheParamsTheUserSet(t *testing.T) {
 func TestFocusedParamWithHintsTakesTheBoxWithTheHintsInTheAppsOrder(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
 
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 
 	h.waitFor("app.greet · Say hello", "  Bob\n", "  Albert\n", "  Alice\n", "▸ name", "Required. Who to greet", "3/3",
 		"› app.greet")
@@ -641,7 +771,8 @@ func TestFocusedParamWithHintsTakesTheBoxWithTheHintsInTheAppsOrder(t *testing.T
 
 func TestHintsNarrowToTheTextAndSayWhenNoneMatches(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 	h.waitFor("3/3")
 
 	h.typing("bo")
@@ -654,7 +785,8 @@ func TestHintsNarrowToTheTextAndSayWhenNoneMatches(t *testing.T) {
 func TestTypingSelectsTheBestHintSoThatEnterPicksIt(t *testing.T) {
 	app := withNameHints(newFakeApp(), "Alice", "Albert", "Bob")
 	h := start(t, app)
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 	h.waitFor("3/3")
 
 	h.typing("Bo")
@@ -673,7 +805,8 @@ func TestTypingSelectsTheBestHintSoThatEnterPicksIt(t *testing.T) {
 func TestDownFromTheBestHintKeepsTheTextAsTyped(t *testing.T) {
 	app := withNameHints(newFakeApp(), "Alice", "Albert", "Bob")
 	h := start(t, app)
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 	h.waitFor("3/3")
 
 	h.typing("Bo")
@@ -696,7 +829,8 @@ func TestDownFromTheBestHintKeepsTheTextAsTyped(t *testing.T) {
 func TestTextThatNoHintMatchesStaysAsTyped(t *testing.T) {
 	app := withNameHints(newFakeApp(), "Alice", "Albert", "Bob")
 	h := start(t, app)
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 	h.waitFor("3/3")
 
 	h.typing("Bobx")
@@ -712,7 +846,8 @@ func TestTextThatNoHintMatchesStaysAsTyped(t *testing.T) {
 
 func TestEmptyTextSelectsNoHint(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 	h.waitFor("3/3", "› app.greet\n", "↑ hints · enter next")
 	h.waitForNo("▸ A")
 
@@ -725,7 +860,8 @@ func TestEmptyTextSelectsNoHint(t *testing.T) {
 
 func TestCallPreviewsTheSelectedHintInsteadOfTheText(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 	h.waitFor("3/3", "› app.greet\n")
 
 	h.press("up")
@@ -738,7 +874,8 @@ func TestCallPreviewsTheSelectedHintInsteadOfTheText(t *testing.T) {
 
 func TestUpPastTheFirstHintSelectsNone(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 	h.waitFor("3/3")
 
 	h.press("up", "up", "up", "up")
@@ -752,7 +889,8 @@ func TestUpPastTheFirstHintSelectsNone(t *testing.T) {
 
 func TestEscDeselectsTheHintAndThenClosesTheBox(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 	h.waitFor("3/3")
 
 	h.press("up")
@@ -760,7 +898,7 @@ func TestEscDeselectsTheHintAndThenClosesTheBox(t *testing.T) {
 	h.press("esc")
 	h.waitFor("  Alice\n", "▸ name", "↑ hints · enter next")
 	h.press("esc")
-	h.waitFor("▸ app.greet", "> find an action")
+	h.waitFor("▸ app.greet", "> app.greet")
 }
 
 func TestHintsScrollToKeepTheSelectionInSight(t *testing.T) {
@@ -769,7 +907,8 @@ func TestHintsScrollToKeepTheSelectionInSight(t *testing.T) {
 		names = append(names, "user"+strconv.Itoa(10+i))
 	}
 	h := start(t, withNameHints(newFakeApp(), names...))
-	h.press("up", "enter")
+	h.typing("app.greet")
+	h.press("enter")
 	h.waitFor("  user17", "  user10", "20/20")
 	h.waitForNo("user18")
 
@@ -783,7 +922,8 @@ func TestHintsOfANonStringParamDoNotShow(t *testing.T) {
 	app := newFakeApp()
 	app.described[0].Params[1].Hints = []string{"1", "2"}
 	h := start(t, app)
-	h.press("up", "enter", "enter")
+	h.typing("app.greet")
+	h.press("enter", "enter")
 
 	h.waitFor("  name", "▸ times", "enter next · shift+tab back")
 	h.waitForNo("2/2")
@@ -1001,12 +1141,108 @@ export const clean = quack.recipe({ run() { quack.runAction("account.delete") } 
 
 	h.typing("$")
 
-	h.waitFor("  $login   Log in as the test user", "▸ $clean", "2/2")
+	h.waitFor("  login ƒ   Log in as the test user", "▸ clean ƒ", "2/2")
 	h.waitForNo("app.greet")
 	h.typing("lg")
-	h.waitFor("▸ $login", "1/2")
+	h.waitFor("▸ login ƒ", "1/2")
 	h.press("tab")
-	h.waitFor("▸ $login", "> $lg")
+	h.waitFor("▸ login ƒ", "> $lg")
+}
+
+func TestRecipesShareTheListWithTheActionsMarkedByADimF(t *testing.T) {
+	h := start(t, newFakeApp(), withRecipes(t, `
+import quack from "quack"
+
+export const login = quack.recipe({
+  description: "Log in as the test user",
+  run() { quack.runAction("app.greet", { name: "Bob" }) },
+})
+export const clean = quack.recipe({ run() { quack.runAction("account.delete") } })
+`))
+	h.waitFor("8/8")
+
+	h.typing("lo")
+
+	h.waitFor("▸ login ƒ   Log in as the test user", "> lo", "1/8")
+	if mark := statusStyle.Render(" ƒ"); !strings.Contains(h.raw(), mark) {
+		t.Errorf("the recipe's mark is not dim:\n%q", h.raw())
+	}
+	h.press("backspace", "backspace")
+	h.typing("acc")
+	h.waitFor("▸ account.", "3/8")
+	h.waitForNo("ƒ")
+}
+
+func TestRecipeAndActionOfTheSameNameBothShowWithTheRecipeFirstAndEachRunsItself(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app, withRecipes(t, `
+import quack from "quack"
+
+export const count = quack.recipe({
+  name: "app.count",
+  description: "Count with a recipe",
+  run() { quack.runAction("account.delete") },
+})
+`))
+
+	h.typing("app.count")
+	h.waitFor("  app.count     Count to 50", "▸ app.count ƒ   Count with a recipe", "2/7")
+	h.press("enter")
+	h.waitForLog("\n› --recipe app.count\n› account.delete\n")
+	h.waitFor("type or ↑ to find an action")
+	h.typing("app.count")
+	h.press("up")
+	h.waitFor("▸ app.count     Count to 50")
+	h.press("enter")
+
+	h.waitForLog("  50\nCounted · ")
+	want := []wire.Call{{Action: "account.delete"}, {Action: "app.count"}}
+	if got := app.received(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestReloadKeepsTheRecipeOrTheActionOfTheSameNameSelected(t *testing.T) {
+	h := start(t, newFakeApp(), withRecipes(t, `
+import quack from "quack"
+
+export const count = quack.recipe({ name: "app.count", run() {} })
+`))
+	h.typing("app.count")
+	h.waitFor("  app.count  ", "▸ app.count ƒ")
+
+	h.press("ctrl+r")
+	h.waitForLog("reloaded 6 actions and 1 recipes")
+	h.waitFor("  app.count  ", "▸ app.count ƒ")
+	h.press("up")
+	h.waitFor("▸ app.count     Count to 50")
+	h.press("ctrl+r")
+	h.waitForLog("reloaded 6 actions and 1 recipes\nreloaded 6 actions and 1 recipes")
+
+	h.waitFor("▸ app.count     Count to 50", "  app.count ƒ")
+}
+
+func TestBoxOfAnActionPreviewsItsIdAndARecipesItsCommandLine(t *testing.T) {
+	h := start(t, newFakeApp(), withRecipes(t, `
+import quack from "quack"
+
+export const login = quack.recipe({
+  description: "Log in",
+  params: { user: { type: "string" } },
+  run() {},
+})
+`))
+
+	h.typing("login")
+	h.press("tab")
+	h.waitFor("login ƒ · Log in", "▸ user", "› --recipe login\n")
+	h.typing("qa")
+	h.waitFor("› --recipe login user=qa\n")
+	h.press("esc", "esc")
+	h.typing("app.greet")
+	h.press("tab")
+	h.typing("Bob")
+	h.waitFor("app.greet · Say hello", "› app.greet name=Bob\n")
 }
 
 func TestDollarWithoutRecipesSaysWhereToWriteThem(t *testing.T) {
@@ -1025,7 +1261,7 @@ func TestBrokenRecipeFileSaysWhyAndLeavesTheActions(t *testing.T) {
 	h.waitForLog("switched to io.mehow.quack.sample", "io.mehow.quack.sample.ts:1:19: Unexpected end of file")
 	h.waitFor("6/6")
 	h.press("up")
-	h.waitFor("▸ app.greet", "6/6")
+	h.waitFor("▸ account.", "2/6")
 	h.press("esc")
 	h.typing("$")
 	h.waitFor("No recipes. Create "+recipe.Path("io.mehow.quack.sample"), "0/0")
@@ -1051,7 +1287,7 @@ export const setup = quack.recipe({
 	h.typing("$setup")
 	h.press("enter")
 
-	h.waitForLog("\n› $setup\n› /open-app\nstarting io.mehow.quack.sample…\ndone · ",
+	h.waitForLog("\n› --recipe setup\n› /open-app\nstarting io.mehow.quack.sample…\ndone · ",
 		"\n› wait 10ms\ndone · ",
 		"\n› account.create username=alice\n  Started\n  Creating account\nCreated · ",
 		"\ncreated 1\n› app.greet name=Bob times=2\nHello, Bob! · ",
@@ -1083,14 +1319,14 @@ export const login = quack.recipe({
 
 	h.typing("$login")
 	h.press("enter")
-	h.waitFor("$login · Log in", "bob", "alice", "▸ user", "2/2", "› $login\n")
+	h.waitFor("login ƒ · Log in", "bob", "alice", "▸ user", "2/2", "› --recipe login\n")
 	h.typing("bo")
-	h.waitFor("▸ bob", "▸ user  bo", "1/2", "› $login user=bob\n")
+	h.waitFor("▸ bob", "▸ user  bo", "1/2", "› --recipe login user=bob\n")
 	h.press("enter")
-	h.waitFor("▸ times", "› $login user=bob\n")
+	h.waitFor("▸ times", "› --recipe login user=bob\n")
 	h.press("enter")
 
-	h.waitForLog("\n› $login\n› app.greet name=bob times=1\nHello, bob! · ")
+	h.waitForLog("\n› --recipe login\n› app.greet name=bob times=1\nHello, bob! · ")
 	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"bob"}, "times": {"1"}}}}
 	if got := app.received(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
@@ -1124,10 +1360,10 @@ export const pair = quack.recipe({
 
 	h.typing("$pair")
 	h.press("enter")
-	h.waitFor("▸ code", "› $pair\n")
+	h.waitFor("▸ code", "› --recipe pair\n")
 	h.press("enter")
 
-	h.waitForLog("\n› $pair\ncode from env\n")
+	h.waitForLog("\n› --recipe pair\ncode from env\n")
 }
 
 func TestFailedRecipeEndsWithTheErrorAndWhereItThrew(t *testing.T) {
@@ -1146,7 +1382,7 @@ export const clean = quack.recipe({
 	h.typing("$clean")
 	h.press("enter")
 
-	h.waitForLog("\n› $clean\n› account.delete\n[rejected] there is no account · ", "\n    at run (io.mehow.quack.sample.ts:6:20)\n")
+	h.waitForLog("\n› --recipe clean\n› account.delete\n[rejected] there is no account · ", "\n    at run (io.mehow.quack.sample.ts:6:20)\n")
 	h.waitFor("type or ↑ to find an action")
 	if got, want := app.received(), []wire.Call{{Action: "account.delete"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
@@ -1176,8 +1412,8 @@ export const careful = quack.recipe({
 	h.typing("$careful")
 	h.press("enter")
 
-	h.waitForLog("\n› $careful\n› account.delete\n[rejected] there is no account · ", "\nkept going\n› wait 1m0s\n")
-	h.waitFor("$careful · wait 1m0s")
+	h.waitForLog("\n› --recipe careful\n› account.delete\n[rejected] there is no account · ", "\nkept going\n› wait 1m0s\n")
+	h.waitFor("careful ƒ · wait 1m0s")
 	h.press("ctrl+c")
 	h.waitForLog("\ncanceled · ")
 }
@@ -1199,10 +1435,10 @@ export const watch = quack.recipe({
 	h.typing("$watch")
 	h.press("enter")
 	h.waitForLog("› account.watch\n  Signed out")
-	h.waitFor("$watch · account.watch · ctrl+c cancel action")
+	h.waitFor("watch ƒ · account.watch · ctrl+c cancel action")
 	h.press("ctrl+c")
 
-	h.waitForLog("\n› $watch\n› wait 1ms\ndone · ", "\n› account.watch\n  Signed out\ncanceled · ")
+	h.waitForLog("\n› --recipe watch\n› wait 1ms\ndone · ", "\n› account.watch\n  Signed out\ncanceled · ")
 	h.waitFor("type or ↑ to find an action")
 	if strings.Contains(h.logText(), "app.count") {
 		t.Errorf("the log runs the step after the canceled one:\n%s", h.logText())
@@ -1221,10 +1457,10 @@ export const spin = quack.recipe({ run() { while (true) {} } })
 
 	h.typing("$spin")
 	h.press("enter")
-	h.waitFor("$spin · ctrl+c cancel action")
+	h.waitFor("spin ƒ · ctrl+c cancel action")
 	h.press("ctrl+c")
 
-	h.waitForLog("\n› $spin\ncanceled · ")
+	h.waitForLog("\n› --recipe spin\ncanceled · ")
 	h.waitFor("type or ↑ to find an action")
 }
 
@@ -1257,7 +1493,7 @@ export const clean = quack.recipe({ run() {} })`)
 	h.press("ctrl+r")
 
 	h.waitForLog("reloaded 6 actions and 1 recipes")
-	h.waitFor("▸ $clean", "1/1")
+	h.waitFor("▸ clean ƒ", "1/1")
 	writeRecipes(t, "export const a = (")
 	h.press("ctrl+r")
 	h.waitForLog("io.mehow.quack.sample.ts:1:19: Unexpected end of file\nreloaded 6 actions\n")
@@ -1266,15 +1502,15 @@ export const clean = quack.recipe({ run() {} })`)
 
 func TestReloadKeepsTheSelectedAction(t *testing.T) {
 	app := newFakeApp()
-	h := start(t, app)
+	h := start(t, app, flat)
 	h.press("up", "up", "up")
-	h.waitFor("▸ account.create")
+	h.waitFor("▸ account.watch")
 
 	app.setActions(append([]wire.Action{{ID: "aaa.new", Description: "A new action"}}, app.actions()...))
 	h.press("ctrl+r")
 
 	h.waitForLog("reloaded 7 actions and 0 recipes")
-	h.waitFor("▸ account.create", "aaa.new", "7/7")
+	h.waitFor("▸ account.watch", "aaa.new", "7/7")
 
 	app.setActions(append([]wire.Action{{ID: "aab.newer", Description: "A newer action"}}, app.actions()...))
 	h.typing("/reload")
@@ -1282,7 +1518,7 @@ func TestReloadKeepsTheSelectedAction(t *testing.T) {
 	h.waitForLog("reloaded 8 actions")
 	h.waitFor("8/8")
 	h.press("up")
-	h.waitFor("▸ aab.newer", "8/8")
+	h.waitFor("aab.newer", "▸ aaa.new", "8/8")
 }
 
 func TestFailedReloadKeepsTheActions(t *testing.T) {
@@ -1295,7 +1531,7 @@ func TestFailedReloadKeepsTheActions(t *testing.T) {
 	h.waitForLog("reload: the app is gone")
 	h.waitFor("6/6")
 	h.press("up")
-	h.waitFor("▸ app.greet", "6/6")
+	h.waitFor("▸ account.", "2/6")
 }
 
 func TestClearLeavesOnlyTheDuck(t *testing.T) {
@@ -1333,7 +1569,7 @@ func TestInitRecipesStartsTheRecipesOfTheAppAndListsThem(t *testing.T) {
 	path := recipe.Path("io.mehow.quack.sample")
 	h.waitForLog("wrote "+filepath.Join(recipe.Dir(), "quack.d.ts"), "wrote "+filepath.Join(recipe.Dir(), "tsconfig.json"), "wrote "+path)
 	h.typing("$")
-	h.waitFor("▸ $open", "Show the app's main screen", "1/1")
+	h.waitFor("▸ open ƒ", "Show the app's main screen", "1/1")
 	h.press("esc")
 	h.typing("/init-recipes")
 	h.press("enter")
@@ -1352,9 +1588,9 @@ func TestCtrlOOpensTheAppEvenDuringARun(t *testing.T) {
 }
 
 func TestSmallWindowsShrinkTheList(t *testing.T) {
-	h := start(t, newFakeApp())
+	h := start(t, newFakeApp(), flat)
 
-	h.press("up")
+	h.press("up", "up", "up", "up", "up")
 	for _, size := range []struct{ width, height, rows int }{{100, 30, 6}, {100, 10, 5}, {100, 8, 3}} {
 		h.resize(size.width, size.height)
 		h.waitForOverlayRows(size.rows)
@@ -1465,6 +1701,9 @@ func writeRecipes(t *testing.T, file string) string {
 	}
 	return path
 }
+
+// Browsing lists every runnable without groups.
+func flat(m *model) { m.prompt.grouped = false }
 
 // The runs' clock moves on by the next of steps each time it is read.
 func withClock(steps ...time.Duration) func(*model) {
