@@ -291,9 +291,11 @@ func expected(p wire.Param) string {
 	return string(p.Type)
 }
 
-// Follows the rules of action ids.
+// Follows the rules of action ids: ASCII letters, '_', '.' and '-', and no '-' first, which would read as a flag.
 func isName(name string) bool {
-	return name != "" && strings.IndexFunc(name, unicode.IsSpace) < 0 && !strings.ContainsRune("-/$", rune(name[0]))
+	return name != "" && name[0] != '-' && strings.IndexFunc(name, func(r rune) bool {
+		return !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || strings.ContainsRune("_.-", r))
+	}) < 0
 }
 
 // Double quotes would leave $ and ` to the shell.

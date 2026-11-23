@@ -3,6 +3,7 @@ package io.mehow.quack
 import kotlin.enums.enumEntries
 
 public interface QuackAction {
+  /** Holds only ASCII letters, '_', '.' and '-', and does not start with '-'. The server leaves out other actions. */
   public val id: String
 
   public val description: String

@@ -8,7 +8,7 @@ internal sealed interface ActionProblem {
 
   data class MalformedId(override val action: QuackAction) : ActionProblem {
     override val message: String
-      get() = "its id must not be empty, contain whitespace, or start with '-', '/' or '$'"
+      get() = "its id must hold only ASCII letters, '_', '.' and '-', and must not start with '-'"
   }
 
   data class DuplicateId(override val action: QuackAction) : ActionProblem {
@@ -86,7 +86,7 @@ private fun paramProblem(action: QuackAction): ActionProblem? {
 
 // The CLI reads a word that starts with '-' as one of its options, one that starts with '/' as an interactive command, and one that
 // starts with '$' as a recipe.
-private fun String.isActionId() = isNotEmpty() && none(Char::isWhitespace) && first() !in "-/$"
+private fun String.isActionId() = isNotEmpty() && first() != '-' && all { it in 'a'..'z' || it in 'A'..'Z' || it in "_.-" }
 
 // The CLI splits an argument into a param name and a value at its first '='.
 private fun String.isParamName() = isNotEmpty() && none { it.isWhitespace() || it == '=' } && first() != '-'
