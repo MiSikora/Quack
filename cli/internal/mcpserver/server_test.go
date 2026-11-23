@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,15 +18,18 @@ import (
 	"quack/internal/adb"
 	"quack/internal/client"
 	"quack/internal/device"
+	"quack/internal/fakes"
+	"quack/internal/fakes/backend"
 	"quack/internal/recipe"
+	"quack/internal/session"
 	"quack/internal/wire"
 )
 
 func TestListDevicesGivesEachDeviceWithItsApps(t *testing.T) {
-	source := &fakeSource{devices: []device.Info{
-		{Listing: adb.Listing{Device: "emulator-5554", State: "device"}, Model: "Pixel 8", Packages: []string{"io.mehow.quack.sample"}},
-		{Listing: adb.Listing{Device: "R5CT20ABCDE", State: "unauthorized"}},
-	}}
+	source := backend.New(nil,
+		device.Info{Listing: adb.Listing{Device: "emulator-5554", State: "device"}, Model: "Pixel 8", Packages: []string{"io.mehow.quack.sample"}},
+		device.Info{Listing: adb.Listing{Device: "R5CT20ABCDE", State: "unauthorized"}},
+	)
 	session := connect(t, source)
 
 	result := call(t, session, "list_devices", nil)
@@ -58,8 +60,8 @@ func TestListActionsAsksForTheDeviceAndAppItWasGiven(t *testing.T) {
 
 	call(t, session, "list_actions", map[string]any{"device": "emulator-5554", "app": "io.mehow.quack.sample"})
 
-	if want := []string{"emulator-5554 io.mehow.quack.sample"}; !reflect.DeepEqual(source.finds, want) {
-		t.Errorf("finds are %q, want %q", source.finds, want)
+	if want := []string{"emulator-5554 io.mehow.quack.sample"}; !reflect.DeepEqual(source.Finds(), want) {
+		t.Errorf("finds are %q, want %q", source.Finds(), want)
 	}
 }
 
@@ -88,7 +90,7 @@ func TestRunActionPassesArgsAsTheAppParsesThem(t *testing.T) {
 		"admin":    {"true"},
 		"tags":     {"a", "b"},
 	}}
-	if got := source.app.calls; !reflect.DeepEqual(got, []wire.Call{want}) {
+	if got := source.App.Calls(); !reflect.DeepEqual(got, []wire.Call{want}) {
 		t.Errorf("calls are %+v, want %+v", got, want)
 	}
 }
@@ -100,8 +102,9 @@ func TestRunActionStartsTheAppInTheBackgroundUnlessToldToOpenIt(t *testing.T) {
 	call(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "alice"}})
 	call(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "bob"}, "open_app": true})
 
-	if want := []client.StartMode{client.Wake, client.OpenApp}; !reflect.DeepEqual(source.modes, want) {
-		t.Errorf("modes are %q, want %q", source.modes, want)
+	want := []string{"emulator-5554 io.mehow.quack.sample wake", "emulator-5554 io.mehow.quack.sample open-app"}
+	if !reflect.DeepEqual(source.Connects(), want) {
+		t.Errorf("connects are %q, want %q", source.Connects(), want)
 	}
 }
 
@@ -151,7 +154,7 @@ func TestRunActionAsksTheUserForMissingRequiredParams(t *testing.T) {
 	wantSchema := `{"type":"object","required":["username"],"properties":{"username":{"type":"string","title":"username","description":"Who signs in"}}}`
 	assertJSON(t, string(schema), wantSchema)
 	want := wire.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"carol"}, "age": {"42"}}}
-	if got := source.app.calls; !reflect.DeepEqual(got, []wire.Call{want}) {
+	if got := source.App.Calls(); !reflect.DeepEqual(got, []wire.Call{want}) {
 		t.Errorf("calls are %+v, want %+v", got, want)
 	}
 }
@@ -166,7 +169,7 @@ func TestRunActionAsksClientsOnOlderProtocolsForMissingRequiredParams(t *testing
 	call(t, session, "run_action", map[string]any{"action": "account.create"})
 
 	want := wire.Call{Action: "account.create", Args: map[string]wire.RawArg{"username": {"carol"}}}
-	if got := source.app.calls; !reflect.DeepEqual(got, []wire.Call{want}) {
+	if got := source.App.Calls(); !reflect.DeepEqual(got, []wire.Call{want}) {
 		t.Errorf("calls are %+v, want %+v", got, want)
 	}
 }
@@ -194,20 +197,20 @@ func TestRunActionFailsWhenTheUserDeclinesToGiveParams(t *testing.T) {
 	result := callTool(t, session, "run_action", map[string]any{"action": "account.create"})
 
 	assertError(t, result, "the user declined to give username for account.create")
-	if len(source.app.calls) > 0 {
-		t.Errorf("the app got calls %+v, want none", source.app.calls)
+	if len(source.App.Calls()) > 0 {
+		t.Errorf("the app got calls %+v, want none", source.App.Calls())
 	}
 }
 
 func TestToolsReportWhyNoAppWasFound(t *testing.T) {
 	source := newFakeSource()
-	source.findErr = &device.AppError{Message: "several quack packages on emulator-5554, pick one:\n  --device emulator-5554 --app a.b\n  --device emulator-5554 --app c.d"}
+	source.FindErr = &device.AppError{Message: "several quack packages on emulator-5554, pick one:\n  --device emulator-5554 --app a.b\n  --device emulator-5554 --app c.d"}
 	session := connect(t, source)
 
 	for tool, args := range map[string]map[string]any{"list_actions": nil, "run_action": {"action": "account.create"}} {
 		result := callTool(t, session, tool, args)
 
-		assertError(t, result, source.findErr.Error())
+		assertError(t, result, source.FindErr.Error())
 	}
 }
 
@@ -218,8 +221,8 @@ func TestRunActionRefusesArgsThatAreNotTextNumbersOrBooleans(t *testing.T) {
 	result := callTool(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": map[string]any{"first": "alice"}}})
 
 	assertError(t, result, `argument "username" must be a string, a number, a boolean or an array of them`)
-	if len(source.app.calls) > 0 {
-		t.Errorf("the app got calls %+v, want none", source.app.calls)
+	if len(source.App.Calls()) > 0 {
+		t.Errorf("the app got calls %+v, want none", source.App.Calls())
 	}
 }
 
@@ -239,7 +242,7 @@ func TestReadRunFollowsARunWhileItWaitsAndGivesItsEnd(t *testing.T) {
 
 	run := startRun(t, session, map[string]any{"action": "sync.present"})
 	first := call(t, session, "read_run", map[string]any{"run": run, "wait": "5s"})
-	close(source.app.release)
+	close(source.release)
 	last := call(t, session, "read_run", map[string]any{"run": run, "after": 1, "wait": "5s"})
 
 	assertStructured(t, first, `{"notifications":[{"message":"Pairing code","data":{"code":"abc123"}}],"next":1,"done":false}`)
@@ -316,8 +319,8 @@ func TestStartActionRefusesWhatTheAppWouldRefuseWithoutCallingIt(t *testing.T) {
 	assertError(t, unknown, "[unknown_action] no action 'nope'")
 	assertError(t, extra, "[invalid_args] unknown argument 'bogus'")
 	assertError(t, missing, "[invalid_args] missing argument 'username'")
-	if len(source.app.calls) != 0 {
-		t.Errorf("calls are %+v, want none", source.app.calls)
+	if len(source.App.Calls()) != 0 {
+		t.Errorf("calls are %+v, want none", source.App.Calls())
 	}
 }
 
@@ -389,13 +392,13 @@ export const gone = quack.recipe({ run() {} })`)
 		`{"name":"user","type":"string","description":"","hints":["alice","bob"],"required":false,"default":"alice"},` +
 		`{"name":"count","type":"int","description":"","required":true}],"file":` + quoted(path) + `}]}`
 	assertStructured(t, result, want)
-	if len(source.modes) > 0 {
-		t.Errorf("the app started %q, want it left alone", source.modes)
+	if len(source.Connects()) > 0 {
+		t.Errorf("the app started %q, want it left alone", source.Connects())
 	}
 }
 
 func TestListRecipesWithoutRecipesGivesNone(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	inConfigDir(t)
 	session := connect(t, newFakeSource())
 
 	result := call(t, session, "list_recipes", map[string]any{})
@@ -444,8 +447,8 @@ export const fresh = quack.recipe({
 		`{"step":"wait 1ms","notifications":[],"message":""},`+
 		`{"step":"shell pm clear com.example","notifications":[],"message":"ran pm clear com.example"},`+
 		`{"step":"run echo seeded","notifications":[],"message":"seeded"}],"log":["id 7"]}`)
-	if want := []client.StartMode{client.OpenApp}; !reflect.DeepEqual(source.app.starts, want) {
-		t.Errorf("starts are %q, want %q", source.app.starts, want)
+	if want := []client.StartMode{client.OpenApp}; !reflect.DeepEqual(source.App.Starts(), want) {
+		t.Errorf("starts are %q, want %q", source.App.Starts(), want)
 	}
 }
 
@@ -510,7 +513,7 @@ export const redo = quack.recipe({
 
 	assertError(t, result, "› account.create username=alice\nCreating alice\nCreated alice\n› account.delete\nDeleting\n"+
 		"[rejected] there is no account\n    at run (io.mehow.quack.sample.ts:5:20)")
-	if got := len(source.app.calls); got != 2 {
+	if got := len(source.App.Calls()); got != 2 {
 		t.Errorf("the app got %d calls, want 2", got)
 	}
 }
@@ -546,8 +549,8 @@ export const fresh = quack.recipe({ params: { user: { type: "string", required: 
 	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "fresh"})
 
 	assertError(t, result, "[invalid_args] recipe 'fresh': missing argument 'user'")
-	if len(source.app.calls) > 0 {
-		t.Errorf("the app got calls %+v, want none", source.app.calls)
+	if len(source.App.Calls()) > 0 {
+		t.Errorf("the app got calls %+v, want none", source.App.Calls())
 	}
 }
 
@@ -611,7 +614,7 @@ func TestRunRecipeSaysWhyRecipesWereLeftOut(t *testing.T) {
 // writeRecipes keeps file as the recipes of the sample app in a config dir of the test's own, with up-to-date types.
 func writeRecipes(t *testing.T, file string) string {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	inConfigDir(t)
 	if _, err := recipe.Init(t.TempDir(), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -624,6 +627,14 @@ func writeRecipes(t *testing.T, file string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// The server runs in a config dir of the test's own, which is in no project, so that the recipes come only from the
+// user's config.
+func inConfigDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Chdir(dir)
 }
 
 func quoted(text string) string {
@@ -660,28 +671,28 @@ func (l *progressLog) waitFor(t *testing.T, want []string) {
 	}
 }
 
-func connect(t *testing.T, source *fakeSource) *mcp.ClientSession {
+func connect(t *testing.T, source session.Backend) *mcp.ClientSession {
 	return connectWith(t, source, nil)
 }
 
-func connectWith(t *testing.T, source *fakeSource, options *mcp.ClientOptions) *mcp.ClientSession {
+func connectWith(t *testing.T, source session.Backend, options *mcp.ClientOptions) *mcp.ClientSession {
 	t.Helper()
 	return connectAt(t, source, options, "")
 }
 
-func connectAt(t *testing.T, source *fakeSource, options *mcp.ClientOptions, version string) *mcp.ClientSession {
+func connectAt(t *testing.T, source session.Backend, options *mcp.ClientOptions, version string) *mcp.ClientSession {
 	t.Helper()
 	return connectFull(t, t.Context(), source, options, version)
 }
 
 // The server's runs end with ctx, while the session lasts as long as the test.
-func connectUntil(t *testing.T, ctx context.Context, source *fakeSource) *mcp.ClientSession {
+func connectUntil(t *testing.T, ctx context.Context, source session.Backend) *mcp.ClientSession {
 	t.Helper()
 	return connectFull(t, ctx, source, nil, "")
 }
 
 // "" asks for the latest protocol version.
-func connectFull(t *testing.T, ctx context.Context, source *fakeSource, options *mcp.ClientOptions, version string) *mcp.ClientSession {
+func connectFull(t *testing.T, ctx context.Context, source session.Backend, options *mcp.ClientOptions, version string) *mcp.ClientSession {
 	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := New(ctx, source, "test").Connect(t.Context(), serverTransport, nil)
@@ -771,99 +782,48 @@ func text(result *mcp.CallToolResult) string {
 	return strings.Join(texts, "\n")
 }
 
-type fakeSource struct {
-	devices []device.Info
-	app     *fakeApp
-	findErr error
-	finds   []string
-	modes   []client.StartMode
-}
-
-func newFakeSource() *fakeSource {
-	return &fakeSource{app: &fakeApp{release: make(chan struct{})}}
-}
-
-func (s *fakeSource) Devices() ([]device.Info, error) { return s.devices, nil }
-
-func (s *fakeSource) Find(serial adb.Device, pkg string) (device.Target, error) {
-	s.finds = append(s.finds, string(serial)+" "+pkg)
-	if s.findErr != nil {
-		return device.Target{}, s.findErr
-	}
-	return device.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}, nil
-}
-
-func (s *fakeSource) Connect(_ device.Target, mode client.StartMode) (App, error) {
-	s.modes = append(s.modes, mode)
-	return s.app, nil
-}
-
-// The config dir is outside any project, and the recipes come only from the user's config.
-func (s *fakeSource) Recipes(pkg string) (*recipe.Cookbook, []string, error) {
-	return recipe.Load(os.Getenv("XDG_CONFIG_HOME"), pkg)
-}
-
-type fakeApp struct {
-	mu     sync.Mutex
-	calls  []wire.Call
-	starts []client.StartMode
-	// Closing it lets sync.present end.
+// Closing release lets sync.present end.
+type fakeBackend struct {
+	*backend.Backend
 	release chan struct{}
 }
 
-func (a *fakeApp) Target() device.Target {
-	return device.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}
-}
-
-func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
-	return adb.Output{Stdout: "ran " + cmd + "\n"}, nil
-}
-
-func (a *fakeApp) Start(mode client.StartMode) error {
-	a.starts = append(a.starts, mode)
-	return nil
-}
-
-func (a *fakeApp) Describe(context.Context) (wire.Hello, []wire.Action, error) {
-	return wire.Hello{Package: "io.mehow.quack.sample", Version: "1.0"}, []wire.Action{
-		{ID: "app.greet", Description: "Greet someone"},
-		{ID: "account.create", Description: "Create an account", Params: []wire.Param{
+func newFakeSource() fakeBackend {
+	release := make(chan struct{})
+	app := fakes.NewApp(
+		wire.Action{ID: "app.greet", Description: "Greet someone"},
+		wire.Action{ID: "account.create", Description: "Create an account", Params: []wire.Param{
 			{Name: "username", Type: wire.ParamTypeString, Description: "Who signs in", Hints: []string{"alice", "bob"}, Presence: wire.Required{}},
 			{Name: "age", Type: wire.ParamTypeInt, Presence: wire.Default{Values: []string{"30"}}},
 			{Name: "tags", Type: wire.ParamTypeStringList, Presence: wire.Default{Values: []string{"a", "b"}}},
 		}},
-		{ID: "account.delete", Description: "Delete the account"},
-		{ID: "sync.present", Description: "Show a pairing code and wait for a device to pair"},
-		{ID: "app.chatty", Description: "Notify 1002 times"},
-	}, nil
-}
-
-func (a *fakeApp) Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
-	a.mu.Lock()
-	a.calls = append(a.calls, call)
-	a.mu.Unlock()
-	switch call.Action {
-	case "sync.present":
+		wire.Action{ID: "account.delete", Description: "Delete the account"},
+		wire.Action{ID: "sync.present", Description: "Show a pairing code and wait for a device to pair"},
+		wire.Action{ID: "app.chatty", Description: "Notify 1002 times"},
+	)
+	app.Replies["sync.present"] = func(ctx context.Context, _ wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
 		notify(wire.Notification{Message: "Pairing code", Data: json.RawMessage(`{"code":"abc123"}`)})
 		select {
-		case <-a.release:
+		case <-release:
 			return wire.MessageResult{Message: "Paired"}, nil
 		case <-ctx.Done():
 			return wire.MessageResult{}, ctx.Err()
 		}
-	case "app.chatty":
+	}
+	app.Replies["app.chatty"] = func(_ context.Context, _ wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
 		for i := 1; i <= 1002; i++ {
 			notify(wire.Notification{Message: strconv.Itoa(i)})
 		}
 		return wire.MessageResult{Message: "Done"}, nil
-	case "account.create":
+	}
+	app.Replies["account.create"] = func(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
 		username := call.Args["username"][0]
 		notify(wire.Notification{Message: "Creating " + username, Data: json.RawMessage(`{"username":"` + username + `"}`)})
 		return wire.MessageResult{Message: "Created " + username, Data: json.RawMessage(`{"id":7}`)}, nil
-	case "account.delete":
+	}
+	app.Replies["account.delete"] = func(_ context.Context, _ wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
 		notify(wire.Notification{Message: "Deleting"})
 		return wire.MessageResult{}, wire.Error{Code: wire.ErrorCodeRejected, Message: "there is no account"}
-	default:
-		return wire.MessageResult{}, errors.New("unknown action")
 	}
+	return fakeBackend{backend.New(app), release}
 }

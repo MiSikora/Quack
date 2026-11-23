@@ -8,18 +8,17 @@ import (
 	"testing"
 	"time"
 
-	"quack/internal/client"
 	"quack/internal/device"
 )
 
 func TestOneDeviceWithOneAppGoesStraightToTheActions(t *testing.T) {
 	source := newFakeSource(newFakeApp())
 
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "6/6", "type or ↑ to find an action")
 	h.waitForLog("switched to io.mehow.quack.sample on Pixel 8 · emulator-5554")
-	if got, want := source.starts(), []string{"emulator-5554 io.mehow.quack.sample wake"}; !reflect.DeepEqual(got, want) {
+	if got, want := source.Connects(), []string{"emulator-5554 io.mehow.quack.sample wake"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("started %q, want %q", got, want)
 	}
 }
@@ -27,7 +26,7 @@ func TestOneDeviceWithOneAppGoesStraightToTheActions(t *testing.T) {
 func TestOneDeviceWithTwoAppsStartsAtThePackageStepWithoutBack(t *testing.T) {
 	source := newFakeSource(newFakeApp(), deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
 
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 
 	h.waitFor("  com.duckduckgo.mobile", "▸ io.mehow.quack.sample", "> pick an app", "2/2",
 		"enter pick · ↑↓ select · esc close · ctrl+c quit")
@@ -38,7 +37,7 @@ func TestOneDeviceWithTwoAppsStartsAtThePackageStepWithoutBack(t *testing.T) {
 
 func TestEscClosesThePickerOfTheStartAndPickDeviceShowsItAgain(t *testing.T) {
 	source := newFakeSource(newFakeApp(), deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("> pick an app", "2/2")
 
 	h.press("esc")
@@ -56,9 +55,9 @@ func TestTwoDevicesStartAtTheDeviceStepAndAnAppAloneOnItStarts(t *testing.T) {
 	source := newFakeSource(newFakeApp(),
 		deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"),
 		deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
-	source.appFor("3A251FDH2000XY", "com.duckduckgo.mobile")
+	appFor(source, "3A251FDH2000XY", "com.duckduckgo.mobile")
 
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 
 	h.waitFor("  Pixel 7 · 3A251FDH2000XY   2 apps", "▸ Pixel 8 · emulator-5554    1 app", "> pick a device")
 	h.press("up", "enter")
@@ -72,7 +71,7 @@ func TestEscOnThePackageStepGoesBackToTheDevices(t *testing.T) {
 	source := newFakeSource(newFakeApp(),
 		deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"),
 		deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("Pixel 7", "> pick a device")
 
 	h.press("up", "enter")
@@ -88,7 +87,7 @@ func TestTheTextFiltersDevicesOnTheModelAndTheSerial(t *testing.T) {
 	source := newFakeSource(newFakeApp(),
 		deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"),
 		deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("Pixel 7", "> pick a device")
 
 	h.typing("3A25")
@@ -103,7 +102,7 @@ func TestSerialFlagLeavesOneDeviceAndSkipsItsStep(t *testing.T) {
 		deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"),
 		deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
 
-	h := startPicking(t, source, device.Target{Device: "3A251FDH2000XY"}, client.Wake)
+	h := startPicking(t, source, device.Target{Device: "3A251FDH2000XY"}, false)
 
 	h.waitFor("com.duckduckgo.mobile", "▸ io.mehow.quack.sample", "> pick an app", "2/2")
 }
@@ -112,9 +111,9 @@ func TestPackageFlagLeavesTheDevicesThatHaveItAndSkipsBothSteps(t *testing.T) {
 	source := newFakeSource(newFakeApp(),
 		deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"),
 		deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
-	source.appFor("3A251FDH2000XY", "com.duckduckgo.mobile")
+	appFor(source, "3A251FDH2000XY", "com.duckduckgo.mobile")
 
-	h := startPicking(t, source, device.Target{Package: "com.duckduckgo.mobile"}, client.Wake)
+	h := startPicking(t, source, device.Target{Package: "com.duckduckgo.mobile"}, false)
 
 	h.waitFor("quack · com.duckduckgo.mobile 1.0 · 3A251FDH2000XY", "type or ↑ to find an action")
 }
@@ -122,15 +121,15 @@ func TestPackageFlagLeavesTheDevicesThatHaveItAndSkipsBothSteps(t *testing.T) {
 func TestFlagsThatMatchNothingSayWhatQuackWaitsFor(t *testing.T) {
 	source := newFakeSource(newFakeApp())
 
-	h := startPicking(t, source, device.Target{Device: "3A251FDH2000XY", Package: "com.duckduckgo.mobile"}, client.Wake)
+	h := startPicking(t, source, device.Target{Device: "3A251FDH2000XY", Package: "com.duckduckgo.mobile"}, false)
 
 	h.waitFor("quack · waiting for com.duckduckgo.mobile on 3A251FDH2000XY", "> / for commands", "/ for commands · ctrl+c quit")
 }
 
 func TestNoAppLeavesTheCommandsThatNeedNone(t *testing.T) {
 	source := newFakeSource(newFakeApp())
-	source.devices = nil
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	source.Set()
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("quack · no device · waiting for one to connect", "> / for commands")
 	h.checkRed(" · ", "no device", " · waiting for one to connect")
 
@@ -160,9 +159,9 @@ func TestNoAppSaysWhyInTheInfoLine(t *testing.T) {
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			source := newFakeSource(newFakeApp())
-			source.devices = tc.devices
+			source.Set(tc.devices...)
 
-			h := startPicking(t, source, device.Target{}, client.Wake)
+			h := startPicking(t, source, device.Target{}, false)
 
 			h.waitFor(tc.want, "> / for commands")
 			before, after, _ := strings.Cut(strings.TrimPrefix(tc.want, "quack"), tc.red)
@@ -177,7 +176,7 @@ func TestNoAppSaysWhyInTheInfoLine(t *testing.T) {
 func TestFlagsThatMatchNoDeviceYetAreNotRed(t *testing.T) {
 	source := newFakeSource(newFakeApp(), deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"))
 
-	h := startPicking(t, source, device.Target{Device: "3A251FDH2000XY"}, client.Wake)
+	h := startPicking(t, source, device.Target{Device: "3A251FDH2000XY"}, false)
 
 	h.waitFor("quack · waiting for 3A251FDH2000XY", "> / for commands")
 	if !strings.Contains(h.raw(), statusStyle.Render(" · waiting for 3A251FDH2000XY")) {
@@ -187,7 +186,7 @@ func TestFlagsThatMatchNoDeviceYetAreNotRed(t *testing.T) {
 
 func TestPickDeviceWithoutAnAppShowsTheDevicesAndEscHidesThem(t *testing.T) {
 	source := newFakeSource(newFakeApp(), deviceInfo("emulator-5554", "Pixel 8", "device"), deviceInfo("R5CT20ABCDE", "", "unauthorized"))
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("quack · 2 devices")
 
 	h.typing("/pick-device")
@@ -205,7 +204,7 @@ func TestDevicesThatCannotBePickedShowDimmedAndAreSkipped(t *testing.T) {
 		deviceInfo("emulator-5556", "Pixel 9", "device"),
 		deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"),
 		deviceInfo("emulator-5558", "", "offline"))
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 
 	h.waitFor(
 		"  emulator-5558              offline · wait for adb to see it again, or reconnect it",
@@ -229,39 +228,39 @@ func TestDevicesThatCannotBePickedShowDimmedAndAreSkipped(t *testing.T) {
 	h.press("enter")
 	h.waitForRunning()
 	h.waitFor("R5CT20ABCDE", "> R5CT")
-	if got := source.starts(); len(got) > 0 {
+	if got := source.Connects(); len(got) > 0 {
 		t.Errorf("started %q, want nothing", got)
 	}
 }
 
 func TestWaitingPickerFillsInWhenADeviceConnects(t *testing.T) {
 	source := newFakeSource(newFakeApp())
-	source.devices = nil
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	source.Set()
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("quack · no device · waiting for one to connect", "> / for commands")
 
-	source.set(deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"))
+	source.Set(deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"))
 
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")
 }
 
 func TestWaitingPickerFillsInWhenAnAppInstalls(t *testing.T) {
 	source := newFakeSource(newFakeApp(), deviceInfo("emulator-5554", "Pixel 8", "device"))
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("quack · Pixel 8 · emulator-5554 · no quack-enabled app", "> / for commands")
 	h.keepPolling()
 	// Several polls go by first, so that the picker keeps polling rather than polling once.
-	h.waitForInspects(source, source.inspects()+3)
+	h.waitForInspects(source, source.Inspects()+3)
 
-	source.install("emulator-5554", "io.mehow.quack.sample")
+	source.Install("emulator-5554", "io.mehow.quack.sample")
 
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")
 }
 
 func TestFailedDescribeStaysOnThePackageStepWithTheErrorInTheLog(t *testing.T) {
 	source := newFakeSource(newFakeApp(), deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
-	source.appFor("emulator-5554", "com.duckduckgo.mobile").setActions(nil)
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	appFor(source, "emulator-5554", "com.duckduckgo.mobile").SetDescribeErr(gone)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("com.duckduckgo.mobile", "> pick an app")
 
 	h.press("up", "enter")
@@ -274,14 +273,14 @@ func TestFailedDescribeStaysOnThePackageStepWithTheErrorInTheLog(t *testing.T) {
 
 func TestFailedStartOfTheOnlyAppIsNotRetriedByItself(t *testing.T) {
 	source := newFakeSource(newFakeApp())
-	source.app.setActions(nil)
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	source.App.SetDescribeErr(gone)
+	h := startPicking(t, source, device.Target{}, false)
 
 	h.waitForLog("io.mehow.quack.sample: the app is gone")
 	h.waitFor("▸ io.mehow.quack.sample", "> pick an app", "enter pick")
 	h.keepPolling()
-	h.waitForInspects(source, source.inspects()+3)
-	if got := source.starts(); len(got) != 1 {
+	h.waitForInspects(source, source.Inspects()+3)
+	if got := source.Connects(); len(got) != 1 {
 		t.Errorf("started %q, want one start", got)
 	}
 }
@@ -290,8 +289,8 @@ func TestDeviceCommandSwitchesToAnotherDevice(t *testing.T) {
 	source := newFakeSource(newFakeApp(),
 		deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"),
 		deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "com.duckduckgo.mobile"))
-	source.appFor("3A251FDH2000XY", "com.duckduckgo.mobile")
-	h := startPicking(t, source, device.Target{Device: "emulator-5554"}, client.Wake)
+	appFor(source, "3A251FDH2000XY", "com.duckduckgo.mobile")
+	h := startPicking(t, source, device.Target{Device: "emulator-5554"}, false)
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")
 
 	h.typing("/pick-device")
@@ -316,10 +315,10 @@ func TestEscClosesThePickerOfACommand(t *testing.T) {
 
 func TestPackageCommandShowsTheAppsOfTheDevice(t *testing.T) {
 	source := newFakeSource(newFakeApp(), deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"))
-	source.appFor("emulator-5554", "com.duckduckgo.mobile")
-	h := startPicking(t, source, device.Target{}, client.OpenApp)
+	appFor(source, "emulator-5554", "com.duckduckgo.mobile")
+	h := startPicking(t, source, device.Target{}, true)
 	h.waitFor("type or ↑ to find an action")
-	source.install("emulator-5554", "io.mehow.quack.sample", "com.duckduckgo.mobile")
+	source.Install("emulator-5554", "io.mehow.quack.sample", "com.duckduckgo.mobile")
 
 	h.typing("/pick-app")
 	h.press("enter")
@@ -328,7 +327,7 @@ func TestPackageCommandShowsTheAppsOfTheDevice(t *testing.T) {
 
 	h.waitFor("quack · com.duckduckgo.mobile 1.0 · emulator-5554", "type or ↑ to find an action")
 	want := []string{"emulator-5554 io.mehow.quack.sample open-app", "emulator-5554 com.duckduckgo.mobile wake"}
-	if got := source.starts(); !reflect.DeepEqual(got, want) {
+	if got := source.Connects(); !reflect.DeepEqual(got, want) {
 		t.Errorf("started %q, want the flags' mode only for the first pick: %q", got, want)
 	}
 }
@@ -351,13 +350,13 @@ func TestDeviceAndPackageAreRefusedDuringARun(t *testing.T) {
 func TestDisconnectWaitsForPickDevice(t *testing.T) {
 	app := newFakeApp()
 	source := newFakeSource(app)
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("type or ↑ to find an action")
 	h.typing("account.watch")
 	h.press("enter")
 	h.waitFor("account.watch · ctrl+c cancel action")
 
-	source.set()
+	source.Set()
 
 	h.waitForLog("emulator-5554 disconnected")
 	h.waitFor("quack · no device", "> / for commands", "0/0")
@@ -366,12 +365,12 @@ func TestDisconnectWaitsForPickDevice(t *testing.T) {
 	case <-time.After(timeout):
 		t.Error("the run was not stopped")
 	}
-	source.set(deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"))
+	source.Set(deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"))
 	h.waitFor("quack · Pixel 8 · emulator-5554 · 1 app · /pick-device to connect", "> / for commands")
 	if !strings.Contains(h.raw(), statusStyle.Render(" · Pixel 8 · emulator-5554 · 1 app · /pick-device to connect")) {
 		t.Errorf("a device that is there is not dimmed in:\n%q", h.raw())
 	}
-	if got := source.starts(); len(got) != 1 {
+	if got := source.Connects(); len(got) != 1 {
 		t.Errorf("started %q, want only the first pick", got)
 	}
 
@@ -384,15 +383,15 @@ func TestDisconnectWaitsForPickDevice(t *testing.T) {
 
 func TestConnectedAppIsPolledOnlyForItsDevicesApps(t *testing.T) {
 	source := newFakeSource(newFakeApp())
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("type or ↑ to find an action")
-	inspects := source.inspects()
+	inspects := source.Inspects()
 	h.keepPolling()
 
-	lists := func() string { return strconv.Itoa(source.packageLists()) }
+	lists := func() string { return strconv.Itoa(source.PackageLists()) }
 	h.wait(lists, func(n string) bool { got, _ := strconv.Atoi(n); return got >= 2 }, "2 package lists")
 
-	if got := source.inspects(); got != inspects {
+	if got := source.Inspects(); got != inspects {
 		t.Errorf("got %d inspects while connected, want %d", got, inspects)
 	}
 }
@@ -400,14 +399,14 @@ func TestConnectedAppIsPolledOnlyForItsDevicesApps(t *testing.T) {
 func TestUninstalledAppGoesAsIfItsDeviceWent(t *testing.T) {
 	app := newFakeApp()
 	source := newFakeSource(app)
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("type or ↑ to find an action")
 	h.typing("account.watch")
 	h.press("enter")
 	h.waitFor("account.watch · ctrl+c cancel action")
 	h.keepPolling()
 
-	source.install("emulator-5554")
+	source.Install("emulator-5554")
 
 	h.waitForLog("io.mehow.quack.sample left emulator-5554")
 	h.waitFor("quack · Pixel 8 · emulator-5554 · no quack-enabled app", "> / for commands")
@@ -421,34 +420,34 @@ func TestUninstalledAppGoesAsIfItsDeviceWent(t *testing.T) {
 	h.waitFor("/pick-device", "5/5")
 
 	h.press("esc")
-	source.install("emulator-5554", "io.mehow.quack.sample")
+	source.Install("emulator-5554", "io.mehow.quack.sample")
 	h.waitFor("quack · Pixel 8 · emulator-5554 · 1 app · /pick-device to connect")
-	if got := source.starts(); len(got) != 1 {
+	if got := source.Connects(); len(got) != 1 {
 		t.Errorf("started %q, want only the first pick", got)
 	}
 }
 
 func TestDisconnectSaysWhichDevicesCanBePicked(t *testing.T) {
 	source := newFakeSource(newFakeApp())
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("type or ↑ to find an action")
 
-	source.set(deviceInfo("emulator-5556", "Pixel 9", "device", "io.mehow.quack.sample"), deviceInfo("3A251FDH2000XY", "Pixel 7", "device"))
+	source.Set(deviceInfo("emulator-5556", "Pixel 9", "device", "io.mehow.quack.sample"), deviceInfo("3A251FDH2000XY", "Pixel 7", "device"))
 
 	h.waitFor("quack · 2 devices · /pick-device to pick one", "> / for commands")
 }
 
 func TestOtherDevicesComingAndGoingKeepTheActions(t *testing.T) {
 	source := newFakeSource(newFakeApp())
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("type or ↑ to find an action")
 
-	source.set(deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"), deviceInfo("3A251FDH2000XY", "Pixel 7", "device"))
-	source.set(deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"))
+	source.Set(deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"), deviceInfo("3A251FDH2000XY", "Pixel 7", "device"))
+	source.Set(deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"))
 
 	h.waitForRunning()
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")
-	if got := source.starts(); len(got) != 1 {
+	if got := source.Connects(); len(got) != 1 {
 		t.Errorf("started %q, want only the first pick", got)
 	}
 }
@@ -459,7 +458,7 @@ func TestTheOnlyDeviceThatCanBePickedIsTakenByItself(t *testing.T) {
 		deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"),
 		deviceInfo("emulator-5556", "Pixel 9", "device"))
 
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")
 }
@@ -468,14 +467,14 @@ func TestAStartThePickerLeftBehindDoesNotTakeOver(t *testing.T) {
 	source := newFakeSource(newFakeApp(),
 		deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"),
 		deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.other"))
-	source.appFor("emulator-5554", "com.duckduckgo.mobile")
-	source.appFor("3A251FDH2000XY", "io.mehow.other")
-	h := startPicking(t, source, device.Target{Device: "emulator-5554"}, client.Wake)
+	appFor(source, "emulator-5554", "com.duckduckgo.mobile")
+	appFor(source, "3A251FDH2000XY", "io.mehow.other")
+	h := startPicking(t, source, device.Target{Device: "emulator-5554"}, false)
 	h.waitFor("> pick an app")
 	h.press("enter")
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")
-	releaseLeft := source.hold("emulator-5554", "com.duckduckgo.mobile")
-	releaseNew := source.hold("3A251FDH2000XY", "io.mehow.other")
+	releaseLeft := source.Hold(device.Target{Device: "emulator-5554", Package: "com.duckduckgo.mobile"})
+	releaseNew := source.Hold(device.Target{Device: "3A251FDH2000XY", Package: "io.mehow.other"})
 	t.Cleanup(releaseLeft)
 	t.Cleanup(releaseNew)
 
@@ -484,7 +483,7 @@ func TestAStartThePickerLeftBehindDoesNotTakeOver(t *testing.T) {
 	h.waitFor("> pick an app")
 	h.press("up", "enter")
 	h.waitFor("starting com.duckduckgo.mobile on emulator-5554…")
-	source.set(deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.other"))
+	source.Set(deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.other"))
 	h.waitFor("quack · Pixel 7 · 3A251FDH2000XY · 1 app · /pick-device to connect")
 	h.typing("/pick-device")
 	h.press("enter")
@@ -502,9 +501,9 @@ func TestAStartThePickerLeftBehindDoesNotTakeOver(t *testing.T) {
 
 func TestPanelKeepsItsHeightInEveryPickerState(t *testing.T) {
 	source := newFakeSource(newFakeApp())
-	source.devices = nil
-	source.appFor("3A251FDH2000XY", "com.duckduckgo.mobile").setActions(nil)
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	source.Set()
+	appFor(source, "3A251FDH2000XY", "com.duckduckgo.mobile").SetDescribeErr(gone)
+	h := startPicking(t, source, device.Target{}, false)
 	check := func(state string) {
 		t.Helper()
 		if got := h.panelRows(); got != 6 {
@@ -525,7 +524,7 @@ func TestPanelKeepsItsHeightInEveryPickerState(t *testing.T) {
 	for i := range 6 {
 		devices = append(devices, deviceInfo("emulator-56"+string(rune('0'+i))+"0", "", "offline"))
 	}
-	source.set(devices...)
+	source.Set(devices...)
 	h.waitFor("> pick a device", "8/8")
 	check("more devices than fit")
 	h.typing("zz")
@@ -558,7 +557,7 @@ func TestPackageFlagHidesTheDevicesWithoutIt(t *testing.T) {
 		deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"),
 		deviceInfo("emulator-5556", "Pixel 9", "device", "com.duckduckgo.mobile"))
 
-	h := startPicking(t, source, device.Target{Package: "com.duckduckgo.mobile"}, client.Wake)
+	h := startPicking(t, source, device.Target{Package: "com.duckduckgo.mobile"}, false)
 
 	h.waitFor("Pixel 9 · emulator-5556", "Pixel 7 · 3A251FDH2000XY", "> pick a device", "2/2")
 	h.waitForNo("Pixel 8")
@@ -566,10 +565,10 @@ func TestPackageFlagHidesTheDevicesWithoutIt(t *testing.T) {
 
 func TestPackageStepSaysWhenTheDeviceHasNoAppLeft(t *testing.T) {
 	source := newFakeSource(newFakeApp(), deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"))
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("> pick an app", "2/2")
 
-	source.install("emulator-5554")
+	source.Install("emulator-5554")
 	h.keepPolling()
 
 	h.waitFor("quack · no quack-enabled app on emulator-5554 · waiting for one", "> / for commands")
@@ -580,12 +579,12 @@ func TestPackageStepGoesBackToTheDevicesWhenItsDeviceLeaves(t *testing.T) {
 		deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"),
 		deviceInfo("3A251FDH2000XY", "Pixel 7", "device", "io.mehow.quack.sample", "com.duckduckgo.mobile"),
 		deviceInfo("emulator-5556", "Pixel 9", "device", "io.mehow.quack.sample"))
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.waitFor("Pixel 7", "> pick a device")
 	h.press("up", "enter")
 	h.waitFor("com.duckduckgo.mobile", "> pick an app")
 
-	source.set(deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"), deviceInfo("emulator-5556", "Pixel 9", "device", "io.mehow.quack.sample"))
+	source.Set(deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"), deviceInfo("emulator-5556", "Pixel 9", "device", "io.mehow.quack.sample"))
 
 	h.waitFor("Pixel 9", "Pixel 8", "> pick a device", "2/2")
 }
@@ -595,7 +594,7 @@ func TestDeviceListScrollsToTheSelectionAndNewTextSelectsTheBestMatch(t *testing
 	for i := range 7 {
 		devices = append(devices, deviceInfo("emulator-555"+strconv.Itoa(i), "Pixel "+strconv.Itoa(i), "device", "io.mehow.quack.sample"))
 	}
-	h := startPicking(t, newFakeSource(newFakeApp(), devices...), device.Target{}, client.Wake)
+	h := startPicking(t, newFakeSource(newFakeApp(), devices...), device.Target{}, false)
 	h.waitFor("▸ Pixel 0", "> pick a device", "7/7")
 	// A list of 5 rows, so that the 7 devices scroll.
 	h.resize(100, 10)
@@ -610,9 +609,9 @@ func TestDeviceListScrollsToTheSelectionAndNewTextSelectsTheBestMatch(t *testing
 
 func TestLostTrackOfTheDevicesSaysSoOnceAndTracksAgain(t *testing.T) {
 	source := newFakeSource(newFakeApp())
-	source.failTracks = 3
+	source.FailTracks = 3
 
-	h := startPicking(t, source, device.Target{}, client.Wake)
+	h := startPicking(t, source, device.Target{}, false)
 	h.keepPolling()
 
 	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑ to find an action")

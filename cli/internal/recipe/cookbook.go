@@ -31,11 +31,19 @@ type Cookbook struct {
 // Run returns what the recipe's run returned as JSON, or nil when it returned undefined. Ending ctx interrupts the
 // recipe wherever it is. The events' lines show the args of a Call in the order of its action's params in actions.
 func (c *Cookbook) Run(ctx context.Context, app step.App, actions []wire.Action, name string, args map[string]wire.RawArg, emit func(step.Event)) (json.RawMessage, error) {
-	at := slices.IndexFunc(c.Recipes, func(r Recipe) bool { return r.Name == name })
-	if at < 0 {
+	r, ok := c.Find(name)
+	if !ok {
 		return nil, fmt.Errorf("no recipe named %s for %s", name, app.Target().Package)
 	}
-	return c.scripts[c.Recipes[at].script].run(ctx, app, actions, name, args, emit)
+	return c.scripts[r.script].run(ctx, app, actions, name, args, emit)
+}
+
+func (c *Cookbook) Find(name string) (Recipe, bool) {
+	at := slices.IndexFunc(c.Recipes, func(r Recipe) bool { return r.Name == name })
+	if at < 0 {
+		return Recipe{}, false
+	}
+	return c.Recipes[at], true
 }
 
 // Load reads the recipes of pkg from the project that dir is in, and from the user's config. It never writes files.

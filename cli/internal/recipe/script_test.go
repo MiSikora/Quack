@@ -16,7 +16,7 @@ import (
 	"quack/internal/adb"
 	"quack/internal/client"
 	"quack/internal/config"
-	"quack/internal/device"
+	"quack/internal/fakes"
 	"quack/internal/step"
 	"quack/internal/wire"
 )
@@ -73,7 +73,7 @@ export const open = quack.recipe({ run() {} })
 const helper = quack.recipe({ run() {} })`)
 	var logged []string
 
-	_, err := s.Run(context.Background(), &fakeApp{}, nil, "app.reset", nil, logTo(&logged))
+	_, err := s.Run(context.Background(), newApp(), nil, "app.reset", nil, logTo(&logged))
 
 	var names []string
 	for _, r := range s.Recipes {
@@ -165,7 +165,8 @@ quack.recipe({ name: "app:reset", run() {} })`, "recipe 'app:reset': its name ma
 }
 
 func TestRunRunsTheStepsInOrderAndEmitsTheirEventsNumbered(t *testing.T) {
-	app := &fakeApp{output: adb.Output{Stdout: "Success\n"}}
+	app := newApp()
+	app.CommandReply = func(string) adb.Output { return adb.Output{Stdout: "Success\n"} }
 	s := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
@@ -206,13 +207,16 @@ export const r = quack.recipe({
 	if err != nil || !reflect.DeepEqual(events, want) {
 		t.Errorf("got %v\n%#v\nwant\n%#v", err, events, want)
 	}
-	if !reflect.DeepEqual(app.starts, []client.StartMode{client.OpenApp}) {
-		t.Errorf("starts: got %v", app.starts)
+	if !reflect.DeepEqual(app.Starts(), []client.StartMode{client.OpenApp}) {
+		t.Errorf("starts: got %v", app.Starts())
 	}
 }
 
 func TestARecipeBranchesOnTheDataOfAnAction(t *testing.T) {
-	app := &fakeApp{data: map[string]string{"account.status": `{"tries":[1,2],"loggedIn":false}`}}
+	app := newApp()
+	app.Replies["account.status"] = func(context.Context, wire.Call, client.NotificationFunc) (wire.MessageResult, error) {
+		return wire.MessageResult{Message: "account.status", Data: json.RawMessage(`{"tries":[1,2],"loggedIn":false}`)}, nil
+	}
 	s := load(t, `
 import quack from "quack"
 export const r = quack.recipe({
@@ -230,8 +234,8 @@ export const r = quack.recipe({
 		t.Fatal(err)
 	}
 
-	if want := []string{"account.status", "app.greet name='tries 2'", "app.greet name=x"}; !reflect.DeepEqual(app.calls, want) {
-		t.Errorf("got %v, want %v", app.calls, want)
+	if want := []string{"account.status", "app.greet name='tries 2'", "app.greet name=x"}; !reflect.DeepEqual(lines(app.Calls()), want) {
+		t.Errorf("got %v, want %v", lines(app.Calls()), want)
 	}
 	// The data keeps the app's key order.
 	if want := []string{`{"tries":[1,2],"loggedIn":false}`}; !reflect.DeepEqual(logged, want) {
@@ -257,7 +261,7 @@ export const r = quack.recipe({
 })`)
 	var logged []string
 
-	_, err := s.Run(context.Background(), &fakeApp{}, nil, "r", map[string]wire.RawArg{
+	_, err := s.Run(context.Background(), newApp(), nil, "r", map[string]wire.RawArg{
 		"count": {"3"}, "size": {"9007199254740993"}, "ratio": {"0.5"}, "flag": {"true"}, "theme": {"dark"}, "tag": {"x", "y"},
 	}, logTo(&logged))
 
@@ -283,14 +287,14 @@ export const r = quack.recipe({
 		{map[string]wire.RawArg{"user": {"a", "b"}}, "recipe 'r': 'user' given more than once"},
 		{map[string]wire.RawArg{"user": {"a"}, "count": {"many"}}, "recipe 'r': 'count' expects int, got 'many'"},
 	} {
-		_, err := s.Run(context.Background(), &fakeApp{}, nil, "r", c.args, ignore)
+		_, err := s.Run(context.Background(), newApp(), nil, "r", c.args, ignore)
 
 		var refused wire.Error
 		if !errors.As(err, &refused) || refused.Code != wire.ErrorCodeInvalidArgs || refused.Message != c.want {
 			t.Errorf("%v: got %v, want %s", c.args, err, c.want)
 		}
 	}
-	if _, err := s.Run(context.Background(), &fakeApp{}, nil, "nope", nil, ignore); err == nil || err.Error() != "no recipe named nope for io.mehow.quack.sample" {
+	if _, err := s.Run(context.Background(), newApp(), nil, "nope", nil, ignore); err == nil || err.Error() != "no recipe named nope for io.mehow.quack.sample" {
 		t.Errorf("unknown recipe: got %v", err)
 	}
 }
@@ -315,7 +319,7 @@ export const r = quack.recipe({
 	}
 	var events []step.Event
 
-	_, err = s.Run(context.Background(), &fakeApp{}, nil, "r", nil, collect(&events))
+	_, err = s.Run(context.Background(), newApp(), nil, "r", nil, collect(&events))
 
 	var refused wire.Error
 	var thrown *ScriptError
@@ -347,7 +351,7 @@ export const r = quack.recipe({
 })`)
 	var events []step.Event
 
-	_, err := s.Run(context.Background(), &fakeApp{}, nil, "r", nil, collect(&events))
+	_, err := s.Run(context.Background(), newApp(), nil, "r", nil, collect(&events))
 
 	want := []step.Event{
 		step.Started{Number: 1, Line: "fail"},
@@ -367,7 +371,7 @@ export const spin = quack.recipe({ run() { while (true) {} } })`)
 	time.AfterFunc(20*time.Millisecond, cancel)
 
 	started := time.Now()
-	_, err := s.Run(ctx, &fakeApp{}, nil, "spin", nil, ignore)
+	_, err := s.Run(ctx, newApp(), nil, "spin", nil, ignore)
 
 	var call *client.CallError
 	if !errors.As(err, &call) || err.Error() != "canceled" || time.Since(started) > 5*time.Second {
@@ -382,7 +386,7 @@ export const spin = quack.recipe({ run() { while (true) {} } })`)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := s.Run(ctx, &fakeApp{}, nil, "spin", nil, ignore)
+	_, err := s.Run(ctx, newApp(), nil, "spin", nil, ignore)
 
 	var call *client.CallError
 	if !errors.As(err, &call) || err.Error() != "canceled" {
@@ -408,10 +412,10 @@ export const times = quack.recipe({ run() { quack.waitUntil(() => false, { timeo
 		startedLines(&started)(e)
 	}
 
-	if _, err := s.Run(context.Background(), &fakeApp{}, nil, "passes", nil, observer); err != nil || !reflect.DeepEqual(logged, []string{"checks 3"}) {
+	if _, err := s.Run(context.Background(), newApp(), nil, "passes", nil, observer); err != nil || !reflect.DeepEqual(logged, []string{"checks 3"}) {
 		t.Errorf("passes: got %v, %v", logged, err)
 	}
-	_, err := s.Run(context.Background(), &fakeApp{}, nil, "times", nil, observer)
+	_, err := s.Run(context.Background(), newApp(), nil, "times", nil, observer)
 	if err == nil || !strings.HasPrefix(err.Error(), "waitUntil: the check did not pass within 30ms") {
 		t.Errorf("times: got %v", err)
 	}
@@ -428,7 +432,7 @@ import quack from "quack"
 export const r = quack.recipe({ run() { console.log(quack.app.package, quack.device.serial, quack.env.QUACK_NAME, quack.env.QUACK_MISSING) } })`)
 	var logged []string
 
-	_, err := s.Run(context.Background(), &fakeApp{}, nil, "r", nil, logTo(&logged))
+	_, err := s.Run(context.Background(), newApp(), nil, "r", nil, logTo(&logged))
 
 	if want := []string{"io.mehow.quack.sample emulator-5554 Bob undefined"}; err != nil || !reflect.DeepEqual(logged, want) {
 		t.Errorf("got %v, %v, want %v", logged, err, want)
@@ -446,7 +450,7 @@ export const r = quack.recipe({
     quack.runAction("app.greet", { name: quack.env.QUACK_TOKEN + "-Bob" })
   },
 })`)
-	app := &fakeApp{}
+	app := newApp()
 	var started []string
 
 	_, err := s.Run(context.Background(), app, nil, "r", nil, startedLines(&started))
@@ -454,11 +458,11 @@ export const r = quack.recipe({
 	if want := []string{"shell curl -H 'Authorization: ${QUACK_TOKEN}' -d Bob", "app.greet name='${QUACK_TOKEN}-Bob'"}; err != nil || !reflect.DeepEqual(started, want) {
 		t.Errorf("started: got %v, %v, want %v", started, err, want)
 	}
-	if want := []string{"curl -H 'Authorization: s3cret' -d Bob"}; !reflect.DeepEqual(app.commands, want) {
-		t.Errorf("commands: got %v, want %v", app.commands, want)
+	if want := []string{"curl -H 'Authorization: s3cret' -d Bob"}; !reflect.DeepEqual(app.Commands(), want) {
+		t.Errorf("commands: got %v, want %v", app.Commands(), want)
 	}
-	if want := []string{"app.greet name=s3cret-Bob"}; !reflect.DeepEqual(app.calls, want) {
-		t.Errorf("calls: got %v, want %v", app.calls, want)
+	if want := []string{"app.greet name=s3cret-Bob"}; !reflect.DeepEqual(lines(app.Calls()), want) {
+		t.Errorf("calls: got %v, want %v", lines(app.Calls()), want)
 	}
 }
 
@@ -475,7 +479,7 @@ export const unset = quack.recipe({
   params: { code: { type: "string", required: true, env: "QUACK_MISSING" } },
   run() {},
 })`)
-	app := &fakeApp{}
+	app := newApp()
 	var started []string
 
 	_, err := s.Run(context.Background(), app, nil, "set", nil, startedLines(&started))
@@ -483,8 +487,8 @@ export const unset = quack.recipe({
 	if want := (wire.Default{Values: []string{"${QUACK_CODE}"}}); !reflect.DeepEqual(s.Recipes[0].Params[0].Presence, want) {
 		t.Errorf("set presence: got %v, want %v", s.Recipes[0].Params[0].Presence, want)
 	}
-	if want := []string{"app.greet name=s3cret"}; err != nil || !reflect.DeepEqual(app.calls, want) {
-		t.Errorf("calls: got %v, %v, want %v", app.calls, err, want)
+	if want := []string{"app.greet name=s3cret"}; err != nil || !reflect.DeepEqual(lines(app.Calls()), want) {
+		t.Errorf("calls: got %v, %v, want %v", lines(app.Calls()), err, want)
 	}
 	if want := []string{"app.greet name='${QUACK_CODE}'"}; !reflect.DeepEqual(started, want) {
 		t.Errorf("started: got %v, want %v", started, want)
@@ -520,7 +524,7 @@ export const outer = quack.recipe({
     return [session.user, quack.runRecipe(quack.recipe({ run() {} }))]
   },
 })`)
-	app := &fakeApp{}
+	app := newApp()
 	var events []step.Event
 
 	data, err := s.Run(context.Background(), app, nil, "outer", nil, collect(&events))
@@ -577,7 +581,7 @@ export const outer = quack.recipe({
 })`)
 	var logged []string
 
-	_, err := s.Run(context.Background(), &fakeApp{}, nil, "outer", nil, logTo(&logged))
+	_, err := s.Run(context.Background(), newApp(), nil, "outer", nil, logTo(&logged))
 
 	want := []string{
 		"[invalid_args] recipe 'login': missing argument 'user'",
@@ -594,7 +598,7 @@ func TestRunRecipeTakesOnlyARecipeAndOnlyInsideARun(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
 export const named = quack.recipe({ run() { quack.runRecipe("named" as any) } })`)
-	if _, err := s.Run(context.Background(), &fakeApp{}, nil, "named", nil, ignore); err == nil || !strings.HasPrefix(err.Error(), "TypeError: runRecipe() takes a recipe that quack.recipe() returned") {
+	if _, err := s.Run(context.Background(), newApp(), nil, "named", nil, ignore); err == nil || !strings.HasPrefix(err.Error(), "TypeError: runRecipe() takes a recipe that quack.recipe() returned") {
 		t.Errorf("by name: got %v", err)
 	}
 
@@ -627,7 +631,7 @@ export const nested = quack.recipe({ run() { quack.runRecipe(deep) } })`)
 		"deep":   "the recipe calls functions more than 10000 deep",
 		"nested": "the recipe calls functions more than 10000 deep",
 	} {
-		if _, err := s.Run(context.Background(), &fakeApp{}, nil, name, nil, ignore); err == nil || !strings.Contains(err.Error(), want) {
+		if _, err := s.Run(context.Background(), newApp(), nil, name, nil, ignore); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: got %v, want %s", name, err, want)
 		}
 	}
@@ -641,11 +645,11 @@ export const fn = quack.recipe({ run() { return (() => 1) as any } })
 export const cycle = quack.recipe({ run() { const a: any = {}; a.a = a; return a } })`)
 
 	for _, name := range []string{"nothing", "fn"} {
-		if data, err := s.Run(context.Background(), &fakeApp{}, nil, name, nil, ignore); data != nil || err != nil {
+		if data, err := s.Run(context.Background(), newApp(), nil, name, nil, ignore); data != nil || err != nil {
 			t.Errorf("%s: got %s, %v, want no data", name, data, err)
 		}
 	}
-	_, err := s.Run(context.Background(), &fakeApp{}, nil, "cycle", nil, ignore)
+	_, err := s.Run(context.Background(), newApp(), nil, "cycle", nil, ignore)
 	if err == nil || !strings.HasPrefix(err.Error(), "recipe 'cycle' returned a value that JSON cannot hold: TypeError") {
 		t.Errorf("cycle: got %v", err)
 	}
@@ -668,12 +672,12 @@ export const caught = quack.recipe({
 	var logged []string
 	observer := logTo(&logged)
 
-	_, err := s.Run(context.Background(), &fakeApp{}, nil, "uncaught", nil, observer)
+	_, err := s.Run(context.Background(), newApp(), nil, "uncaught", nil, observer)
 	var thrown *ScriptError
 	if err == nil || err.Error() != "no account" || errors.As(err, &thrown) {
 		t.Errorf("uncaught: got %#v, want the message without a stack", err)
 	}
-	if _, err := s.Run(context.Background(), &fakeApp{}, nil, "caught", nil, observer); err != nil || !reflect.DeepEqual(logged, []string{"caught no account true"}) {
+	if _, err := s.Run(context.Background(), newApp(), nil, "caught", nil, observer); err != nil || !reflect.DeepEqual(logged, []string{"caught no account true"}) {
 		t.Errorf("caught: got %q, %v", logged, err)
 	}
 }
@@ -690,7 +694,7 @@ export const r = quack.recipe({
 })`)
 	var logged []string
 
-	_, err := s.Run(context.Background(), &fakeApp{}, nil, "r", nil, logTo(&logged))
+	_, err := s.Run(context.Background(), newApp(), nil, "r", nil, logTo(&logged))
 
 	if want := []string{`{"id":7} 0`}; err != nil || !reflect.DeepEqual(logged, want) {
 		t.Errorf("got %q, %v, want %q", logged, err, want)
@@ -698,8 +702,6 @@ export const r = quack.recipe({
 }
 
 const pkg = "io.mehow.quack.sample"
-
-var target = device.Target{Device: "emulator-5554", Package: pkg}
 
 var actions = []wire.Action{
 	{ID: "app.params", Params: []wire.Param{
@@ -777,36 +779,28 @@ func call(action string, keysAndValues ...string) step.Call {
 	return step.Call{Action: action, Args: args}
 }
 
-type fakeApp struct {
-	starts   []client.StartMode
-	commands []string
-	output   adb.Output
-	data     map[string]string
-	calls    []string
-}
-
-func (a *fakeApp) Target() device.Target { return target }
-
-func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
-	a.commands = append(a.commands, cmd)
-	return a.output, nil
-}
-
-func (a *fakeApp) Call(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
-	a.calls = append(a.calls, step.Line(step.Call(call), nil))
-	switch {
-	case call.Action == "fail":
-		return wire.MessageResult{}, wire.Error{Code: wire.ErrorCodeRejected, Message: "no way"}
-	case a.data[call.Action] != "":
-		return wire.MessageResult{Message: call.Action, Data: json.RawMessage(a.data[call.Action])}, nil
+// The app greets whoever a call names, fails a call of fail, and answers each command with no output.
+func newApp() *fakes.App {
+	greet := func(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
+		notify(wire.Notification{Message: "greeting", Data: json.RawMessage(`{"name":"` + call.Args["name"][0] + `"}`)})
+		return wire.MessageResult{Message: "Hello, " + call.Args["name"][0] + "!"}, nil
 	}
-	notify(wire.Notification{Message: "greeting", Data: json.RawMessage(`{"name":"` + call.Args["name"][0] + `"}`)})
-	return wire.MessageResult{Message: "Hello, " + call.Args["name"][0] + "!"}, nil
+	app := fakes.NewApp()
+	app.Replies["app.greet"], app.Replies["app.login"] = greet, greet
+	app.Replies["fail"] = func(context.Context, wire.Call, client.NotificationFunc) (wire.MessageResult, error) {
+		return wire.MessageResult{}, wire.Error{Code: wire.ErrorCodeRejected, Message: "no way"}
+	}
+	app.CommandReply = func(string) adb.Output { return adb.Output{} }
+	return app
 }
 
-func (a *fakeApp) Start(mode client.StartMode) error {
-	a.starts = append(a.starts, mode)
-	return nil
+// Each call as its line.
+func lines(calls []wire.Call) []string {
+	var lines []string
+	for _, c := range calls {
+		lines = append(lines, step.Line(step.Call(c), nil))
+	}
+	return lines
 }
 
 func ignore(step.Event) {}

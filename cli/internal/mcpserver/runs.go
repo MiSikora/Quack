@@ -66,7 +66,7 @@ func newRuns(ctx context.Context) *runs {
 	return &runs{ctx: ctx}
 }
 
-func (r *runs) start(target device.Target, app App, call wire.Call) string {
+func (r *runs) start(target device.Target, app session.App, call wire.Call) string {
 	ctx, cancel := context.WithCancel(r.ctx)
 	r.mu.Lock()
 	r.count++

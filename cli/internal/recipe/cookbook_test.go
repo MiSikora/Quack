@@ -63,7 +63,7 @@ export const second = quack.recipe({ run() { console.log("b") } })`)
 	observer := logTo(&logged)
 
 	for _, name := range []string{"second", "first"} {
-		if _, err := c.Run(context.Background(), &fakeApp{}, nil, name, nil, observer); err != nil {
+		if _, err := c.Run(context.Background(), newApp(), nil, name, nil, observer); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -116,9 +116,9 @@ export const hello = quack.recipe({ run() { greet() } })`)
 	if err != nil || !reflect.DeepEqual(names(c), []string{"hello"}) {
 		t.Fatalf("got %v, %v, want only hello", names(c), err)
 	}
-	app := &fakeApp{}
-	if _, err := c.Run(context.Background(), app, nil, "hello", nil, ignore); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob"}) {
-		t.Errorf("run: got %v and calls %v", err, app.calls)
+	app := newApp()
+	if _, err := c.Run(context.Background(), app, nil, "hello", nil, ignore); err != nil || !reflect.DeepEqual(lines(app.Calls()), []string{"app.greet name=Bob"}) {
+		t.Errorf("run: got %v and calls %v", err, lines(app.Calls()))
 	}
 }
 
@@ -137,9 +137,9 @@ export const login = quack.recipe({ run() {} })`)
 	if want := map[string]string{"login": main, "reset": helpers}; !reflect.DeepEqual(files(c), want) {
 		t.Fatalf("got %v, want %v", files(c), want)
 	}
-	app := &fakeApp{}
-	if _, err := c.Run(context.Background(), app, nil, "reset", nil, ignore); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob"}) {
-		t.Errorf("run: got %v and calls %v", err, app.calls)
+	app := newApp()
+	if _, err := c.Run(context.Background(), app, nil, "reset", nil, ignore); err != nil || !reflect.DeepEqual(lines(app.Calls()), []string{"app.greet name=Bob"}) {
+		t.Errorf("run: got %v and calls %v", err, lines(app.Calls()))
 	}
 }
 
@@ -191,9 +191,9 @@ export const reset = quack.recipe({ run() { greet(); quack.runRecipe(login) } })
 	if want := map[string]string{"login": common, "reset": debug, "seed": common}; !reflect.DeepEqual(files, want) {
 		t.Fatalf("got %v, want %v", files, want)
 	}
-	app := &fakeApp{}
-	if _, err := c.Run(context.Background(), app, nil, "reset", nil, ignore); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob", "app.login name=Ann"}) {
-		t.Errorf("run: got %v and calls %v", err, app.calls)
+	app := newApp()
+	if _, err := c.Run(context.Background(), app, nil, "reset", nil, ignore); err != nil || !reflect.DeepEqual(lines(app.Calls()), []string{"app.greet name=Bob", "app.login name=Ann"}) {
+		t.Errorf("run: got %v and calls %v", err, lines(app.Calls()))
 	}
 }
 
@@ -413,9 +413,9 @@ func TestInitWithAnAppStartsAProjectWhoseRecipeRuns(t *testing.T) {
 	if err != nil || warnings != nil || !reflect.DeepEqual(names(c), []string{"open"}) {
 		t.Fatalf("load: got %v, %q, %v", names(c), warnings, err)
 	}
-	app := &fakeApp{}
-	if _, err := c.Run(context.Background(), app, nil, "open", nil, ignore); err != nil || !reflect.DeepEqual(app.starts, []client.StartMode{client.OpenApp}) {
-		t.Errorf("open: got %v and starts %v", err, app.starts)
+	app := newApp()
+	if _, err := c.Run(context.Background(), app, nil, "open", nil, ignore); err != nil || !reflect.DeepEqual(app.Starts(), []client.StartMode{client.OpenApp}) {
+		t.Errorf("open: got %v and starts %v", err, app.Starts())
 	}
 	if written, err := Init(dir, pkg); err != nil || len(written) != 0 {
 		t.Errorf("again: got %v, %v, want nothing written", written, err)

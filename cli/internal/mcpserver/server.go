@@ -10,7 +10,6 @@ import (
 	"os"
 	"reflect"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +18,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"quack/internal/adb"
-	"quack/internal/client"
 	"quack/internal/device"
 	"quack/internal/recipe"
 	"quack/internal/session"
@@ -27,30 +25,17 @@ import (
 	"quack/internal/wire"
 )
 
-type Source interface {
-	Devices() ([]device.Info, error)
-	Find(serial adb.Device, pkg string) (device.Target, error)
-	Connect(target device.Target, mode client.StartMode) (App, error)
-	// Recipes gives the app's recipes, and the problems that left some files or entries out.
-	Recipes(pkg string) (*recipe.Cookbook, []string, error)
-}
-
-type App interface {
-	step.App
-	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
-}
-
 // The session ends with stdin, which cancels the runs that start_action started.
 func Serve(ctx context.Context, version string, startTimeout time.Duration, status io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	return New(ctx, clientSource{startTimeout, status}, version).Run(ctx, &mcp.StdioTransport{})
+	return New(ctx, session.ADB{StartTimeout: startTimeout, Status: status}, version).Run(ctx, &mcp.StdioTransport{})
 }
 
 // The runs that start_action starts end with ctx.
-func New(ctx context.Context, source Source, version string) *mcp.Server {
+func New(ctx context.Context, backend session.Backend, version string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "quack", Version: version}, &mcp.ServerOptions{Instructions: instructions})
-	s := tools{source, newRuns(ctx)}
+	s := tools{backend, newRuns(ctx)}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_devices",
 		Description: "List the devices adb knows, each with its state and the quack-enabled apps on it.",
@@ -122,8 +107,8 @@ func New(ctx context.Context, source Source, version string) *mcp.Server {
 }
 
 type tools struct {
-	source Source
-	runs   *runs
+	backend session.Backend
+	runs    *runs
 }
 
 type listDevicesInput struct{}
@@ -258,7 +243,7 @@ type notificationOutput struct {
 }
 
 func (s tools) listDevices(context.Context, *mcp.CallToolRequest, listDevicesInput) (*mcp.CallToolResult, listDevicesOutput, error) {
-	devices, err := s.source.Devices()
+	devices, err := s.backend.Devices("", "")
 	if err != nil {
 		return nil, listDevicesOutput{}, err
 	}
@@ -278,7 +263,7 @@ func (s tools) listActions(ctx context.Context, _ *mcp.CallToolRequest, in listA
 	if err != nil {
 		return nil, listActionsOutput{}, fmt.Errorf("invalid filter: %v", err)
 	}
-	target, app, err := s.connect(in.Device, in.App, client.Wake)
+	target, app, err := s.connect(in.Device, in.App, false)
 	if err != nil {
 		return nil, listActionsOutput{}, err
 	}
@@ -345,11 +330,11 @@ func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRec
 	if err != nil {
 		return nil, listRecipesOutput{}, fmt.Errorf("invalid filter: %v", err)
 	}
-	target, err := s.source.Find(adb.Device(in.Device), in.App)
+	target, err := s.find(in.Device, in.App)
 	if err != nil {
 		return nil, listRecipesOutput{}, err
 	}
-	cookbook, problems, err := s.source.Recipes(target.Package)
+	cookbook, problems, err := loadRecipes(target.Package)
 	if err != nil {
 		return nil, listRecipesOutput{}, err
 	}
@@ -368,15 +353,16 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	target, app, err := s.connect(in.Device, in.App, client.Wake)
+	target, app, err := s.connect(in.Device, in.App, false)
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	cookbook, problems, err := s.source.Recipes(target.Package)
+	cookbook, problems, err := loadRecipes(target.Package)
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	if !slices.ContainsFunc(cookbook.Recipes, func(r recipe.Recipe) bool { return r.Name == in.Recipe }) {
+	r, ok := cookbook.Find(in.Recipe)
+	if !ok {
 		return nil, runRecipeOutput{}, errors.New(strings.Join(append([]string{"no recipe named " + in.Recipe + " for " + target.Package}, problems...), "\n"))
 	}
 	_, actions, err := app.Describe(ctx)
@@ -384,12 +370,8 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 		return nil, runRecipeOutput{}, err
 	}
 	if canElicit(req.Session) {
-		for _, r := range cookbook.Recipes {
-			if r.Name == in.Recipe {
-				if form, err := askForParams(req, "recipe "+in.Recipe, r.Params, args); form != nil || err != nil {
-					return form, runRecipeOutput{}, err
-				}
-			}
+		if form, err := askForParams(req, "recipe "+in.Recipe, r.Params, args); form != nil || err != nil {
+			return form, runRecipeOutput{}, err
 		}
 	}
 	t := newTranscript(progress(ctx, req))
@@ -540,7 +522,7 @@ func fieldSchema(p wire.Param) *jsonschema.Schema {
 
 type preparedCall struct {
 	target  device.Target
-	app     App
+	app     session.App
 	call    wire.Call
 	actions []wire.Action
 }
@@ -550,11 +532,7 @@ func (s tools) prepareCall(ctx context.Context, req *mcp.CallToolRequest, in run
 	if err != nil {
 		return preparedCall{}, nil, err
 	}
-	mode := client.Wake
-	if in.OpenApp {
-		mode = client.OpenApp
-	}
-	target, app, err := s.connect(in.Device, in.App, mode)
+	target, app, err := s.connect(in.Device, in.App, in.OpenApp)
 	if err != nil {
 		return preparedCall{}, nil, err
 	}
@@ -577,13 +555,29 @@ func (s tools) prepareCall(ctx context.Context, req *mcp.CallToolRequest, in run
 	return prepared, nil, nil
 }
 
-func (s tools) connect(serial, pkg string, mode client.StartMode) (device.Target, App, error) {
-	target, err := s.source.Find(adb.Device(serial), pkg)
+func (s tools) connect(serial, pkg string, openApp bool) (device.Target, session.App, error) {
+	target, err := s.find(serial, pkg)
 	if err != nil {
 		return device.Target{}, nil, err
 	}
-	app, err := s.source.Connect(target, mode)
+	app, err := s.backend.Connect(target, openApp)
 	return target, app, err
+}
+
+func (s tools) find(serial, pkg string) (device.Target, error) {
+	if pkg != "" && !device.IsPackageName(pkg) {
+		return device.Target{}, errors.New(pkg + " is not a package name")
+	}
+	return s.backend.Find(adb.Device(serial), pkg)
+}
+
+// Recipes come from the project of the dir quack-mcp runs in, as the MCP client started it, and from the user's config.
+func loadRecipes(pkg string) (*recipe.Cookbook, []string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, nil, err
+	}
+	return recipe.Load(dir, pkg)
 }
 
 func progress(ctx context.Context, req *mcp.CallToolRequest) func(message string) {
@@ -645,36 +639,6 @@ func rawArgs(values map[string]json.RawMessage) (map[string]wire.RawArg, error) 
 		}
 	}
 	return args, nil
-}
-
-type clientSource struct {
-	startTimeout time.Duration
-	status       io.Writer
-}
-
-func (clientSource) Devices() ([]device.Info, error) {
-	return device.List("", "")
-}
-
-func (clientSource) Find(serial adb.Device, pkg string) (device.Target, error) {
-	if pkg != "" && !device.IsPackageName(pkg) {
-		return device.Target{}, errors.New(pkg + " is not a package name")
-	}
-	return device.Find(serial, pkg)
-}
-
-func (s clientSource) Connect(target device.Target, mode client.StartMode) (App, error) {
-	app, err := client.Resolve(client.Options{Target: target, Mode: mode, StartTimeout: s.startTimeout, Status: s.status})
-	return app, err
-}
-
-// Recipes come from the project of the dir quack-mcp runs in, as the MCP client started it, and from the user's config.
-func (clientSource) Recipes(pkg string) (*recipe.Cookbook, []string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return nil, nil, err
-	}
-	return recipe.Load(dir, pkg)
 }
 
 // Raw JSON would otherwise infer as an array of bytes.

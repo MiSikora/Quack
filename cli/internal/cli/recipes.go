@@ -7,10 +7,8 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"slices"
 	"strings"
 
-	"quack/internal/client"
 	"quack/internal/config"
 	"quack/internal/recipe"
 	"quack/internal/session"
@@ -18,7 +16,7 @@ import (
 	"quack/internal/wire"
 )
 
-func runPrinted(app client.App, cookbook *recipe.Cookbook, r session.Runnable, args map[string]wire.RawArg, terminal Terminal, json bool) error {
+func runPrinted(app session.App, cookbook *recipe.Cookbook, r session.Runnable, args map[string]wire.RawArg, terminal Terminal, json bool) error {
 	ctx := context.Background()
 	var actions []wire.Action
 	if r.Recipe {
@@ -111,7 +109,7 @@ func findRecipe(pkg, name string, terminal Terminal) (*recipe.Cookbook, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !slices.ContainsFunc(c.Recipes, func(r recipe.Recipe) bool { return r.Name == name }) {
+	if _, ok := c.Find(name); !ok {
 		return nil, usageErrorf("no recipe named %s for %s", name, pkg)
 	}
 	return c, nil

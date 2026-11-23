@@ -1,4 +1,4 @@
-package session
+package session_test
 
 import (
 	"context"
@@ -14,7 +14,9 @@ import (
 	"quack/internal/adb"
 	"quack/internal/client"
 	"quack/internal/device"
+	"quack/internal/fakes"
 	"quack/internal/recipe"
+	"quack/internal/session"
 	"quack/internal/step"
 	"quack/internal/wire"
 )
@@ -22,7 +24,7 @@ import (
 func TestRunRunsAPlainActionAsOneUnnumberedStep(t *testing.T) {
 	var events []step.Event
 
-	data, err := Run(context.Background(), &fakeApp{}, actions, nil, Runnable{Name: "account.create"}, map[string]wire.RawArg{"username": {"ann"}, "age": {"7"}}, collect(&events))
+	data, err := session.Run(context.Background(), newApp(), actions, nil, session.Runnable{Name: "account.create"}, map[string]wire.RawArg{"username": {"ann"}, "age": {"7"}}, collect(&events))
 
 	want := []step.Event{
 		step.Started{Line: "account.create username=ann age=7"},
@@ -40,9 +42,9 @@ func TestRunRunsAPlainActionAsOneUnnumberedStep(t *testing.T) {
 func TestAPlainActionsFailureIsTheRunsErrorWithoutAFailedStep(t *testing.T) {
 	var events []step.Event
 
-	_, err := Run(context.Background(), &fakeApp{}, actions, nil, Runnable{Name: "fail"}, nil, collect(&events))
+	_, err := session.Run(context.Background(), newApp(), actions, nil, session.Runnable{Name: "fail"}, nil, collect(&events))
 
-	var failed *StepError
+	var failed *session.StepError
 	if err != refused || errors.As(err, &failed) {
 		t.Errorf("got %#v, want the app's error as it is", err)
 	}
@@ -64,7 +66,7 @@ export const r = quack.recipe({
 })`)
 	var events []step.Event
 
-	data, err := Run(context.Background(), &fakeApp{}, actions, cookbook, Runnable{Name: "r", Recipe: true}, nil, collect(&events))
+	data, err := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "r", Recipe: true}, nil, collect(&events))
 
 	want := []step.Event{
 		step.Logged{Text: "first"},
@@ -92,9 +94,9 @@ export const r = quack.recipe({
   },
 })`)
 
-	_, err := Run(context.Background(), &fakeApp{}, actions, cookbook, Runnable{Name: "r", Recipe: true}, nil, func(step.Event) {})
+	_, err := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "r", Recipe: true}, nil, func(step.Event) {})
 
-	var failed *StepError
+	var failed *session.StepError
 	var thrown *recipe.ScriptError
 	if !errors.As(err, &failed) || failed.Step != 2 || !errors.Is(err, refused) || !errors.As(err, &thrown) {
 		t.Fatalf("got %#v, want step 2's error", err)
@@ -126,10 +128,10 @@ export const goesOn = quack.recipe({
   },
 })`)
 
-	_, rethrown := Run(context.Background(), &fakeApp{}, actions, cookbook, Runnable{Name: "rethrows", Recipe: true}, nil, func(step.Event) {})
-	_, wentOn := Run(context.Background(), &fakeApp{}, actions, cookbook, Runnable{Name: "goesOn", Recipe: true}, nil, func(step.Event) {})
+	_, rethrown := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "rethrows", Recipe: true}, nil, func(step.Event) {})
+	_, wentOn := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "goesOn", Recipe: true}, nil, func(step.Event) {})
 
-	var failed *StepError
+	var failed *session.StepError
 	if !errors.Is(rethrown, refused) || errors.As(rethrown, &failed) {
 		t.Errorf("rethrows: got %#v, want the app's error without a step", rethrown)
 	}
@@ -145,14 +147,14 @@ func TestClassifyGivesTheAppsCodeOrTheKindOfFailure(t *testing.T) {
 		code, message string
 	}{
 		{refused, "rejected", "no way"},
-		{&StepError{Step: 2, Err: thrown}, "rejected", "no way\n    at run (r.ts:1:1)"},
+		{&session.StepError{Step: 2, Err: thrown}, "rejected", "no way\n    at run (r.ts:1:1)"},
 		{&step.CommandError{Exit: 3, Output: "nope"}, "command", "the command exited with 3: nope"},
 		{fmt.Errorf("wrapped: %w", client.ErrCanceled), "no_reply", "wrapped: canceled"},
 		{&adb.Error{Message: "adb is not running"}, "error", "adb is not running"},
 		{&device.AppError{Message: "not installed"}, "error", "not installed"},
 	}
 	for _, c := range cases {
-		if code, message := Classify(c.err); code != c.code || message != c.message {
+		if code, message := session.Classify(c.err); code != c.code || message != c.message {
 			t.Errorf("%v: got %s %q, want %s %q", c.err, code, message, c.code, c.message)
 		}
 	}
@@ -192,21 +194,16 @@ func load(t *testing.T, file string) *recipe.Cookbook {
 	return cookbook
 }
 
-type fakeApp struct{}
-
-func (*fakeApp) Target() device.Target {
-	return device.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}
-}
-
-func (*fakeApp) Command(context.Context, string) (adb.Output, error) { return adb.Output{}, nil }
-
-func (*fakeApp) Start(client.StartMode) error { return nil }
-
-func (*fakeApp) Call(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
-	if call.Action == "fail" {
+// The app creates the account a call names, and fails a call of fail.
+func newApp() *fakes.App {
+	app := fakes.NewApp()
+	app.Replies["account.create"] = func(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
+		username := call.Args["username"][0]
+		notify(wire.Notification{Message: "Creating " + username})
+		return wire.MessageResult{Message: "Created " + username, Data: json.RawMessage(`{"id":7}`)}, nil
+	}
+	app.Replies["fail"] = func(context.Context, wire.Call, client.NotificationFunc) (wire.MessageResult, error) {
 		return wire.MessageResult{}, refused
 	}
-	username := call.Args["username"][0]
-	notify(wire.Notification{Message: "Creating " + username})
-	return wire.MessageResult{Message: "Created " + username, Data: json.RawMessage(`{"id":7}`)}, nil
+	return app
 }

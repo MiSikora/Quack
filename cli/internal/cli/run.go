@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/pflag"
 
 	"quack/internal/adb"
-	"quack/internal/client"
 	"quack/internal/device"
 	"quack/internal/recipe"
 	"quack/internal/session"
@@ -202,17 +201,14 @@ func run(opts options, terminal Terminal) error {
 	if opts.initRecipes {
 		return initRecipes(terminal.Out, opts.pkg)
 	}
+	backend := session.ADB{StartTimeout: opts.startTimeout, Status: terminal.Err}
 	if opts.listDevices {
-		return printDevices(terminal.Out, adb.Device(opts.device), opts.pkg, opts.json)
-	}
-	mode := client.Wake
-	if opts.openApp {
-		mode = client.OpenApp
+		return printDevices(terminal.Out, backend, adb.Device(opts.device), opts.pkg, opts.json)
 	}
 	if opts.interactive {
-		return tui.Run(device.Target{Device: adb.Device(opts.device), Package: opts.pkg}, mode, opts.startTimeout, version)
+		return tui.Run(device.Target{Device: adb.Device(opts.device), Package: opts.pkg}, opts.openApp, opts.startTimeout, version)
 	}
-	target, err := device.Find(adb.Device(opts.device), opts.pkg)
+	target, err := backend.Find(adb.Device(opts.device), opts.pkg)
 	if err != nil {
 		return err
 	}
@@ -225,12 +221,7 @@ func run(opts options, terminal Terminal) error {
 			return err
 		}
 	}
-	app, err := client.Resolve(client.Options{
-		Target:       target,
-		Mode:         mode,
-		StartTimeout: opts.startTimeout,
-		Status:       terminal.Err,
-	})
+	app, err := backend.Connect(target, opts.openApp)
 	if err != nil {
 		return err
 	}

@@ -5,7 +5,7 @@ import (
 	"io"
 
 	"quack/internal/adb"
-	"quack/internal/device"
+	"quack/internal/session"
 )
 
 type deviceJSON struct {
@@ -19,8 +19,8 @@ type appJSON struct {
 	Package string `json:"package"`
 }
 
-func printDevices(w io.Writer, serial adb.Device, pkg string, asJSON bool) error {
-	devices, err := device.List(serial, pkg)
+func printDevices(w io.Writer, backend session.Backend, serial adb.Device, pkg string, asJSON bool) error {
+	devices, err := backend.Devices(serial, pkg)
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"regexp"
 	"slices"
@@ -17,7 +16,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"quack/internal/adb"
-	"quack/internal/client"
 	"quack/internal/config"
 	"quack/internal/device"
 	"quack/internal/recipe"
@@ -26,35 +24,25 @@ import (
 	"quack/internal/wire"
 )
 
-type App interface {
-	step.App
-	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
-}
-
 // The app's status lines go into the log, since anything printed around the TUI would break the screen.
-func Run(want device.Target, mode client.StartMode, startTimeout time.Duration, version string) error {
+func Run(want device.Target, openApp bool, startTimeout time.Duration, version string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	settings, problems := config.Load()
 	dir, _ := os.Getwd()
-	_, err := tea.NewProgram(newModel(clientSource{startTimeout}, newActivity(ctx), want, mode, version, dir, settings, problems)).Run()
+	activity := newActivity(ctx)
+	backend := session.ADB{StartTimeout: startTimeout, Status: activity}
+	_, err := tea.NewProgram(newModel(backend, activity, want, openApp, version, dir, settings, problems)).Run()
 	return err
 }
 
-type Source interface {
-	Track(ctx context.Context, send func([]adb.Listing)) error
-	Inspect(listing adb.Listing) (device.Info, error)
-	Packages(serial adb.Device) ([]string, error)
-	Connect(target device.Target, mode client.StartMode, status io.Writer) (App, error)
-}
-
 type model struct {
-	source     Source
+	backend    session.Backend
 	activity   activity
-	app        App
+	app        session.App
 	target     device.Target
 	connection int
-	mode       client.StartMode
+	opensApp   bool
 	devices    []seenDevice
 	listed     bool
 	asked      int
@@ -129,21 +117,17 @@ type (
 
 type connected struct {
 	target device.Target
-	app    App
+	app    session.App
 	described
 }
 
-type clientSource struct {
-	startTimeout time.Duration
-}
-
-func newModel(source Source, activity activity, want device.Target, mode client.StartMode, version, dir string, settings config.Config, problems []string) *model {
+func newModel(backend session.Backend, activity activity, want device.Target, openApp bool, version, dir string, settings config.Config, problems []string) *model {
 	m := &model{
-		source:    source,
+		backend:   backend,
 		activity:  activity,
 		dir:       dir,
 		pending:   map[adb.Device]int{},
-		mode:      mode,
+		opensApp:  openApp,
 		picker:    newPicker(want, 0),
 		clock:     wallClock{},
 		prompt:    prompt{input: newInput(""), grouped: settings.GroupNamespaces},
@@ -438,7 +422,7 @@ func (m *model) openApp() tea.Cmd {
 	app, activity := m.app, m.activity
 	return func() tea.Msg {
 		line := statusStyle.Render("showed the app's main screen")
-		if err := app.Start(client.OpenApp); err != nil {
+		if _, err := step.Do(context.Background(), app, step.OpenApp{}, nil); err != nil {
 			line = problemStyle.Render("open-app: " + err.Error())
 		}
 		activity.send(logged{line})
@@ -585,9 +569,9 @@ func (m *model) advance() tea.Cmd {
 
 func (m *model) connect(target device.Target) tea.Cmd {
 	m.picker.connecting = &target
-	source, activity, mode, dir := m.source, m.activity, m.mode, m.dir
+	backend, activity, openApp, dir := m.backend, m.activity, m.opensApp, m.dir
 	return func() tea.Msg {
-		app, err := source.Connect(target, mode, activity)
+		app, err := backend.Connect(target, openApp)
 		msg := connected{target: target, app: app, described: described{err: err}}
 		if err == nil {
 			msg.hello, msg.actions, msg.err = app.Describe(activity.ctx)
@@ -607,7 +591,7 @@ func (m *model) connected(msg connected) tea.Cmd {
 		m.log.add(problemStyle.Render(msg.target.Package + ": " + msg.err.Error()))
 		return m.advance()
 	}
-	m.app, m.target, m.hello, m.mode = msg.app, msg.target, msg.hello, client.Wake
+	m.app, m.target, m.hello, m.opensApp = msg.app, msg.target, msg.hello, false
 	m.connection++
 	m.picker = nil
 	m.prompt.clear()
@@ -623,11 +607,11 @@ func (m *model) connected(msg connected) tea.Cmd {
 }
 
 func (m *model) track() tea.Cmd {
-	source, activity, clock := m.source, m.activity, m.clock
+	backend, activity, clock := m.backend, m.activity, m.clock
 	return func() tea.Msg {
 		failing := false
 		for activity.ctx.Err() == nil {
-			err := source.Track(activity.ctx, func(listings []adb.Listing) {
+			err := backend.Track(activity.ctx, func(listings []adb.Listing) {
 				failing = false
 				activity.send(listed{listings})
 			})
@@ -675,8 +659,8 @@ func (m *model) inspect(listing adb.Listing) tea.Cmd {
 	if listing.State != adb.Ready {
 		return nil
 	}
-	source := m.source
-	return m.ask(listing.Device, func() (device.Info, error) { return source.Inspect(listing) })
+	backend := m.backend
+	return m.ask(listing.Device, func() (device.Info, error) { return backend.Inspect(listing) })
 }
 
 func (m *model) ask(serial adb.Device, inspect func() (device.Info, error)) tea.Cmd {
@@ -704,10 +688,10 @@ func (m *model) inspectPicked() tea.Cmd {
 	if !seen.inspected || seen.State != adb.Ready {
 		return m.inspect(seen.Listing)
 	}
-	source := m.source
+	backend := m.backend
 	return m.ask(seen.Device, func() (device.Info, error) {
 		info := seen.Info
-		packages, err := source.Packages(info.Device)
+		packages, err := backend.Packages(info.Device)
 		info.Packages = packages
 		return info, err
 	})
@@ -904,26 +888,6 @@ func commands() []command {
 		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", true, (*model).reload},
 		{"/toggle-data", "", "Show or hide the JSON data of notifications and results", false, (*model).toggleData},
 	}
-}
-
-func (clientSource) Track(ctx context.Context, send func([]adb.Listing)) error {
-	return adb.Track(ctx, send)
-}
-
-func (clientSource) Inspect(listing adb.Listing) (device.Info, error) {
-	return device.Inspect(listing)
-}
-
-func (clientSource) Packages(serial adb.Device) ([]string, error) {
-	return device.Packages(serial)
-}
-
-func (s clientSource) Connect(target device.Target, mode client.StartMode, status io.Writer) (App, error) {
-	app, err := client.Resolve(client.Options{Target: target, Mode: mode, StartTimeout: s.startTimeout, Status: status})
-	if err != nil {
-		return nil, err
-	}
-	return app, nil
 }
 
 func loadRecipes(dir, pkg string) recipes {

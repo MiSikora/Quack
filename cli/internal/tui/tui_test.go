@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,6 +23,8 @@ import (
 	"quack/internal/client"
 	"quack/internal/config"
 	"quack/internal/device"
+	"quack/internal/fakes"
+	"quack/internal/fakes/backend"
 	"quack/internal/recipe"
 	"quack/internal/wire"
 )
@@ -71,7 +72,7 @@ func TestUpOnEmptyTextListsTheNamespacesUnderARuleAndEscClosesIt(t *testing.T) {
 // without a dot.
 func startNamespaces(t *testing.T) (*harness, *fakeApp) {
 	app := newFakeApp()
-	app.setActions(append(app.actions(),
+	app.SetActions(append(app.Actions(),
 		wire.Action{ID: "sync.restore", Description: "Restore a backup"},
 		wire.Action{ID: "sync.backup", Description: "Back up"},
 		wire.Action{ID: "feature.toggle", Description: "Toggle a feature"},
@@ -147,7 +148,7 @@ func TestEnterInAGroupRunsTheSelectedRecipeOrAction(t *testing.T) {
 	h.press("enter")
 	h.waitForLog("\n› --recipe sync.backup\nrecipe backed up\n")
 	h.waitFor("type or ↑ to find an action")
-	if got := app.received(); len(got) != 0 {
+	if got := app.Calls(); len(got) != 0 {
 		t.Errorf("calls: got %v, want none", got)
 	}
 	h.press("up", "up", "up", "up", "up", "up", "enter", "up")
@@ -155,7 +156,7 @@ func TestEnterInAGroupRunsTheSelectedRecipeOrAction(t *testing.T) {
 	h.press("enter")
 
 	h.waitForLog("\n› sync.backup\n")
-	if got, want := app.received(), []wire.Call{{Action: "sync.backup"}}; !reflect.DeepEqual(got, want) {
+	if got, want := app.Calls(), []wire.Call{{Action: "sync.backup"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -202,7 +203,7 @@ func TestEnterAndTabDoNothingWhileNoListShows(t *testing.T) {
 
 	h.waitForRunning()
 	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
-	if got := app.received(); len(got) != 0 {
+	if got := app.Calls(); len(got) != 0 {
 		t.Errorf("calls: got %v, want none", got)
 	}
 }
@@ -381,7 +382,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 
 func TestViewTakesTheAlternateScreenAndTheMouse(t *testing.T) {
 	app := newFakeApp()
-	m := newModel(newFakeSource(app), newActivity(t.Context()), device.Target{}, client.Wake, "dev", t.TempDir(), config.Default(), nil)
+	m := newModel(newFakeSource(app), newActivity(t.Context()), device.Target{}, false, "dev", t.TempDir(), config.Default(), nil)
 
 	view := m.View()
 
@@ -612,7 +613,7 @@ func TestEnterRunsAnActionWithoutParamsAndPrintsItsError(t *testing.T) {
 
 	h.waitForLog("› account.delete\n[rejected] there is no account · ")
 	h.waitFor("quack · ", "> find an action", "type or ↑ to find an action")
-	if got, want := app.received(), []wire.Call{{Action: "account.delete"}}; !reflect.DeepEqual(got, want) {
+	if got, want := app.Calls(), []wire.Call{{Action: "account.delete"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -646,7 +647,7 @@ func TestEnterOnAnActionWithARequiredParamOpensTheBox(t *testing.T) {
 	h.waitForLog("› app.greet name='Bob Smith'\nHello, Bob Smith! · ")
 	h.waitFor("> find an action")
 	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bob Smith"}}}}
-	if got := app.received(); !reflect.DeepEqual(got, want) {
+	if got := app.Calls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -672,7 +673,7 @@ func TestMissingRequiredParamBlocksTheRunAndTurnsItsNoteRed(t *testing.T) {
 	if strings.Contains(h.raw(), red) {
 		t.Errorf("the note stayed red after the param was set")
 	}
-	if got := app.received(); len(got) != 0 {
+	if got := app.Calls(); len(got) != 0 {
 		t.Errorf("calls: got %v, want none", got)
 	}
 }
@@ -691,7 +692,7 @@ func TestEscAndCtrlCCloseTheBoxAndKeepTheQuery(t *testing.T) {
 		h.waitFor("▸ app.params", "> app.p")
 	}
 	h.waitFor("enter run")
-	if got := app.received(); len(got) != 0 {
+	if got := app.Calls(); len(got) != 0 {
 		t.Errorf("calls: got %v, want none", got)
 	}
 }
@@ -723,7 +724,7 @@ func TestStringListSplitsOnCommasAndKeepsEscapedOnes(t *testing.T) {
 	h.press("enter")
 	h.waitForLog("› app.params tag=a tag=b,c tag=d\ndone · ")
 	want := []wire.Call{{Action: "app.params", Args: map[string]wire.RawArg{"tag": {"a", "b,c", "d"}}}}
-	if got := app.received(); !reflect.DeepEqual(got, want) {
+	if got := app.Calls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -752,7 +753,7 @@ func TestBoxSendsOnlyTheParamsTheUserSet(t *testing.T) {
 		"theme": {"dark"},
 		"tag":   {"a", "b c"},
 	}}}
-	if got := app.received(); !reflect.DeepEqual(got, want) {
+	if got := app.Calls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -799,7 +800,7 @@ func TestTypingSelectsTheBestHintSoThatEnterPicksIt(t *testing.T) {
 
 	h.waitForLog("› app.greet name=Bob\nHello, Bob! · ")
 	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bob"}}}}
-	if got := app.received(); !reflect.DeepEqual(got, want) {
+	if got := app.Calls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -823,7 +824,7 @@ func TestDownFromTheBestHintKeepsTheTextAsTyped(t *testing.T) {
 
 	h.waitForLog("› app.greet name=Bo\nHello, Bo! · ")
 	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bo"}}}}
-	if got := app.received(); !reflect.DeepEqual(got, want) {
+	if got := app.Calls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -841,7 +842,7 @@ func TestTextThatNoHintMatchesStaysAsTyped(t *testing.T) {
 
 	h.waitForLog("› app.greet name=Bobx\nHello, Bobx! · ")
 	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bobx"}}}}
-	if got := app.received(); !reflect.DeepEqual(got, want) {
+	if got := app.Calls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -922,7 +923,7 @@ func TestHintsScrollToKeepTheSelectionInSight(t *testing.T) {
 
 func TestHintsOfANonStringParamDoNotShow(t *testing.T) {
 	app := newFakeApp()
-	app.described[0].Params[1].Hints = []string{"1", "2"}
+	app.Actions()[0].Params[1].Hints = []string{"1", "2"}
 	h := start(t, app)
 	h.typing("app.greet")
 	h.press("enter", "enter")
@@ -933,7 +934,7 @@ func TestHintsOfANonStringParamDoNotShow(t *testing.T) {
 
 func TestDataOfARunPrintsIndentedUnderItsMessage(t *testing.T) {
 	app := newFakeApp()
-	app.setActions(append(app.actions(), wire.Action{ID: "account.show", Description: "Show the account"}))
+	app.SetActions(append(app.Actions(), wire.Action{ID: "account.show", Description: "Show the account"}))
 	h := start(t, app, withClock(0, 0, 1234*time.Millisecond))
 
 	h.typing("account.show")
@@ -961,7 +962,7 @@ func TestNotificationsOfARunPrintUnderItsCommand(t *testing.T) {
 
 func TestDataOfANotificationPrintsIndentedUnderIt(t *testing.T) {
 	app := newFakeApp()
-	app.setActions(append(app.actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
 	h := start(t, app)
 
 	h.typing("sync.pair")
@@ -975,7 +976,7 @@ func TestDataOfANotificationPrintsIndentedUnderIt(t *testing.T) {
 
 func TestToggleDataHidesTheDataOfNotificationsAndResultsUntilToggledBack(t *testing.T) {
 	app := newFakeApp()
-	app.setActions(append(app.actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
 	h := start(t, app)
 
 	h.typing("/toggle-data")
@@ -995,7 +996,7 @@ func TestToggleDataHidesTheDataOfNotificationsAndResultsUntilToggledBack(t *test
 
 func TestShowDataFalseInTheConfigHidesTheDataUntilToggled(t *testing.T) {
 	app := newFakeApp()
-	app.setActions(append(app.actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
 	h := startWithConfig(t, app, "show-data = false\n")
 
 	h.typing("sync.pair")
@@ -1023,7 +1024,7 @@ func TestUnknownConfigKeyGoesIntoTheLogAndTheOtherKeysApply(t *testing.T) {
 
 func TestConfigValueOfTheWrongTypeGoesIntoTheLogAndKeepsItsDefault(t *testing.T) {
 	app := newFakeApp()
-	app.setActions(append(app.actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
 	h := startWithConfig(t, app, "show-data = false\ngroup-namespaces = \"no\"\n")
 
 	h.waitForLog("config.toml:2: 'group-namespaces' must be true or false")
@@ -1040,7 +1041,7 @@ func TestConfigValueOfTheWrongTypeGoesIntoTheLogAndKeepsItsDefault(t *testing.T)
 
 func TestConfigThatDoesNotParseGoesIntoTheLogAndEveryKeyKeepsItsDefault(t *testing.T) {
 	app := newFakeApp()
-	app.setActions(append(app.actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
+	app.SetActions(append(app.Actions(), wire.Action{ID: "sync.pair", Description: "Pair with another device"}))
 	h := startWithConfig(t, app, "show-data = false\ngroup-namespaces =\n")
 
 	h.waitForLog("config.toml:2:19: unexpected character U+000A at start of value")
@@ -1086,7 +1087,7 @@ func TestActionsDoNotRunWhileARunRunsButTheBoxOpens(t *testing.T) {
 	h.waitFor("▸ username", "cancel the running action first (ctrl+c)")
 	h.press("backspace")
 	h.waitFor("▸ username", "› account.create username=alic\n")
-	if got, want := app.received(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
+	if got, want := app.Calls(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("calls while the watch runs: got %v, want %v", got, want)
 	}
 
@@ -1105,7 +1106,7 @@ func TestActionsDoNotRunWhileARunRunsButTheBoxOpens(t *testing.T) {
 		{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alic"}}},
 		{Action: "account.delete"},
 	}
-	if got := app.received(); !reflect.DeepEqual(got, want) {
+	if got := app.Calls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -1261,7 +1262,7 @@ export const count = quack.recipe({
 
 	h.waitForLog("  50\nCounted · ")
 	want := []wire.Call{{Action: "account.delete"}, {Action: "app.count"}}
-	if got := app.received(); !reflect.DeepEqual(got, want) {
+	if got := app.Calls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -1378,7 +1379,7 @@ export const setup = quack.recipe({
 		{Action: "account.create", Args: map[string]wire.RawArg{"username": {"alice"}}},
 		{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bob"}, "times": {"2"}}},
 	}
-	if got := app.received(); !reflect.DeepEqual(got, want) {
+	if got := app.Calls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -1443,7 +1444,7 @@ export const login = quack.recipe({
 
 	h.waitForLog("\n› --recipe login\n› app.greet name=bob times=1\nHello, bob! · ")
 	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"bob"}, "times": {"1"}}}}
-	if got := app.received(); !reflect.DeepEqual(got, want) {
+	if got := app.Calls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -1458,7 +1459,7 @@ func TestEnterOnAnActionWithOnlyOptionalParamsOpensTheBoxAndRunsWithoutThem(t *t
 	h.press("enter", "enter", "enter", "enter", "enter", "enter", "enter")
 
 	h.waitForLog("› app.params\ndone · ")
-	if got := app.received(); len(got) != 1 || len(got[0].Args) != 0 {
+	if got := app.Calls(); len(got) != 1 || len(got[0].Args) != 0 {
 		t.Errorf("calls: got %v, want app.params without args", got)
 	}
 }
@@ -1499,7 +1500,7 @@ export const clean = quack.recipe({
 
 	h.waitForLog("\n› --recipe clean\n› account.delete\n[rejected] there is no account · ", "\n    at run (io.mehow.quack.sample.ts:6:20)\n")
 	h.waitFor("type or ↑ to find an action")
-	if got, want := app.received(), []wire.Call{{Action: "account.delete"}}; !reflect.DeepEqual(got, want) {
+	if got, want := app.Calls(), []wire.Call{{Action: "account.delete"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 	if got := strings.Count(h.logText(), "there is no account"); got != 1 {
@@ -1558,7 +1559,7 @@ export const watch = quack.recipe({
 	if strings.Contains(h.logText(), "app.count") {
 		t.Errorf("the log runs the step after the canceled one:\n%s", h.logText())
 	}
-	if got, want := app.received(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
+	if got, want := app.Calls(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -1592,7 +1593,7 @@ export const clean = quack.recipe({ run() { quack.runAction("account.delete") } 
 	h.press("enter")
 
 	h.waitFor("> $clean", "cancel the running action first (ctrl+c)")
-	if got, want := app.received(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
+	if got, want := app.Calls(), []wire.Call{{Action: "account.watch"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
 }
@@ -1617,7 +1618,7 @@ export const clean = quack.recipe({ run() {} })`)
 
 // The app left while it was asked, and nothing of its answer may come back with no app to run it on.
 func TestReloadThatEndsAfterTheAppLeftChangesNothing(t *testing.T) {
-	m := newModel(newFakeSource(newFakeApp()), newActivity(t.Context()), device.Target{}, client.Wake, "dev", t.TempDir(), config.Default(), nil)
+	m := newModel(newFakeSource(newFakeApp()), newActivity(t.Context()), device.Target{}, false, "dev", t.TempDir(), config.Default(), nil)
 	asked := m.connection
 	m.drop("io.mehow.quack.sample left emulator-5554")
 	cookbook := &recipe.Cookbook{Recipes: []recipe.Recipe{{Name: "clean"}}}
@@ -1635,13 +1636,13 @@ func TestReloadKeepsTheSelectedAction(t *testing.T) {
 	h.press("up", "up", "up")
 	h.waitFor("▸ account.watch")
 
-	app.setActions(append([]wire.Action{{ID: "aaa.new", Description: "A new action"}}, app.actions()...))
+	app.SetActions(append([]wire.Action{{ID: "aaa.new", Description: "A new action"}}, app.Actions()...))
 	h.press("ctrl+r")
 
 	h.waitForLog("reloaded 7 actions and 0 recipes")
 	h.waitFor("▸ account.watch", "aaa.new", "7/7")
 
-	app.setActions(append([]wire.Action{{ID: "aab.newer", Description: "A newer action"}}, app.actions()...))
+	app.SetActions(append([]wire.Action{{ID: "aab.newer", Description: "A newer action"}}, app.Actions()...))
 	h.typing("/reload")
 	h.press("enter")
 	h.waitForLog("reloaded 8 actions")
@@ -1654,7 +1655,7 @@ func TestFailedReloadKeepsTheActions(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
 
-	app.setActions(nil)
+	app.SetDescribeErr(gone)
 	h.press("ctrl+r")
 
 	h.waitForLog("reload: the app is gone")
@@ -1799,7 +1800,7 @@ type probe struct {
 }
 
 func start(t *testing.T, app *fakeApp, options ...func(*model)) *harness {
-	h := startPicking(t, newFakeSource(app), device.Target{}, client.Wake, options...)
+	h := startPicking(t, newFakeSource(app), device.Target{}, false, options...)
 	h.waitFor("quack · ", "type or ↑ to find an action")
 	return h
 }
@@ -1813,25 +1814,26 @@ func startWithConfig(t *testing.T, app *fakeApp, file string, options ...func(*m
 	if err := os.WriteFile(filepath.Join(dir, "quack", "config.toml"), []byte(file), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := startIn(t, dir, newFakeSource(app), device.Target{}, client.Wake, options...)
+	h := startIn(t, dir, newFakeSource(app), device.Target{}, false, options...)
 	h.waitFor("quack · ", "type or ↑ to find an action")
 	return h
 }
 
 // The apps read their recipes and settings from a config dir of the test's own, which has none.
-func startPicking(t *testing.T, source *fakeSource, want device.Target, mode client.StartMode, options ...func(*model)) *harness {
-	return startIn(t, t.TempDir(), source, want, mode, options...)
+func startPicking(t *testing.T, source *backend.Backend, want device.Target, openApp bool, options ...func(*model)) *harness {
+	return startIn(t, t.TempDir(), source, want, openApp, options...)
 }
 
 // The settings come from the config dir as Run reads them, and quack starts in it too, so that its .quack is the
 // project.
-func startIn(t *testing.T, configDir string, source *fakeSource, want device.Target, mode client.StartMode, options ...func(*model)) *harness {
+func startIn(t *testing.T, configDir string, source *backend.Backend, want device.Target, openApp bool, options ...func(*model)) *harness {
 	t.Setenv("XDG_CONFIG_HOME", configDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	activity := newActivity(ctx)
+	source.Status = activity
 	h := &harness{t: t, exited: make(chan struct{}), height: 30, seen: map[int]bool{}, clock: &fakeClock{now: time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)}}
 	settings, problems := config.Load()
-	m := newModel(source, activity, want, mode, "dev", configDir, settings, problems)
+	m := newModel(source, activity, want, openApp, "dev", configDir, settings, problems)
 	m.clock = h.clock
 	m.clipboard = func(text string) error {
 		h.mu.Lock()
@@ -2133,9 +2135,9 @@ func (h *harness) advance(d time.Duration) { h.clock.advance(d) }
 // on. A poll skips a device whose last answer has not come yet, so a single poll does not always ask it.
 func (h *harness) keepPolling() { h.step = pollTime }
 
-func (h *harness) waitForInspects(source *fakeSource, count int) {
+func (h *harness) waitForInspects(source *backend.Backend, count int) {
 	h.t.Helper()
-	inspects := func() string { return strconv.Itoa(source.inspects()) }
+	inspects := func() string { return strconv.Itoa(source.Inspects()) }
 	h.wait(inspects, func(n string) bool { got, _ := strconv.Atoi(n); return got >= count }, strconv.Itoa(count)+" inspects")
 }
 
@@ -2281,133 +2283,102 @@ func (c *fakeClock) advance(d time.Duration) {
 
 // account.watch prints the account each time account.create signs in, until it is canceled.
 type fakeApp struct {
-	status io.Writer
-	pkg    string
+	*fakes.App
 
 	mu            sync.Mutex
-	described     []wire.Action
-	calls         []wire.Call
 	watchers      []client.NotificationFunc
 	watchCanceled []chan struct{}
 	stopsHeld     chan struct{}
 }
 
 func withNameHints(app *fakeApp, hints ...string) *fakeApp {
-	app.described[0].Params[0].Hints = hints
+	app.Actions()[0].Params[0].Hints = hints
 	return app
 }
 
 func newFakeApp() *fakeApp {
-	return &fakeApp{
-		pkg: "io.mehow.quack.sample",
-		described: []wire.Action{
-			{ID: "app.greet", Description: "Say hello", Params: []wire.Param{
-				{Name: "name", Type: wire.ParamTypeString, Presence: wire.Required{}, Description: "Who to greet"},
-				{Name: "times", Type: wire.ParamTypeInt, Presence: wire.Default{Values: []string{"1"}}},
-			}},
-			{ID: "app.params", Description: "Show the parsed value of each param type", Params: []wire.Param{
-				{Name: "text", Type: wire.ParamTypeString, Presence: wire.Optional{}},
-				{Name: "count", Type: wire.ParamTypeInt, Presence: wire.Optional{}},
-				{Name: "size", Type: wire.ParamTypeLong, Presence: wire.Optional{}},
-				{Name: "ratio", Type: wire.ParamTypeDouble, Presence: wire.Optional{}},
-				{Name: "flag", Type: wire.ParamTypeBoolean, Presence: wire.Optional{}},
-				{Name: "theme", Type: wire.ParamTypeEnum, Choices: []string{"light", "dark"}, Presence: wire.Optional{}},
-				{Name: "tag", Type: wire.ParamTypeStringList, Presence: wire.Default{Values: []string{"a", "b"}}, Description: "Labels to add"},
-			}},
-			{ID: "account.create", Description: "Create the account", Params: []wire.Param{
-				{Name: "username", Type: wire.ParamTypeString, Presence: wire.Required{}},
-			}},
-			{ID: "account.delete", Description: "Delete the account"},
-			{ID: "account.watch", Description: "Print the account each time it changes, until stopped"},
-			{ID: "app.count", Description: "Count to 50"},
+	a := &fakeApp{App: fakes.NewApp(
+		wire.Action{ID: "app.greet", Description: "Say hello", Params: []wire.Param{
+			{Name: "name", Type: wire.ParamTypeString, Presence: wire.Required{}, Description: "Who to greet"},
+			{Name: "times", Type: wire.ParamTypeInt, Presence: wire.Default{Values: []string{"1"}}},
+		}},
+		wire.Action{ID: "app.params", Description: "Show the parsed value of each param type", Params: []wire.Param{
+			{Name: "text", Type: wire.ParamTypeString, Presence: wire.Optional{}},
+			{Name: "count", Type: wire.ParamTypeInt, Presence: wire.Optional{}},
+			{Name: "size", Type: wire.ParamTypeLong, Presence: wire.Optional{}},
+			{Name: "ratio", Type: wire.ParamTypeDouble, Presence: wire.Optional{}},
+			{Name: "flag", Type: wire.ParamTypeBoolean, Presence: wire.Optional{}},
+			{Name: "theme", Type: wire.ParamTypeEnum, Choices: []string{"light", "dark"}, Presence: wire.Optional{}},
+			{Name: "tag", Type: wire.ParamTypeStringList, Presence: wire.Default{Values: []string{"a", "b"}}, Description: "Labels to add"},
+		}},
+		wire.Action{ID: "account.create", Description: "Create the account", Params: []wire.Param{
+			{Name: "username", Type: wire.ParamTypeString, Presence: wire.Required{}},
+		}},
+		wire.Action{ID: "account.delete", Description: "Delete the account"},
+		wire.Action{ID: "account.watch", Description: "Print the account each time it changes, until stopped"},
+		wire.Action{ID: "app.count", Description: "Count to 50"},
+	)}
+	a.Replies = map[string]fakes.Reply{
+		"account.show": func(context.Context, wire.Call, client.NotificationFunc) (wire.MessageResult, error) {
+			return wire.MessageResult{Message: "Signed in as alice", Data: json.RawMessage(`{"username":"alice","tags":["a"]}`)}, nil
 		},
-	}
-}
-
-func (a *fakeApp) Describe(context.Context) (wire.Hello, []wire.Action, error) {
-	actions := a.actions()
-	if actions == nil {
-		return wire.Hello{}, nil, &device.AppError{Message: "the app is gone"}
-	}
-	return wire.Hello{Protocol: 1, Package: a.pkg, Version: "1.0"}, actions, nil
-}
-
-func (a *fakeApp) Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
-	switch call.Action {
-	case "account.show":
-		return wire.MessageResult{Message: "Signed in as alice", Data: json.RawMessage(`{"username":"alice","tags":["a"]}`)}, nil
-	case "sync.pair":
-		notify(wire.Notification{Message: "Pairing code", Data: json.RawMessage(`{"code":"abc123"}`)})
-		return wire.MessageResult{Message: "Paired"}, nil
-	}
-	message, err := a.reply(ctx, call, notify)
-	return wire.MessageResult{Message: message}, err
-}
-
-func (a *fakeApp) reply(ctx context.Context, call wire.Call, notify client.NotificationFunc) (string, error) {
-	a.mu.Lock()
-	a.calls = append(a.calls, call)
-	a.mu.Unlock()
-	switch call.Action {
-	case "app.greet":
-		return "Hello, " + call.Args["name"][0] + "!", nil
-	case "app.params":
-		return strings.Join(call.Args["text"], ""), nil
-	case "account.create":
-		notify(wire.Notification{Message: "Started"})
-		notify(wire.Notification{Message: "Creating account"})
-		a.mu.Lock()
-		for _, watch := range a.watchers {
-			if watch == nil {
-				continue
+		"sync.pair": func(_ context.Context, _ wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
+			notify(wire.Notification{Message: "Pairing code", Data: json.RawMessage(`{"code":"abc123"}`)})
+			return wire.MessageResult{Message: "Paired"}, nil
+		},
+		"app.greet": func(_ context.Context, call wire.Call, _ client.NotificationFunc) (wire.MessageResult, error) {
+			return wire.MessageResult{Message: "Hello, " + call.Args["name"][0] + "!"}, nil
+		},
+		"app.params": func(_ context.Context, call wire.Call, _ client.NotificationFunc) (wire.MessageResult, error) {
+			return wire.MessageResult{Message: strings.Join(call.Args["text"], "")}, nil
+		},
+		"account.create": a.create,
+		"app.count": func(_ context.Context, _ wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
+			for i := 1; i <= 50; i++ {
+				notify(wire.Notification{Message: strconv.Itoa(i)})
 			}
-			watch(wire.Notification{Message: "Signed in as " + call.Args["username"][0]})
-		}
-		a.mu.Unlock()
-		return "Created", nil
-	case "app.count":
-		for i := 1; i <= 50; i++ {
-			notify(wire.Notification{Message: strconv.Itoa(i)})
-		}
-		return "Counted", nil
-	case "account.delete":
-		return "", wire.Error{Code: wire.ErrorCodeRejected, Message: "there is no account"}
-	case "account.watch":
-		done := make(chan struct{})
-		a.mu.Lock()
-		watcher := len(a.watchers)
-		a.watchers = append(a.watchers, notify)
-		a.watchCanceled = append(a.watchCanceled, done)
-		held := a.stopsHeld
-		a.mu.Unlock()
-		notify(wire.Notification{Message: "Signed out"})
-		<-ctx.Done()
-		a.mu.Lock()
-		a.watchers[watcher] = nil
-		a.mu.Unlock()
-		close(done)
-		if held != nil {
-			<-held
-		}
-		return "", client.ErrCanceled
+			return wire.MessageResult{Message: "Counted"}, nil
+		},
+		"account.delete": func(context.Context, wire.Call, client.NotificationFunc) (wire.MessageResult, error) {
+			return wire.MessageResult{}, wire.Error{Code: wire.ErrorCodeRejected, Message: "there is no account"}
+		},
+		"account.watch": a.watch,
 	}
-	return "", wire.Error{Code: wire.ErrorCodeUnknownAction, Message: "no action '" + call.Action + "'"}
+	return a
 }
 
-func (a *fakeApp) Target() device.Target {
-	return device.Target{Device: "emulator-5554", Package: a.pkg}
-}
-
-func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
-	return adb.Output{Stdout: "ran " + cmd + "\n"}, nil
-}
-
-func (a *fakeApp) Start(mode client.StartMode) error {
-	if mode != client.OpenApp {
-		return errors.New("unexpected mode " + string(mode))
+func (a *fakeApp) create(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
+	notify(wire.Notification{Message: "Started"})
+	notify(wire.Notification{Message: "Creating account"})
+	a.mu.Lock()
+	for _, watch := range a.watchers {
+		if watch == nil {
+			continue
+		}
+		watch(wire.Notification{Message: "Signed in as " + call.Args["username"][0]})
 	}
-	io.WriteString(a.status, "starting "+a.pkg+"…\n")
-	return nil
+	a.mu.Unlock()
+	return wire.MessageResult{Message: "Created"}, nil
+}
+
+func (a *fakeApp) watch(ctx context.Context, _ wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
+	done := make(chan struct{})
+	a.mu.Lock()
+	watcher := len(a.watchers)
+	a.watchers = append(a.watchers, notify)
+	a.watchCanceled = append(a.watchCanceled, done)
+	held := a.stopsHeld
+	a.mu.Unlock()
+	notify(wire.Notification{Message: "Signed out"})
+	<-ctx.Done()
+	a.mu.Lock()
+	a.watchers[watcher] = nil
+	a.mu.Unlock()
+	close(done)
+	if held != nil {
+		<-held
+	}
+	return wire.MessageResult{}, client.ErrCanceled
 }
 
 func (a *fakeApp) holdStops() (release func()) {
@@ -2428,176 +2399,31 @@ func (a *fakeApp) signIn(username string) {
 	}
 }
 
-func (a *fakeApp) received() []wire.Call {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return append([]wire.Call(nil), a.calls...)
-}
-
 func (a *fakeApp) canceled(i int) <-chan struct{} {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.watchCanceled[i]
 }
 
-func (a *fakeApp) actions() []wire.Action {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.described
-}
-
-func (a *fakeApp) setActions(actions []wire.Action) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.described = actions
-}
-
 const timeout = 5 * time.Second
 
-// Each app is the default one unless apps has one for its target.
-type fakeSource struct {
-	app *fakeApp
-
-	mu             sync.Mutex
-	devices        []device.Info
-	apps           map[device.Target]*fakeApp
-	send           func([]adb.Listing)
-	started        []string
-	failTracks     int
-	held           map[device.Target]chan struct{}
-	inspected      int
-	listedPackages int
-}
-
-func newFakeSource(app *fakeApp, devices ...device.Info) *fakeSource {
+// The default device has the app.
+func newFakeSource(app *fakeApp, devices ...device.Info) *backend.Backend {
 	if len(devices) == 0 {
-		devices = []device.Info{deviceInfo("emulator-5554", "Pixel 8", "device", app.pkg)}
+		devices = []device.Info{deviceInfo("emulator-5554", "Pixel 8", "device", app.Package)}
 	}
-	return &fakeSource{app: app, devices: devices, apps: map[device.Target]*fakeApp{}, held: map[device.Target]chan struct{}{}}
+	return backend.New(app.App, devices...)
 }
 
 func deviceInfo(serial, model, state string, pkgs ...string) device.Info {
 	return device.Info{Listing: adb.Listing{Device: adb.Device(serial), State: state}, Model: model, Packages: pkgs}
 }
 
-func (s *fakeSource) Track(ctx context.Context, send func([]adb.Listing)) error {
-	s.mu.Lock()
-	if s.failTracks > 0 {
-		s.failTracks--
-		s.mu.Unlock()
-		return &adb.Error{Message: "lost track of the devices: EOF"}
-	}
-	s.send = send
-	listings := s.listings()
-	s.mu.Unlock()
-	send(listings)
-	<-ctx.Done()
-	return nil
-}
-
-func (s *fakeSource) Inspect(listing adb.Listing) (device.Info, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.inspected++
-	for _, d := range s.devices {
-		if d.Device == listing.Device {
-			d.Listing = listing
-			return d, nil
-		}
-	}
-	return device.Info{}, errors.New(string(listing.Device) + " is not connected")
-}
-
-func (s *fakeSource) Packages(serial adb.Device) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.listedPackages++
-	for _, d := range s.devices {
-		if d.Device == serial {
-			return d.Packages, nil
-		}
-	}
-	return nil, errors.New(string(serial) + " is not connected")
-}
-
-func (s *fakeSource) Connect(target device.Target, mode client.StartMode, status io.Writer) (App, error) {
-	s.mu.Lock()
-	held := s.held[target]
-	s.started = append(s.started, string(target.Device)+" "+target.Package+" "+string(mode))
-	s.mu.Unlock()
-	if held != nil {
-		<-held
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	app, ok := s.apps[target]
-	if !ok {
-		app = s.app
-	}
-	app.status = status
-	return app, nil
-}
-
-func (s *fakeSource) hold(serial, pkg string) (release func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	held := make(chan struct{})
-	s.held[device.Target{Device: adb.Device(serial), Package: pkg}] = held
-	return sync.OnceFunc(func() { close(held) })
-}
-
-func (s *fakeSource) inspects() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.inspected
-}
-
-func (s *fakeSource) packageLists() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.listedPackages
-}
-
-func (s *fakeSource) starts() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Clone(s.started)
-}
-
-func (s *fakeSource) set(devices ...device.Info) {
-	s.mu.Lock()
-	s.devices = devices
-	send, listings := s.send, s.listings()
-	s.mu.Unlock()
-	if send != nil {
-		send(listings)
-	}
-}
-
-// Installing an app changes nothing that adb lists.
-func (s *fakeSource) install(serial string, pkgs ...string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, d := range s.devices {
-		if d.Device == adb.Device(serial) {
-			s.devices[i].Packages = pkgs
-		}
-	}
-}
-
-func (s *fakeSource) appFor(serial, pkg string) *fakeApp {
+func appFor(source *backend.Backend, serial, pkg string) *fakeApp {
 	app := newFakeApp()
-	app.pkg = pkg
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.apps[device.Target{Device: adb.Device(serial), Package: pkg}] = app
+	app.Package = pkg
+	source.Add(device.Target{Device: adb.Device(serial), Package: pkg}, app.App)
 	return app
 }
 
-func (s *fakeSource) listings() []adb.Listing {
-	var listings []adb.Listing
-	for _, d := range s.devices {
-		listings = append(listings, d.Listing)
-	}
-	return listings
-}
+var gone = &device.AppError{Message: "the app is gone"}

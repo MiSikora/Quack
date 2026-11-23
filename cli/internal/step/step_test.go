@@ -13,19 +13,20 @@ import (
 	"quack/internal/adb"
 	"quack/internal/client"
 	"quack/internal/device"
+	"quack/internal/fakes"
 	"quack/internal/wire"
 )
 
 func TestDoRunsEachKindOfStep(t *testing.T) {
-	app := &fakeApp{}
+	app := newApp(adb.Output{})
 	var notified []string
 
 	result, err := Do(context.Background(), app, call("app.greet", "name", "Bob"), func(n wire.Notification) { notified = append(notified, n.Message) })
 	if err != nil || result.Message != "Hello, Bob!" || !reflect.DeepEqual(notified, []string{"greeting"}) {
 		t.Errorf("call: got %v, %v and notifications %v", result, err, notified)
 	}
-	if _, err := Do(context.Background(), app, OpenApp{}, nil); err != nil || !reflect.DeepEqual(app.starts, []client.StartMode{client.OpenApp}) {
-		t.Errorf("open-app: got %v and starts %v, want one open", err, app.starts)
+	if _, err := Do(context.Background(), app, OpenApp{}, nil); err != nil || !reflect.DeepEqual(app.Starts(), []client.StartMode{client.OpenApp}) {
+		t.Errorf("open-app: got %v and starts %v, want one open", err, app.Starts())
 	}
 	started := time.Now()
 	if _, err := Do(context.Background(), app, Wait{50 * time.Millisecond}, nil); err != nil || time.Since(started) < 50*time.Millisecond {
@@ -34,17 +35,17 @@ func TestDoRunsEachKindOfStep(t *testing.T) {
 }
 
 func TestDoRunsAShellCommandOnTheDevice(t *testing.T) {
-	app := &fakeApp{output: adb.Output{Stdout: "Success\n"}}
+	app := newApp(adb.Output{Stdout: "Success\n"})
 
 	result, err := Do(context.Background(), app, Shell{"pm clear com.example"}, nil)
 
-	if err != nil || result.Message != "Success" || !reflect.DeepEqual(app.commands, []string{"pm clear com.example"}) {
-		t.Errorf("got %v, %v and commands %v", result, err, app.commands)
+	if err != nil || result.Message != "Success" || !reflect.DeepEqual(app.Commands(), []string{"pm clear com.example"}) {
+		t.Errorf("got %v, %v and commands %v", result, err, app.Commands())
 	}
 }
 
 func TestDoRunsACommandOnThisComputer(t *testing.T) {
-	result, err := Do(context.Background(), &fakeApp{}, Run{"echo duck; echo noise >&2"}, nil)
+	result, err := Do(context.Background(), newApp(adb.Output{}), Run{"echo duck; echo noise >&2"}, nil)
 
 	if err != nil || result.Message != "duck" {
 		t.Errorf("got %v, %v, want duck", result, err)
@@ -54,12 +55,12 @@ func TestDoRunsACommandOnThisComputer(t *testing.T) {
 func TestACommandThatExitsWithAnotherStatusFailsWithItsOutput(t *testing.T) {
 	for _, c := range []struct {
 		step Step
-		app  *fakeApp
+		app  *fakes.App
 		want CommandError
 	}{
-		{Run{"echo out; echo err >&2; exit 3"}, &fakeApp{}, CommandError{3, "err"}},
-		{Run{"echo out; exit 4"}, &fakeApp{}, CommandError{4, "out"}},
-		{Shell{"pm clear nope"}, &fakeApp{output: adb.Output{Stderr: "Failed\n", Exit: 1}}, CommandError{1, "Failed"}},
+		{Run{"echo out; echo err >&2; exit 3"}, newApp(adb.Output{}), CommandError{3, "err"}},
+		{Run{"echo out; exit 4"}, newApp(adb.Output{}), CommandError{4, "out"}},
+		{Shell{"pm clear nope"}, newApp(adb.Output{Stderr: "Failed\n", Exit: 1}), CommandError{1, "Failed"}},
 	} {
 		_, err := Do(context.Background(), c.app, c.step, nil)
 
@@ -78,7 +79,7 @@ func TestCancelingEndsACommandOnThisComputer(t *testing.T) {
 	time.AfterFunc(20*time.Millisecond, cancel)
 
 	started := time.Now()
-	_, err := Do(ctx, &fakeApp{}, Run{"sleep 60"}, nil)
+	_, err := Do(ctx, newApp(adb.Output{}), Run{"sleep 60"}, nil)
 
 	if err == nil || err.Error() != "canceled" || time.Since(started) > 5*time.Second {
 		t.Errorf("got %v after %v, want canceled at once", err, time.Since(started))
@@ -89,7 +90,7 @@ func TestARunHasTheAppAndTheDeviceInItsEnvironment(t *testing.T) {
 	t.Setenv("QUACK_PACKAGE", "com.other")
 	t.Setenv("ANDROID_SERIAL", "other-device")
 
-	result, err := Do(context.Background(), &fakeApp{}, Run{`echo "$QUACK_PACKAGE $ANDROID_SERIAL"`}, nil)
+	result, err := Do(context.Background(), newApp(adb.Output{}), Run{`echo "$QUACK_PACKAGE $ANDROID_SERIAL"`}, nil)
 
 	if want := "io.mehow.quack.sample emulator-5554"; err != nil || result.Message != want {
 		t.Errorf("got %v, %v, want %s", result, err, want)
@@ -97,7 +98,7 @@ func TestARunHasTheAppAndTheDeviceInItsEnvironment(t *testing.T) {
 }
 
 func TestCancelingEndsAWaitAndSkipsAStepThatHasNotStarted(t *testing.T) {
-	app := &fakeApp{}
+	app := newApp(adb.Output{})
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(20*time.Millisecond, cancel)
 
@@ -106,8 +107,8 @@ func TestCancelingEndsAWaitAndSkipsAStepThatHasNotStarted(t *testing.T) {
 	if err == nil || err.Error() != "canceled" || time.Since(started) > time.Second {
 		t.Errorf("wait: got %v after %v, want canceled at once", err, time.Since(started))
 	}
-	if _, err := Do(ctx, app, OpenApp{}, nil); err == nil || err.Error() != "canceled" || app.starts != nil {
-		t.Errorf("open-app: got %v and starts %v, want canceled without a start", err, app.starts)
+	if _, err := Do(ctx, app, OpenApp{}, nil); err == nil || err.Error() != "canceled" || app.Starts() != nil {
+		t.Errorf("open-app: got %v and starts %v, want canceled without a start", err, app.Starts())
 	}
 }
 
@@ -174,25 +175,13 @@ func call(action string, keysAndValues ...string) Call {
 	return Call{Action: action, Args: args}
 }
 
-type fakeApp struct {
-	starts   []client.StartMode
-	commands []string
-	output   adb.Output
-}
-
-func (a *fakeApp) Target() device.Target { return target }
-
-func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
-	a.commands = append(a.commands, cmd)
-	return a.output, nil
-}
-
-func (a *fakeApp) Call(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
-	notify(wire.Notification{Message: "greeting", Data: json.RawMessage(`{"name":"` + call.Args["name"][0] + `"}`)})
-	return wire.MessageResult{Message: "Hello, " + call.Args["name"][0] + "!"}, nil
-}
-
-func (a *fakeApp) Start(mode client.StartMode) error {
-	a.starts = append(a.starts, mode)
-	return nil
+// The app greets whoever a call of app.greet names, and answers each command with output.
+func newApp(output adb.Output) *fakes.App {
+	app := fakes.NewApp()
+	app.Replies["app.greet"] = func(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
+		notify(wire.Notification{Message: "greeting", Data: json.RawMessage(`{"name":"` + call.Args["name"][0] + `"}`)})
+		return wire.MessageResult{Message: "Hello, " + call.Args["name"][0] + "!"}, nil
+	}
+	app.CommandReply = func(string) adb.Output { return output }
+	return app
 }
