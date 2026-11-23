@@ -22,10 +22,8 @@ import (
 	"quack/internal/wire"
 )
 
-// script is one recipes file, bundled with the local files it imports.
 type script struct {
-	path string
-	// Sorted by name.
+	path    string
 	recipes []Recipe
 	code    string
 }
@@ -80,7 +78,6 @@ func loadScript(path string) (*script, error) {
 	return s, nil
 }
 
-// The script declares the recipe named name.
 func (s *script) run(ctx context.Context, app App, name string, args map[string]wire.RawArg, observer Observer) (json.RawMessage, error) {
 	r := newRuntime(s, ctx, app, observer)
 	exports, err := r.load()
@@ -102,15 +99,11 @@ func (s *script) run(ctx context.Context, app App, name string, args map[string]
 	return data, err
 }
 
-// call runs the recipe with args, which it checks against the recipe's params first. A nested call shows the recipe
-// as a step before the recipe's own steps. threw is what the recipe's run threw, as goja has it, and err any other
-// failure.
 func (r *runtime) call(declared declaredRecipe, args map[string]wire.RawArg, nested bool) (data json.RawMessage, threw, err error) {
 	raw, err := recipeArgs(declared.Recipe, args)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Steps show the variables of params by name too, as if the recipe read them.
 	for _, variable := range declared.env {
 		r.env.Get(variable)
 	}
@@ -127,7 +120,6 @@ func (r *runtime) call(declared declaredRecipe, args map[string]wire.RawArg, nes
 
 var canceled = &client.CallError{Message: "canceled"}
 
-// app is nil for a load, which only reads what the script declares.
 type runtime struct {
 	script   *script
 	vm       *goja.Runtime
@@ -136,8 +128,7 @@ type runtime struct {
 	observer Observer
 	recipes  map[*goja.Object]declaredRecipe
 	env      *environment
-	// How many runRecipe calls the current step is inside.
-	depth int
+	depth    int
 }
 
 // Each runRecipe and each JS call takes Go stack, whose overflow kills quack rather than failing the recipe.
@@ -148,12 +139,10 @@ const (
 
 type declaredRecipe struct {
 	Recipe
-	run goja.Callable
-	// The name of the first export that holds a recipe without a name of its own.
+	run      goja.Callable
 	exported string
 }
 
-// The file of the code that called into Go, as the source map gives it. "" when it is unknown.
 func (r *runtime) caller() string {
 	for _, frame := range r.vm.CaptureCallStack(0, nil) {
 		if file := frame.Position().Filename; file != "" {
@@ -255,14 +244,11 @@ func (r *runtime) recipe(definition *goja.Object) goja.Value {
 			declared.Params = append(declared.Params, p)
 		}
 	}
-	// The object stands for the recipe, so that Load finds which exports are recipes.
 	handle := vm.NewObject()
 	r.recipes[handle] = declared
 	return handle
 }
 
-// The variable comes back only while it is set, and the param then shows it as its default.
-// A recipe without a name of its own takes the name of each export that holds it, and is left out without one.
 func (r *runtime) named(exports *goja.Object) ([]declaredRecipe, error) {
 	var named []declaredRecipe
 	for _, declared := range r.recipes {
@@ -372,7 +358,6 @@ func (r *runtime) runAction(id string, args map[string]any) actionResult {
 	return actionResult{Message: result.Message, Data: r.parse(result.Data), Notifications: notifications}
 }
 
-// nil without args.
 func (r *runtime) rawArgs(args map[string]any) map[string]wire.RawArg {
 	var raw map[string]wire.RawArg
 	for key, value := range args {
@@ -388,8 +373,6 @@ func (r *runtime) rawArgs(args map[string]any) map[string]wire.RawArg {
 	return raw
 }
 
-// The recipe's step comes before the steps of the recipe it runs, so that observers see only steps one after
-// another. An arg that is undefined counts as left out, as an optional param's value in args is.
 func (r *runtime) runRecipe(handle goja.Value, args map[string]any) goja.Value {
 	object, _ := handle.(*goja.Object)
 	declared, ok := r.recipes[object]
@@ -417,7 +400,6 @@ func (r *runtime) runRecipe(handle goja.Value, args map[string]any) goja.Value {
 	return r.parse(data)
 }
 
-// nil for undefined, and for what JSON.stringify leaves out, such as a function.
 func (r *runtime) stringify(value goja.Value, name string) (json.RawMessage, error) {
 	stringify, _ := goja.AssertFunction(r.vm.Get("JSON").ToObject(r.vm).Get("stringify"))
 	text, err := stringify(goja.Undefined(), value)
@@ -433,7 +415,7 @@ func (r *runtime) stringify(value goja.Value, name string) (json.RawMessage, err
 	return json.RawMessage(text.String()), nil
 }
 
-// null for nil data. JSON.parse keeps the keys in the app's order, which Go maps do not. The app sends valid JSON.
+// JSON.parse keeps the keys in the app's order, which Go maps do not.
 func (r *runtime) parse(data json.RawMessage) goja.Value {
 	if data == nil {
 		return goja.Null()
@@ -475,7 +457,6 @@ func (r *runtime) do(step Step, collect func(wire.Notification)) wire.MessageRes
 	return result
 }
 
-// It returns the first value of check that is truthy. Its waits between checks are no steps of their own.
 func (r *runtime) waitUntil(check goja.Callable, options *goja.Object) goja.Value {
 	timeout, every := 10*time.Second, 500*time.Millisecond
 	if options != nil {
@@ -524,14 +505,12 @@ func (r *runtime) duration(value goja.Value, what string) time.Duration {
 	return d
 }
 
-// What quack.fail throws. It ends the run with its message alone, without where the recipe was.
 type failure struct {
 	message string
 }
 
 func (f *failure) Error() string { return f.message }
 
-// A goja interrupt is the run's ctx ending.
 func (r *runtime) thrown(err error) error {
 	var interrupted *goja.InterruptedError
 	if errors.As(err, &interrupted) {
@@ -568,8 +547,6 @@ func (r *runtime) thrown(err error) error {
 	return &ScriptError{Err: cause, Stack: stack}
 }
 
-// The args the recipe runs with, which parse as its params' types. A param without a value and without a default
-// stays out.
 func recipeArgs(r Recipe, args map[string]wire.RawArg) (map[string]wire.RawArg, error) {
 	fail := func(format string, a ...any) error {
 		return wire.Error{Code: wire.ErrorCodeInvalidArgs, Message: fmt.Sprintf("recipe '%s': ", r.Name) + fmt.Sprintf(format, a...)}
@@ -611,7 +588,6 @@ func recipeArgs(r Recipe, args map[string]wire.RawArg) (map[string]wire.RawArg, 
 	return values, nil
 }
 
-// The values of the args that recipeArgs gave, as run gets them.
 func argValues(r Recipe, args map[string]wire.RawArg) map[string]any {
 	values := map[string]any{}
 	for _, p := range r.Params {
@@ -708,7 +684,6 @@ func bundle(path string) (string, error) {
 	return string(result.OutputFiles[0].Contents), nil
 }
 
-// Remembers the variables the recipe reads, so that its steps show them by name, as the recipe would write them.
 type environment struct {
 	vm     *goja.Runtime
 	values map[string]string
@@ -747,7 +722,6 @@ func (e *environment) Keys() []string { return slices.Sorted(maps.Keys(e.values)
 
 func (e *environment) hide(step Step) Step {
 	var pairs []string
-	// Longest first, so that a value inside another does not split it.
 	for _, name := range slices.SortedFunc(maps.Keys(e.read), func(a, b string) int { return len(e.read[b]) - len(e.read[a]) }) {
 		if e.read[name] != "" {
 			pairs = append(pairs, e.read[name], "${"+name+"}")

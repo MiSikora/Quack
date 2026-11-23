@@ -15,13 +15,10 @@ import (
 )
 
 type prompt struct {
-	input   textinput.Model
-	actions []wire.Action
-	recipes []recipe.Recipe
-	// The commands that work now. Those that need an app leave while there is none.
+	input    textinput.Model
+	actions  []wire.Action
+	recipes  []recipe.Recipe
 	commands []command
-	// Browsing lists the runnables of an empty prompt, sorted by id. With grouped, the ids that share a namespace with
-	// another go into its group, and group names the group that browsing shows, or is empty at the top level.
 	browsing bool
 	grouped  bool
 	group    string
@@ -29,13 +26,11 @@ type prompt struct {
 	width    int
 }
 
-// An action or a recipe. A recipe's id is its name.
 type runnable struct {
 	wire.Action
 	recipe bool
 }
 
-// A runnable, a command, or a group of runnables whose id is their namespace.
 type choice struct {
 	id          string
 	description string
@@ -56,7 +51,6 @@ func newInput(placeholder string) textinput.Model {
 	return input
 }
 
-// Without an app, the prompt offers only the commands that need none.
 func (p *prompt) connect(app bool) {
 	p.commands = slices.DeleteFunc(commands(), func(c command) bool { return c.needsApp && !app })
 	p.input.Placeholder = "find an action or a recipe, $ for recipes only, / for commands"
@@ -98,7 +92,6 @@ func (p *prompt) choices() ([]choice, int) {
 	return matches, len(all)
 }
 
-// The recipes come first, so that a recipe wins a tie with an action of the same name.
 func (p *prompt) runnables(actions bool) []choice {
 	var all []choice
 	for _, r := range p.recipes {
@@ -112,7 +105,6 @@ func (p *prompt) runnables(actions bool) []choice {
 	return all
 }
 
-// The recipe of an id sorts before its action, as all lists the recipes first.
 func (p *prompt) browse(all []choice) []choice {
 	all = slices.Clone(all)
 	slices.SortStableFunc(all, func(a, b choice) int { return strings.Compare(a.id, b.id) })
@@ -142,7 +134,6 @@ func (p *prompt) browse(all []choice) []choice {
 	return rows
 }
 
-// The text up to the first '.', with the '.'.
 func namespace(id string) (string, bool) {
 	i := strings.IndexByte(id, '.')
 	if i < 0 {
@@ -157,7 +148,6 @@ func runnableChoice(r runnable) choice {
 
 func (p *prompt) open() bool { return p.input.Value() != "" || p.browsing }
 
-// Only while the list shows, so that nothing the user cannot see runs.
 func (p *prompt) selection() (choice, bool) {
 	choices, _ := p.choices()
 	if !p.open() || len(choices) == 0 {
@@ -203,7 +193,6 @@ func (p *prompt) openGroup(group string) {
 	p.group, p.selected = group, 0
 }
 
-// The group's row stays selected, so that ← undoes →.
 func (p *prompt) closeGroup() {
 	group := p.group
 	p.group, p.selected = "", 0
@@ -322,7 +311,6 @@ func (c choice) suffix() string {
 	return c.runnable.suffix()
 }
 
-// The mark of a recipe after its name, unstyled.
 func (r runnable) suffix() string {
 	if r.recipe {
 		return " ƒ"
@@ -330,7 +318,6 @@ func (r runnable) suffix() string {
 	return ""
 }
 
-// The command line that runs it with args.
 func (r runnable) commandLine(args map[string]wire.RawArg) string {
 	line := recipe.CommandLine(r.Action, args)
 	if r.recipe {

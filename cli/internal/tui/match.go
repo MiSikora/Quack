@@ -7,8 +7,6 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
-// Every word of the text must match, in any order, and the item scores the sum of the words' scores. Text without
-// words matches nothing.
 func find(text string, items []string) fuzzy.Matches {
 	words := strings.Fields(text)
 	if len(words) == 0 {

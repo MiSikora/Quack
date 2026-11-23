@@ -37,15 +37,12 @@ type field interface {
 }
 
 type textField struct {
-	input textinput.Model
-	list  bool
-	hints []string
-	// -1 while no hint is selected, so that enter keeps the text as typed. Typed text that a hint matches selects the
-	// best match, and ↓ from it goes back to the text.
+	input    textinput.Model
+	list     bool
+	hints    []string
 	selected int
 }
 
-// An empty option leaves the param unset.
 type choiceField struct {
 	options []string
 	chosen  int
@@ -249,7 +246,6 @@ func (f boxField) row(names, column int) string {
 
 func (b *paramBox) fieldWidth() int { return min(max(b.width/3, 10), 40) }
 
-// The selected hint wins over the text, so that the preview shows what enter would pick.
 func (f *textField) value() wire.RawArg {
 	text := f.input.Value()
 	if f.selected >= 0 {

@@ -13,7 +13,6 @@ import (
 	"quack/internal/wire"
 )
 
-// Step numbers the recipe's step from 1, and is absent outside a recipe.
 type notificationJSON struct {
 	Code    string          `json:"code"`
 	Message string          `json:"message"`
@@ -21,8 +20,6 @@ type notificationJSON struct {
 	Step    int             `json:"step,omitempty"`
 }
 
-// Step numbers the recipe's step from 1. A failed step's outcome is its last, unless the recipe caught the
-// failure and went on.
 type outcomeJSON struct {
 	Code    string          `json:"code"`
 	Message string          `json:"message"`
@@ -48,8 +45,7 @@ type paramJSON struct {
 	Description string   `json:"description"`
 	Choices     []string `json:"choices,omitempty"`
 	Required    bool     `json:"required"`
-	// Default is a string, or an array of strings for a list param, or absent without a default.
-	Default any `json:"default,omitempty"`
+	Default     any      `json:"default,omitempty"`
 }
 
 func failure(err error) (code, message string, exit int) {
@@ -63,7 +59,6 @@ func failure(err error) (code, message string, exit int) {
 	case errors.As(err, &refused):
 		exit := cmp.Or(errorExits[refused.Code], exitAction)
 		message := refused.Message
-		// A recipe that ended on the app's error says where it was.
 		var thrown *recipe.ScriptError
 		if errors.As(err, &thrown) {
 			message = (&recipe.ScriptError{Err: errors.New(message), Stack: thrown.Stack}).Error()

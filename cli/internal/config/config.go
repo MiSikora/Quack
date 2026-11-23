@@ -14,9 +14,7 @@ import (
 )
 
 type Config struct {
-	// The first state of /toggle-data.
-	ShowData bool
-	// Browsing gathers the ids that share a namespace into its group.
+	ShowData        bool
 	GroupNamespaces bool
 }
 
@@ -50,7 +48,6 @@ func Load() (Config, []string) {
 // Parse decodes each key on its own, so that a value of the wrong type leaves only its key at the default.
 func Parse(doc []byte) (Config, []string) {
 	config := Default()
-	// Values of any type pass, so that this decode fails only on syntax and on unknown keys.
 	var known struct {
 		ShowData        any `toml:"show-data"`
 		GroupNamespaces any `toml:"group-namespaces"`
@@ -71,7 +68,6 @@ func Parse(doc []byte) (Config, []string) {
 	return config, problems
 }
 
-// holder is a struct of the key's one field, decoded points into it, and setting takes its value when it decodes.
 func decodeKey(doc []byte, holder any, decoded **bool, setting *bool) []string {
 	var wrong *toml.DecodeError
 	switch err := toml.Unmarshal(doc, holder); {
@@ -101,7 +97,6 @@ func Decode(doc []byte, file string, strict bool, v any) ([]string, error) {
 			row, _ := e.Position()
 			problems = append(problems, fmt.Sprintf("%s:%d: unknown key '%s'", file, row, strings.Join(e.Key(), ".")))
 		}
-		// A plain decode reads whatever the strict one left out.
 		if err := toml.Unmarshal(doc, v); err != nil {
 			return nil, fmt.Errorf("%s: %w", file, err)
 		}

@@ -11,12 +11,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// A point stays on the same text while the log scrolls.
 type point struct {
 	row, col int
 }
 
-// Both ends are included.
 type span struct {
 	from, to point
 }
@@ -39,7 +37,6 @@ func (m *model) click(msg tea.MouseClickMsg) tea.Cmd {
 	double := at == m.mouse.pressed && now.Sub(m.mouse.pressedAt) < doubleClickTime
 	m.mouse.pressed, m.mouse.pressedAt = at, now
 	if double {
-		// A third click starts over rather than counting as another double click.
 		m.mouse.pressedAt = time.Time{}
 		if word, ok := m.log.word(at); ok {
 			m.log.marked = &word
@@ -51,8 +48,6 @@ func (m *model) click(msg tea.MouseClickMsg) tea.Cmd {
 	return nil
 }
 
-// Dragging onto the log's first row or below its shown rows scrolls the log a row, so that the selection can reach
-// past the view.
 func (m *model) drag(msg tea.MouseMotionMsg) {
 	if !m.mouse.dragging {
 		return
@@ -84,7 +79,7 @@ func (m *model) release() tea.Cmd {
 }
 
 // OSC 52 reaches the terminal's clipboard, and the system's clipboard covers terminals that keep OSC 52 from
-// programs. A clipboard that fails leaves the other.
+// programs.
 func (m *model) copy(text string) tea.Cmd {
 	if text == "" {
 		return nil
@@ -158,7 +153,6 @@ func (l *sessionLog) markedCols(row int) (from, to int) {
 	return from, to
 }
 
-// A row with any selected cells loses its own styles.
 func (l *sessionLog) highlight(row int) string {
 	text := l.rows[row].text
 	if l.marked == nil || row < l.marked.from.row || row > l.marked.to.row {

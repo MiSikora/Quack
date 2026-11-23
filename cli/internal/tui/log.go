@@ -10,15 +10,13 @@ import (
 )
 
 type sessionLog struct {
-	lines []string
-	width int
-	rows  []logRow
-	// How many rows the view sits above the newest row. At 0 the view follows new output.
+	lines    []string
+	width    int
+	rows     []logRow
 	scrolled int
 	marked   *span
 }
 
-// Each row carries its own styles, so that it draws alike wherever the view starts.
 type logRow struct {
 	text      string
 	continues bool

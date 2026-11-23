@@ -15,29 +15,24 @@ import (
 	"quack/internal/wire"
 )
 
-// The calls that start_action detached from the tool call that started them. They end with ctx, which lives as long
-// as the server's session.
 type runs struct {
 	ctx   context.Context
 	mu    sync.Mutex
 	count int
-	// Oldest first.
-	all []*run
+	all   []*run
 }
 
 // Everything below cancel is guarded by runs.mu.
 type run struct {
-	id     string
-	action string
-	device string
-	app    string
-	cancel context.CancelFunc
-	// The index of notifications[0], past the ones dropped to keep at most maxRunNotifications.
+	id            string
+	action        string
+	device        string
+	app           string
+	cancel        context.CancelFunc
 	first         int
 	notifications []notificationOutput
 	end           *runEnd
-	// Closed and replaced on every new notification and at the end, which wakes the reads that wait.
-	changed chan struct{}
+	changed       chan struct{}
 }
 
 type runEnd struct {
@@ -49,13 +44,11 @@ type runEnd struct {
 type readRunOutput struct {
 	Notifications []notificationOutput `json:"notifications"`
 	Next          int                  `json:"next"`
-	// The notifications between after and the oldest one the run kept.
-	Dropped int  `json:"dropped,omitempty"`
-	Done    bool `json:"done"`
-	// The run's end, once done. A failed or canceled run has an error instead.
-	Message string          `json:"message,omitempty"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	Error   *errorOutput    `json:"error,omitempty"`
+	Dropped       int                  `json:"dropped,omitempty"`
+	Done          bool                 `json:"done"`
+	Message       string               `json:"message,omitempty"`
+	Data          json.RawMessage      `json:"data,omitempty"`
+	Error         *errorOutput         `json:"error,omitempty"`
 }
 
 type runOutput struct {
@@ -93,8 +86,6 @@ func (r *runs) start(target client.Target, app App, call wire.Call) string {
 	return started.id
 }
 
-// Returns at once when the run has notifications from after on or has ended, and otherwise once one of them happens
-// or wait runs out.
 func (r *runs) read(ctx context.Context, id string, after int, wait time.Duration) (readRunOutput, error) {
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
@@ -123,7 +114,6 @@ func (r *runs) read(ctx context.Context, id string, after int, wait time.Duratio
 	}
 }
 
-// A run that has ended stays as it was.
 func (r *runs) cancel(id string) error {
 	r.mu.Lock()
 	found := r.find(id)
@@ -171,7 +161,6 @@ func (r *runs) ended(ended *run, result wire.MessageResult, err error, canceled 
 	r.dropFinished()
 }
 
-// Drops the oldest finished runs past maxFinishedRuns, so that runs nobody reads do not pile up.
 func (r *runs) dropFinished() {
 	finished := 0
 	for _, held := range r.all {
@@ -219,8 +208,6 @@ func (held *run) wake() {
 
 func noRun(id string) error { return errors.New("no run " + id) }
 
-// Finds what the app would refuse before a detached call starts, so that start_action fails instead of starting a
-// run that ends at once. The messages are the app's.
 func checkCall(actions []wire.Action, call wire.Call) error {
 	i := slices.IndexFunc(actions, func(a wire.Action) bool { return a.ID == call.Action })
 	if i < 0 {

@@ -208,7 +208,6 @@ func Track(ctx context.Context, send func([]Listing)) error {
 	}
 }
 
-// Asks the adb server itself, not a device.
 func query(text string) (string, error) {
 	conn, err := dialServer()
 	if err != nil {
@@ -236,8 +235,6 @@ func parseListings(text string) []Listing {
 	return listings
 }
 
-// Starts the server once if it is not running. Reads and writes fail after serverTimeout, so that a server that
-// stopped answering cannot hang quack.
 func dialServer() (net.Conn, error) {
 	port := os.Getenv("ANDROID_ADB_SERVER_PORT")
 	if port == "" {

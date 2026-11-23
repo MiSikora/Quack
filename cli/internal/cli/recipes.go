@@ -25,8 +25,6 @@ func (e *stepError) Error() string { return e.err.Error() }
 
 func (e *stepError) Unwrap() error { return e.err }
 
-// A step error that the recipe catches prints as that step's outcome only once the recipe goes on. What the recipe
-// returned prints after its last step, as an action's data does.
 func runRecipe(app client.App, c *recipe.Cookbook, name string, args map[string]wire.RawArg, terminal Terminal, json bool) error {
 	ctx := context.Background()
 	_, actions, err := app.Describe(ctx)
@@ -34,7 +32,6 @@ func runRecipe(app client.App, c *recipe.Cookbook, name string, args map[string]
 		return err
 	}
 	step := 0
-	// failure is the error of the step that failed last, until the recipe shows whether it caught it.
 	var failure *stepError
 	caught := func() {
 		if failure != nil {
@@ -98,7 +95,6 @@ func hasMessage(step recipe.Step) bool {
 	return true
 }
 
-// A recipes file that does not load is bad usage, like a name it does not have. The warnings go to stderr.
 func loadRecipes(pkg string, terminal Terminal) (*recipe.Cookbook, error) {
 	dir, err := os.Getwd()
 	if err != nil {

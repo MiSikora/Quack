@@ -26,11 +26,9 @@ type Recipe struct {
 	Params      []wire.Param
 	// The absolute path of the file whose code declares it: a mapped file, or one that a mapped file imports. It is
 	// the mapped file when the source map does not tell.
-	File string
-	// The absolute path of the mapped file it loads from, whose script runs it.
+	File   string
 	script string
-	// The environment variable of each param that takes one, while it is set.
-	env map[string]string
+	env    map[string]string
 }
 
 type Step interface{ step() }
@@ -119,8 +117,8 @@ func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc)
 	return wire.MessageResult{}, nil
 }
 
-// QUACK_PACKAGE and ANDROID_SERIAL make adb in command reach the recipe's device. Ending ctx kills sh, and the
-// commands it started get a second to let go of its output.
+// ANDROID_SERIAL makes adb in command reach the recipe's device. A command that sh started in the background can
+// hold its output open after sh exits, so WaitDelay bounds the wait for it.
 func run(ctx context.Context, command string, target client.Target) (wire.MessageResult, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Env = append(os.Environ(), "QUACK_PACKAGE="+target.Package, "ANDROID_SERIAL="+string(target.Device))
@@ -172,7 +170,6 @@ func Line(step Step, actions []wire.Action) string {
 	case Run:
 		return "run " + step.Command
 	case RunRecipe:
-		// A recipe that has no name is neither named nor exported, and shows by its args alone.
 		return CommandLine(wire.Action{ID: strings.TrimSpace("recipe " + step.Recipe.Name), Params: step.Recipe.Params}, step.Args)
 	}
 	return ""
@@ -208,7 +205,6 @@ func ExpandArgs(args map[string]wire.RawArg, target client.Target) (map[string]w
 	return expanded, nil
 }
 
-// Any other $ stays as it is, so only text that mentions ${ needs escaping.
 func expand(text string, target client.Target) (string, error) {
 	var out strings.Builder
 	rest := text

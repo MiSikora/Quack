@@ -33,14 +33,12 @@ func Run(want client.Target, mode client.StartMode, startTimeout time.Duration, 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	settings, problems := config.Load()
-	// A dir that is unknown fails each load of recipes, which says why.
 	dir, _ := os.Getwd()
 	_, err := tea.NewProgram(newModel(clientSource{startTimeout}, newActivity(ctx), want, mode, version, dir, settings, problems)).Run()
 	return err
 }
 
 type Source interface {
-	// Track returns when ctx ends, or with the error that ended it.
 	Track(ctx context.Context, send func([]adb.Listing)) error
 	Inspect(listing adb.Listing) (client.Device, error)
 	Packages(device adb.Device) ([]string, error)
@@ -48,45 +46,37 @@ type Source interface {
 }
 
 type model struct {
-	source   Source
-	activity activity
-	app      App
-	target   client.Target
-	// Counts the apps connected and dropped, so that a reload's answer applies only to the app that asked.
+	source     Source
+	activity   activity
+	app        App
+	target     client.Target
 	connection int
-	// The flags choose how the first pick starts its app, and Wake starts every later one.
-	mode    client.StartMode
-	devices []seenDevice
-	listed  bool
-	// asked numbers the questions to the devices, and pending holds each device's last unanswered one. Only the answer
-	// to the last question counts, and a poll does not ask a device that has not answered yet.
-	asked   int
-	pending map[adb.Device]int
-	picker  *picker
-	polling bool
-	hello   wire.Hello
-	prompt  prompt
-	// The picker keeps its text and selection under the box.
-	box  *paramBox
-	runs runs
-	// Leaves the JSON data of notifications and results out of the log, from the next line on.
-	hideData bool
-	// The dir quack started in. Recipes load from its project and from the user's config.
-	dir       string
-	cookbook  *recipe.Cookbook
-	quit      notice
-	copied    notice
-	refused   notice
-	log       sessionLog
-	header    string
-	mouse     mouse
-	clipboard func(text string) error
-	clock     clock
-	width     int
-	height    int
+	mode       client.StartMode
+	devices    []seenDevice
+	listed     bool
+	asked      int
+	pending    map[adb.Device]int
+	picker     *picker
+	polling    bool
+	hello      wire.Hello
+	prompt     prompt
+	box        *paramBox
+	runs       runs
+	hideData   bool
+	dir        string
+	cookbook   *recipe.Cookbook
+	quit       notice
+	copied     notice
+	refused    notice
+	log        sessionLog
+	header     string
+	mouse      mouse
+	clipboard  func(text string) error
+	clock      clock
+	width      int
+	height     int
 }
 
-// shown counts the times it showed, so that the end of an earlier one does not close a later one.
 type notice struct {
 	text    string
 	showing bool
@@ -107,11 +97,10 @@ type command struct {
 }
 
 type described struct {
-	hello   wire.Hello
-	actions []wire.Action
-	err     error
-	recipes recipes
-	// The connection it answers; a reply to one that ended is dropped.
+	hello      wire.Hello
+	actions    []wire.Action
+	err        error
+	recipes    recipes
 	connection int
 }
 
@@ -145,7 +134,6 @@ type clientSource struct {
 	startTimeout time.Duration
 }
 
-// The problems with the settings file go into the log, under the header.
 func newModel(source Source, activity activity, want client.Target, mode client.StartMode, version, dir string, settings config.Config, problems []string) *model {
 	m := &model{
 		source:    source,
@@ -179,7 +167,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, m.focus())
 }
 
-// A quiet picker shows and hides as devices come and go, and the input on screen takes the keys.
 func (m *model) focus() tea.Cmd {
 	switch {
 	case m.picker == nil || m.box != nil:
@@ -196,7 +183,6 @@ func (m *model) focus() tea.Cmd {
 
 func (m *model) picking() bool { return m.picker != nil && m.picker.showing(m.devices) }
 
-// The mouse reports clicks, drags and the wheel, so that the TUI scrolls the log itself.
 func (m *model) View() tea.View {
 	view := tea.NewView(strings.Join(m.screen(), "\n"))
 	view.AltScreen = true
@@ -361,8 +347,6 @@ func (m *model) pressPicker(msg tea.KeyPressMsg) tea.Cmd {
 			p.quiet = true
 			p.clear()
 		case p.startup && p.input.Value() == "":
-			// Esc first clears the text. The picker then stays hidden, as the picker of a dropped app does, and
-			// /pick-device shows it again.
 			p.startup = false
 			p.clear()
 		default:
@@ -398,8 +382,6 @@ func (m *model) pressBox(msg tea.KeyPressMsg) tea.Cmd {
 	return tea.Batch(m.start(r, args), m.prompt.input.Focus())
 }
 
-// A second ctrl+c while the action stops asks to quit too, so that an action that does not stop cannot keep quack
-// open.
 func (m *model) interrupt() tea.Cmd {
 	switch {
 	case m.quit.showing:
@@ -467,7 +449,6 @@ func (m *model) openBox(r runnable) tea.Cmd {
 	return m.box.init()
 }
 
-// The answer goes through activity, so that it comes after the status lines on the way to it.
 func (m *model) reload() tea.Cmd {
 	app, activity, dir, pkg, connection := m.app, m.activity, m.dir, m.target.Package, m.connection
 	return func() tea.Msg {
@@ -489,7 +470,6 @@ func (m *model) openApp() tea.Cmd {
 	}
 }
 
-// It touches only files, so it works while a run is active.
 func (m *model) initRecipes() tea.Cmd {
 	pkg := m.target.Package
 	written, err := recipe.Init(m.dir, pkg)
@@ -612,7 +592,6 @@ func (m *model) pick() tea.Cmd {
 	return m.advance()
 }
 
-// The only device is taken only once every device answered.
 func (m *model) advance() tea.Cmd {
 	p := m.picker
 	if p == nil || p.connecting != nil {
@@ -643,8 +622,6 @@ func (m *model) connect(target client.Target) tea.Cmd {
 	}
 }
 
-// The picker may have gone on to another pick since. An app that failed to start leaves the picker on its step, which
-// then no longer takes the only app by itself, so that the user picks again.
 func (m *model) connected(msg connected) tea.Cmd {
 	if m.picker == nil || m.picker.connecting == nil || *m.picker.connecting != msg.target {
 		return nil
@@ -736,7 +713,6 @@ func (m *model) ask(serial adb.Device, inspect func() (client.Device, error)) te
 	}
 }
 
-// While an app is connected, only its device is asked, and only for its apps, so that an app that leaves it is seen.
 func (m *model) inspectPicked() tea.Cmd {
 	if m.picker != nil {
 		return m.inspectAll()
@@ -761,7 +737,6 @@ func (m *model) inspectPicked() tea.Cmd {
 	})
 }
 
-// An app that its device no longer lists, such as one that was uninstalled, goes as if its device went.
 func (m *model) checkApp() tea.Cmd {
 	if m.app == nil {
 		return nil
@@ -773,7 +748,6 @@ func (m *model) checkApp() tea.Cmd {
 	return m.drop(m.target.Package + " left " + string(m.target.Device))
 }
 
-// Only the start picks by itself, so that a device or an app that comes back does not take over the prompt.
 func (m *model) drop(line string) tea.Cmd {
 	m.log.add(statusStyle.Render(line))
 	m.runs.stop()
@@ -798,8 +772,6 @@ func (m *model) inspectAll() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// Only the answer to the last question counts, and only while adb still lists the device in the state it was asked
-// in. A device that did not answer keeps its old answer, since adb soon lists it as gone when it went away.
 func (m *model) inspected(msg inspected) {
 	if m.pending[msg.serial] != msg.asked {
 		return
@@ -824,7 +796,6 @@ func (m *model) deviceIndex(device adb.Device) int {
 	return slices.IndexFunc(m.devices, func(d seenDevice) bool { return d.Device.Device == device })
 }
 
-// It depends on nothing but the window, so that the log never moves.
 func (m *model) logHeight() int { return max(0, m.height-panelRows) }
 
 func (m *model) logShown() int { return min(m.logHeight(), m.logHeight()+1-len(m.overlay())) }
@@ -840,7 +811,6 @@ func (m *model) forward(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// Every state goes through screen, so that the panel never changes height and no row ever moves.
 func (m *model) screen() []string {
 	rows := m.log.view(m.logHeight())
 	if m.width < minWidth || m.height < minHeight {
@@ -938,7 +908,6 @@ type wallClock struct{}
 func (wallClock) Now() time.Time                         { return time.Now() }
 func (wallClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
-// d counts from now rather than from when the command runs.
 func after(c clock, d time.Duration, msg tea.Msg) tea.Cmd {
 	ends := c.After(d)
 	return func() tea.Msg {
@@ -947,7 +916,6 @@ func after(c clock, d time.Duration, msg tea.Msg) tea.Cmd {
 	}
 }
 
-// ctrl+c and ctrl+d do more than their command, so the picker handles them itself.
 func commands() []command {
 	return []command{
 		{"/cancel", "ctrl+c", "Cancel the running action", false, (*model).cancel},
@@ -1002,10 +970,9 @@ var (
 )
 
 const (
-	maxListRows = 10
-	panelRows   = 6
-	minWidth    = 24
-	// Room over the input for a rule and the three rows of a box with a hint.
+	maxListRows      = 10
+	panelRows        = 6
+	minWidth         = 24
 	minHeight        = panelRows + 2
 	noticeTime       = 2 * time.Second
 	pollTime         = 5 * time.Second

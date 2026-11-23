@@ -93,7 +93,6 @@ func Find(device adb.Device, pkg string) (Target, error) {
 		return Target{}, err
 	}
 	if pkg != "" && len(devices) == 1 {
-		// Starting the app says it when the package is missing, more clearly than not finding it here.
 		return Target{devices[0], pkg}, nil
 	}
 	var targets []Target
@@ -215,7 +214,6 @@ func (a App) Start(mode StartMode) error {
 	return nil
 }
 
-// The keep-alive watchdog starts once the request outlasts keepAliveAfter.
 func (a App) send(ctx context.Context, request []byte, notify NotificationFunc) (wire.Hello, wire.Frame, error) {
 	if err := a.Start(a.mode); err != nil {
 		return wire.Hello{}, nil, err
@@ -248,7 +246,6 @@ func (a App) send(ctx context.Context, request []byte, notify NotificationFunc) 
 	}
 }
 
-// Failing to start the service only warns, since the call may finish before Android freezes the app.
 func (a App) keepAlive() {
 	out, err := a.device.Shell("am start-foreground-service -n " + a.pkg + "/" + keepAliveService)
 	if err == nil && strings.Contains(out, "Error") {
@@ -307,7 +304,6 @@ func ambiguity(targets []Target) string {
 
 var packagePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)
 
-// Its receiver is also how quack recognizes a quack-enabled app.
 const wakeAction = "io.mehow.quack.WAKE"
 
 var startCommands = map[StartMode]string{

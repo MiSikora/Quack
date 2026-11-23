@@ -19,7 +19,6 @@ var version = "dev"
 
 func main() {
 	fs := pflag.NewFlagSet("quack-mcp", pflag.ContinueOnError)
-	// Keeps declaration order, as quack does: alphabetical, with help last.
 	fs.SortFlags = false
 	fs.SetOutput(io.Discard)
 	startTimeout := fs.Duration("start-timeout", 15*time.Second, "how long to wait for an app to answer")

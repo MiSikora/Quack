@@ -15,23 +15,18 @@ import (
 )
 
 type picker struct {
-	step   step
-	device adb.Device
-	want   client.Target
-	// auto and skipPackage take a lone choice, so that its step does not show. back lets esc return to a device step that
-	// showed.
+	step        step
+	device      adb.Device
+	want        client.Target
 	auto        bool
 	skipPackage bool
 	back        bool
-	// A quiet picker hides, so that the prompt and its commands work meanwhile, and /pick-device shows it. At startup it
-	// shows by itself once it has something to pick.
-	quiet      bool
-	startup    bool
-	connecting *client.Target
-	input      textinput.Model
-	// Rows come and go as devices do, so the selection follows its row's key rather than its place.
-	selected string
-	width    int
+	quiet       bool
+	startup     bool
+	connecting  *client.Target
+	input       textinput.Model
+	selected    string
+	width       int
 }
 
 type step int
@@ -92,7 +87,6 @@ func (p *picker) rows(devices []seenDevice) ([]pickRow, int) {
 	return matches, len(all)
 }
 
-// With a package wanted, a device shows until it is known not to have it.
 func (p *picker) allRows(devices []seenDevice) []pickRow {
 	var rows []pickRow
 	if p.step == packageStep {
@@ -135,7 +129,6 @@ func (p *picker) allRows(devices []seenDevice) []pickRow {
 	return rows
 }
 
-// There is none while a ready device is still being asked for its apps.
 func (p *picker) onlyDevice(devices []seenDevice) (pickRow, bool) {
 	var only []pickRow
 	for _, d := range devices {
@@ -155,13 +148,10 @@ func (p *picker) onlyDevice(devices []seenDevice) (pickRow, bool) {
 	return only[0], true
 }
 
-// While starting an app the picker shows, so that it says which one.
 func (p *picker) showing(devices []seenDevice) bool {
 	return !p.quiet || p.connecting != nil || p.startup && slices.ContainsFunc(p.allRows(devices), func(r pickRow) bool { return r.ok })
 }
 
-// alarm is the words of status that tell of no device, or of devices without a quack-enabled app, rather than of
-// devices that quack cannot use yet. It is "" when there are none.
 func (p *picker) alarm(devices []seenDevice, listed bool) string {
 	rows := p.allRows(devices)
 	switch {
@@ -185,7 +175,6 @@ func (p *picker) alarm(devices []seenDevice, listed bool) string {
 
 const noApp = "no quack-enabled app"
 
-// status says what a quiet picker waits for, as the rows would.
 func (p *picker) status(devices []seenDevice, listed bool) string {
 	rows := p.allRows(devices)
 	pickable := slices.ContainsFunc(rows, func(r pickRow) bool { return r.ok })

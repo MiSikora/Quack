@@ -42,7 +42,6 @@ func DecodeFrame(line []byte) Frame {
 	}
 }
 
-// Nil for absent or null data.
 func compact(data json.RawMessage) json.RawMessage {
 	if len(data) == 0 || string(data) == "null" {
 		return nil

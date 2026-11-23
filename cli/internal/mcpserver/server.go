@@ -26,7 +26,6 @@ import (
 
 type Source interface {
 	Devices() ([]client.Device, error)
-	// device and pkg may be "" for any, as in client.Find.
 	Find(device adb.Device, pkg string) (client.Target, error)
 	Connect(target client.Target, mode client.StartMode) (App, error)
 	// Recipes gives the app's recipes, and the problems that left some files or entries out.
@@ -131,11 +130,10 @@ type listDevicesOutput struct {
 }
 
 type deviceOutput struct {
-	Serial string `json:"serial"`
-	Model  string `json:"model"`
-	// adb's state: device when ready, or else why not, such as offline or unauthorized.
-	State string   `json:"state"`
-	Apps  []string `json:"apps"`
+	Serial string   `json:"serial"`
+	Model  string   `json:"model"`
+	State  string   `json:"state"`
+	Apps   []string `json:"apps"`
 }
 
 type listActionsInput struct {
@@ -162,11 +160,9 @@ type paramOutput struct {
 	Type        string   `json:"type"`
 	Description string   `json:"description"`
 	Choices     []string `json:"choices,omitempty"`
-	// Other values work too.
-	Hints    []string `json:"hints,omitempty"`
-	Required bool     `json:"required"`
-	// A string, an array of strings for a list param, or absent without a default.
-	Default any `json:"default,omitempty"`
+	Hints       []string `json:"hints,omitempty"`
+	Required    bool     `json:"required"`
+	Default     any      `json:"default,omitempty"`
 }
 
 type runActionInput struct {
@@ -196,8 +192,7 @@ type recipeOutput struct {
 	Name        string        `json:"name"`
 	Description string        `json:"description"`
 	Params      []paramOutput `json:"params"`
-	// The file whose code declares it, which may be one that a mapped file imports.
-	File string `json:"file"`
+	File        string        `json:"file"`
 }
 
 type runRecipeInput struct {
@@ -207,14 +202,12 @@ type runRecipeInput struct {
 	App    string                     `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
 }
 
-// Data is what the recipe returned, and absent when it returned nothing.
 type runRecipeOutput struct {
 	Steps []stepOutput    `json:"steps"`
 	Log   []string        `json:"log"`
 	Data  json.RawMessage `json:"data,omitempty"`
 }
 
-// A failed step has an error instead, which the recipe caught when it went on.
 type stepOutput struct {
 	Step          string               `json:"step"`
 	Notifications []notificationOutput `json:"notifications"`
@@ -223,9 +216,6 @@ type stepOutput struct {
 	Error         *errorOutput         `json:"error,omitempty"`
 }
 
-// The app's error code, command for a command that exited with another status than 0, no_reply for a call that
-// ended without the app's answer, canceled for a run that cancel_run or the session's end canceled, and error for
-// anything else.
 type errorOutput struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -302,8 +292,6 @@ func (s tools) listActions(ctx context.Context, _ *mcp.CallToolRequest, in listA
 	return nil, out, nil
 }
 
-// The client canceling the request cancels the action. A failed action keeps the notifications it sent before
-// the error.
 func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runActionInput) (*mcp.CallToolResult, runActionOutput, error) {
 	prepared, form, err := s.prepareCall(ctx, req, in, canElicit(req.Session))
 	if form != nil || err != nil {
@@ -363,7 +351,6 @@ func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRec
 	if err != nil {
 		return nil, listRecipesOutput{}, fmt.Errorf("invalid filter: %v", err)
 	}
-	// Recipes need only the package, so the app does not start.
 	target, err := s.source.Find(adb.Device(in.Device), in.App)
 	if err != nil {
 		return nil, listRecipesOutput{}, err
@@ -382,7 +369,6 @@ func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRec
 	return nil, out, nil
 }
 
-// Each step's line goes out before its notifications. The client canceling the request interrupts the recipe.
 func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRecipeInput) (*mcp.CallToolResult, runRecipeOutput, error) {
 	args, err := rawArgs(in.Args)
 	if err != nil {
@@ -396,7 +382,6 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	// The problems may say why the recipe is missing, such as a mapped file that does not exist.
 	if !slices.ContainsFunc(cookbook.Recipes, func(r recipe.Recipe) bool { return r.Name == in.Recipe }) {
 		return nil, runRecipeOutput{}, errors.New(strings.Join(append([]string{"no recipe named " + in.Recipe + " for " + target.Package}, problems...), "\n"))
 	}
@@ -556,16 +541,12 @@ func fieldSchema(p wire.Param) *jsonschema.Schema {
 }
 
 type preparedCall struct {
-	target client.Target
-	app    App
-	call   wire.Call
-	// Nil unless describe.
+	target  client.Target
+	app     App
+	call    wire.Call
 	actions []wire.Action
 }
 
-// The front half of run_action and start_action. With describe, it asks the app for its actions, and the user for
-// the required params that args leave out when the client can ask. A form comes back instead of the call, for the
-// client to show.
 func (s tools) prepareCall(ctx context.Context, req *mcp.CallToolRequest, in runActionInput, describe bool) (preparedCall, *mcp.CallToolResult, error) {
 	args, err := rawArgs(in.Args)
 	if err != nil {
@@ -645,7 +626,6 @@ func action(a wire.Action) actionOutput {
 	return actionOutput{ID: a.ID, Description: a.Description, Params: params}
 }
 
-// A number stays as written. An array gives a list param its values, and null leaves the param out.
 func rawArgs(values map[string]json.RawMessage) (map[string]wire.RawArg, error) {
 	args := map[string]wire.RawArg{}
 	for key, raw := range values {

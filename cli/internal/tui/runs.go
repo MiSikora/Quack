@@ -17,7 +17,6 @@ import (
 )
 
 type runs struct {
-	// A run that is stopping stays active until it ends.
 	active  *run
 	spinner spinner.Model
 	now     func() time.Time
@@ -25,9 +24,8 @@ type runs struct {
 
 type run struct {
 	runnable
-	step    string
-	started time.Time
-	// Kept so that the run's end does not repeat the error of the step that ended it.
+	step     string
+	started  time.Time
 	failure  error
 	stopping bool
 	cancel   context.CancelFunc
@@ -50,7 +48,6 @@ type (
 		run *run
 		err error
 	}
-	// data is what a recipe returned.
 	runEnded struct {
 		run      *run
 		data     json.RawMessage
@@ -59,13 +56,10 @@ type (
 	}
 )
 
-// A line for the log from outside Update, styled already.
 type logged struct {
 	text string
 }
 
-// Messages reach Update one at a time through listen. The context ends with the program, so that nothing waits on a
-// program that is gone.
 type activity struct {
 	ctx context.Context
 	ch  chan tea.Msg
@@ -75,7 +69,6 @@ func newRuns() runs {
 	return runs{spinner: spinner.New(spinner.WithSpinner(spinner.Dot)), now: time.Now}
 }
 
-// A recipe's step that runs another recipe has no outcome of its own: the other recipe's steps are its outcome.
 func (r *runs) start(activity activity, started *run, actions []wire.Action, work func(context.Context, recipe.Observer) (json.RawMessage, error)) (string, tea.Cmd) {
 	ctx, cancel := context.WithCancel(activity.ctx)
 	started.started, started.cancel = r.now(), cancel
@@ -149,7 +142,6 @@ func (r *runs) ended(e runEnded) string {
 				rest += "\n" + problemStyle.Render(line)
 			}
 		}
-		// The failed step said its error already, so only where the recipe was is left to say.
 		if e.run.failure != nil && errors.Is(e.err, e.run.failure) {
 			return strings.TrimPrefix(rest, "\n")
 		}
@@ -172,7 +164,6 @@ func (r *runs) cancel() {
 	}
 }
 
-// The spinner stops ticking while no run runs, and start starts it again.
 func (r *runs) tick(msg tea.Msg) tea.Cmd {
 	if _, ok := msg.(spinner.TickMsg); !ok || r.active == nil {
 		return nil
@@ -199,7 +190,6 @@ func newActivity(ctx context.Context) activity {
 	return activity{ctx, make(chan tea.Msg)}
 }
 
-// send drops msg once the program is gone.
 func (a activity) send(msg tea.Msg) {
 	select {
 	case a.ch <- msg:
@@ -207,7 +197,6 @@ func (a activity) send(msg tea.Msg) {
 	}
 }
 
-// Update listens again after each message.
 func (a activity) listen() tea.Cmd {
 	return func() tea.Msg {
 		select {
@@ -234,7 +223,6 @@ func duration(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
-// Indented under the step, with its data below it like a result's.
 func notificationLines(n wire.Notification) string {
 	if n.Data == nil {
 		return indent(n.Message)

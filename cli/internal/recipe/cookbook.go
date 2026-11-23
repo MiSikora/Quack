@@ -24,7 +24,6 @@ import (
 type Cookbook struct {
 	// Sorted by name.
 	Recipes []Recipe
-	// By path.
 	scripts map[string]*script
 }
 
@@ -75,7 +74,6 @@ func Load(dir, pkg string) (*Cookbook, []string, error) {
 		}
 		for _, r := range s.recipes {
 			if file, ok := mapped[realPath(r.File)]; ok {
-				// A mapped file that another one imports has its recipes itself.
 				if file != path {
 					continue
 				}
@@ -158,14 +156,11 @@ var (
 	starter []byte
 )
 
-// The files quack owns in each recipes dir.
 var types = map[string][]byte{"quack.d.ts": quackTypes, "tsconfig.json": tsconfig}
 
 const projectDir = ".quack"
 
-// table is a [recipes] table: the files in dir that hold the recipes of the apps whose packages match each pattern.
 type table struct {
-	// The TOML file it is in.
 	file    string
 	dir     string
 	entries []entry
@@ -173,11 +168,9 @@ type table struct {
 
 type entry struct {
 	pattern *regexp.Regexp
-	// Names of files in the table's dir.
-	files []string
+	files   []string
 }
 
-// Each path once, in the order of the entries.
 func (t table) files(pkg string) []string {
 	var paths []string
 	for _, e := range t.entries {
@@ -193,7 +186,6 @@ func (t table) files(pkg string) []string {
 	return paths
 }
 
-// The project's table comes first, then the user's.
 func readTables(dir string) ([]table, []string, error) {
 	start, err := filepath.Abs(dir)
 	if err != nil {
@@ -219,7 +211,6 @@ func readTables(dir string) ([]table, []string, error) {
 	return append(tables, t), append(warnings, problems...), nil
 }
 
-// A missing file is an empty table.
 func readTable(file, dir string, onlyRecipes bool) (table, []string, error) {
 	doc, err := os.ReadFile(file)
 	switch {
@@ -231,7 +222,6 @@ func readTable(file, dir string, onlyRecipes bool) (table, []string, error) {
 	return parseTable(doc, file, dir, onlyRecipes)
 }
 
-// onlyRecipes reports the keys besides [recipes] as unknown.
 func parseTable(doc []byte, file, dir string, onlyRecipes bool) (table, []string, error) {
 	t := table{file: file, dir: dir}
 	var decoded struct {
@@ -259,7 +249,6 @@ func parseTable(doc []byte, file, dir string, onlyRecipes bool) (table, []string
 	return t, warnings, nil
 }
 
-// The problem is "" for an entry that parses.
 func parseEntry(pattern string, value any) (entry, string) {
 	if _, err := regexp.Compile(pattern); err != nil {
 		return entry{}, "is not a valid regex: " + strings.TrimPrefix(err.Error(), "error parsing regexp: ")
@@ -287,7 +276,6 @@ func parseEntry(pattern string, value any) (entry, string) {
 	return e, ""
 }
 
-// findProject returns the first .quack dir from start up. It checks home, but goes no higher when start is in it.
 func findProject(start, home string) string {
 	for dir := start; ; dir = filepath.Dir(dir) {
 		if info, err := os.Stat(filepath.Join(dir, projectDir)); err == nil && info.IsDir() {
@@ -299,7 +287,6 @@ func findProject(start, home string) string {
 	}
 }
 
-// "" when the home dir is unknown, which lets findProject go up to the root.
 func home() string {
 	dir, err := os.UserHomeDir()
 	if err != nil {
@@ -308,7 +295,6 @@ func home() string {
 	return filepath.Clean(dir)
 }
 
-// It leaves a dir whose types a newer quack wrote, so that a project's types do not go back to an older version.
 func writeTypes(dir string) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -346,7 +332,6 @@ const (
 // leave the files of a project alone, and quacks of different versions that share a project tell which is newer.
 var typesVersionPattern = regexp.MustCompile(`recipe types (\d+)`)
 
-// 0 for a file without a version, such as one from before versions.
 func typesVersion(content []byte) int {
 	match := typesVersionPattern.FindSubmatch(content)
 	if match == nil {
@@ -356,7 +341,6 @@ func typesVersion(content []byte) int {
 	return version
 }
 
-// A missing file, or one edited by hand, counts as older.
 func typesIn(dir string) typesState {
 	state := currentTypes
 	for name, content := range types {
@@ -376,7 +360,6 @@ func exists(path string) bool {
 	return !errors.Is(err, fs.ErrNotExist)
 }
 
-// Why the file at path cannot be loaded, or "" when it can.
 func unreadable(path string) string {
 	info, err := os.Stat(path)
 	switch {
@@ -393,7 +376,6 @@ func unreadable(path string) string {
 	return ""
 }
 
-// path itself when it cannot be resolved.
 func realPath(path string) string {
 	if real, err := filepath.EvalSymlinks(path); err == nil {
 		return real

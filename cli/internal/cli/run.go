@@ -59,17 +59,14 @@ type options struct {
 	version      bool
 	usage        string
 	action       string
-	// nil unless listActions or listRecipes has a pattern.
-	filter *regexp.Regexp
-	args   map[string]wire.RawArg
+	filter       *regexp.Regexp
+	args         map[string]wire.RawArg
 }
 
 func parseOptions(argv []string, terminal Terminal) (options, error) {
 	var opts options
 	fs := pflag.NewFlagSet("quack", pflag.ContinueOnError)
-	// Help lists the flags as declared here: alphabetically, with help last.
 	fs.SortFlags = false
-	// Parse errors print once, through Run.
 	fs.SetOutput(io.Discard)
 	fs.StringVarP(&opts.pkg, "app", "a", "", "the app, by its `package` (default: the only quack-enabled app on the device)")
 	fs.StringVarP(&opts.device, "device", "d", "", "the device, by its `serial` as adb devices lists it (default: $ANDROID_SERIAL)")
@@ -264,7 +261,6 @@ func run(opts options, terminal Terminal) error {
 	return nil
 }
 
-// step is 0 outside a recipe.
 func printResult(terminal Terminal, json bool, result wire.MessageResult, step int) {
 	if json {
 		printJSON(terminal.Out, outcomeJSON{Code: codeOK, Message: result.Message, Data: result.Data, Step: step})
@@ -290,8 +286,7 @@ func parseFilter(rest []string, flag string) (*regexp.Regexp, error) {
 	return nil, usageErrorf("%s takes at most one regex", flag)
 }
 
-// boolFlag declares an on/off flag that sets *p. pflag prints [=true|false] after every bool flag in help, and
-// nothing after a BoolFunc flag, which parses the same.
+// pflag prints [=true|false] after every bool flag in help, and nothing after a BoolFunc flag, which parses the same.
 func boolFlag(fs *pflag.FlagSet, p *bool, name, shorthand, usage string) {
 	fs.BoolFuncP(name, shorthand, usage, func(value string) error {
 		on, err := strconv.ParseBool(value)
@@ -303,7 +298,6 @@ func boolFlag(fs *pflag.FlagSet, p *bool, name, shorthand, usage string) {
 	})
 }
 
-// A repeated key keeps its values in command-line order.
 func parseArgs(words []string) (map[string]wire.RawArg, error) {
 	args := map[string]wire.RawArg{}
 	for _, word := range words {
@@ -316,7 +310,6 @@ func parseArgs(words []string) (map[string]wire.RawArg, error) {
 	return args, nil
 }
 
-// step is 0 outside a recipe.
 func printNotifications(terminal Terminal, json bool, step int) client.NotificationFunc {
 	return func(notification wire.Notification) {
 		if json {
@@ -347,7 +340,6 @@ const (
 	exitDevice = 3
 )
 
-// A code missing here exits with exitAction.
 var errorExits = map[wire.ErrorCode]int{
 	wire.ErrorCodeBadFrame:      exitUsage,
 	wire.ErrorCodeUnknownAction: exitUsage,

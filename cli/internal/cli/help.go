@@ -9,7 +9,6 @@ import (
 	"quack/internal/wire"
 )
 
-// A nil filter keeps all. Fails when filter matches none.
 func matching(actions []wire.Action, filter *regexp.Regexp) ([]wire.Action, error) {
 	if filter == nil {
 		return actions, nil
@@ -76,7 +75,6 @@ func paramUsage(p wire.Param) string {
 	}
 }
 
-// Each line break in text starts a new paragraph.
 func writeWrapped(out *strings.Builder, text, indent string) {
 	for _, paragraph := range strings.Split(text, "\n") {
 		line := indent

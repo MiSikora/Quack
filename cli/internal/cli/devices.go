@@ -20,7 +20,6 @@ type appJSON struct {
 	Package string `json:"package"`
 }
 
-// An empty device or pkg matches any.
 func printDevices(w io.Writer, device adb.Device, pkg string, asJSON bool) error {
 	listings, err := adb.Devices()
 	if err != nil {

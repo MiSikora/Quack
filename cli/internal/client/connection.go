@@ -13,8 +13,6 @@ import (
 	"quack/internal/wire"
 )
 
-// Nothing has been sent on a connection yet, so one that fails before exchange can be retried without running
-// anything twice.
 type connection struct {
 	conn   net.Conn
 	reader *bufio.Reader
