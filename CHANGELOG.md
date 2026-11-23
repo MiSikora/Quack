@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-23
+
 ### Added
 - Library: `Terminal.send` takes optional `json`, data that the CLI prints after the notification's message, MCP returns with it, and recipes read. JSON that does not parse fails the call.
 - MCP: `start_action` starts an action without waiting for it to end, for actions that wait on something outside the call such as another device. `read_run` follows the run's notifications while it runs and gives its end, `cancel_run` cancels it, and `list_runs` lists the runs of the session.
@@ -61,7 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release.
 
-[Unreleased]: https://github.com/MiSikora/Quack/compare/0.1.3...HEAD
+[Unreleased]: https://github.com/MiSikora/Quack/compare/0.1.4...HEAD
+[0.1.4]: https://github.com/MiSikora/Quack/releases/tag/0.1.4
 [0.1.3]: https://github.com/MiSikora/Quack/releases/tag/0.1.3
 [0.1.2]: https://github.com/MiSikora/Quack/releases/tag/0.1.2
 [0.1.1]: https://github.com/MiSikora/Quack/releases/tag/0.1.1
