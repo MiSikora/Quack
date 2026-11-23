@@ -10,45 +10,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### SDK
 
 #### Changed
-- An action's id holds only ASCII letters, digits, `_`, `.` and `-`, and does not start with `-`. The server leaves out other actions, or throws after `throwOnMisconfiguration()`.
+- Action ids may hold only ASCII letters, digits, `_`, `.` and `-`.
 
 ### CLI
 
 #### Added
-- The terminal UI reads `show-data` and `group-namespaces` from `$XDG_CONFIG_HOME/quack/config.toml`, the first state of `/toggle-data` and whether browsing groups the ids by namespace. It logs each problem with the file when it starts, and goes on with the defaults for the keys it could not read.
-- `quack.runRecipe(recipe, args)` runs another recipe and returns what it returned. Its steps follow a `recipe <name>` step, and what it throws, the call throws.
-- A recipe can return a value JSON holds. The CLI prints it after the last step, `--json` as a last `ok` line with `data`, and the terminal UI as the run's data.
-- `quack.fail(message)` throws an error that ends the run with the message alone, without the recipe's stack.
-- A `[recipes]` value can name a file in a subdir of `recipes/`, such as `features/login.ts`, or a glob, such as `features/*.ts`. A glob that matches no files is a warning.
+- `show-data` and `group-namespaces` settings in `config.toml`.
+- `quack.runRecipe()` runs another recipe.
+- Recipes can return JSON data.
+- `quack.fail(message)` ends a recipe with a message.
 
 #### Changed
-- Typing in a param with hints in the terminal UI selects the best matching hint, so that enter picks it. ↓ goes back to the text as typed.
-- The terminal UI lists recipes with the actions, marked `ƒ` after their names, and `$` lists only the recipes. A recipe and an action of the same name both show. The terminal UI writes a recipe's command line as `--recipe <name>` instead of `$<name>`.
-- ↑ on an empty prompt in the terminal UI lists the actions and recipes sorted by id, and groups the ones that share a namespace, such as `sync.`. Enter or → opens a group, and ← or backspace goes back. Typing still searches them all.
-- A recipe's name follows the same rule as an action's id, and a recipes file with another name fails to load.
-- A recipe needs a `name`. `quack.recipe()` throws without one, and an export no longer names a recipe.
-- An app gets only the recipes that a mapped file declares itself. A recipe that a file imports runs through `quack.runRecipe()` and is not listed for the importing file.
-- The terminal UI hides the JSON data of notifications and results until `/toggle-data` shows it, or `show-data = true` in `config.toml`.
-- `quack.waitUntil` keeps checking while the check returns a falsy value, and returns the first truthy one instead of nothing.
-- Recipes live in a project's `.quack/recipes/` or in `$XDG_CONFIG_HOME/quack/recipes/`, and a `[recipes]` table in `.quack/quack.toml` or `config.toml` maps the apps whose packages a regex matches to files there, instead of one `<package>.ts` file per app. An app gets the recipes of every file it matches. `--init-recipes` and `/init-recipes` start `.quack/`.
-- Only `--init-recipes` and `/init-recipes` write `quack.d.ts` and `tsconfig.json`. Loading recipes warns when they are out of date instead of rewriting them. They carry a version that changes only with the recipe API, so a project that a newer quack wrote them in says to upgrade quack, and `--init-recipes` leaves them alone.
-- While no app is connected, the terminal UI keeps its prompt with the commands that need no app, such as `/pick-device`, instead of waiting in the device picker. The line over the prompt says why there is no app, in red when there is no device or no quack-enabled app.
-- The terminal UI picks a device and an app by itself only until the first app connects. After a device disconnects, `/pick-device` picks the next one.
-- The terminal UI notices when the connected app is uninstalled, and goes on as when its device disconnects.
+- Recipes live in `.quack/recipes/` or `~/.config/quack/recipes/`, and a `[recipes]` table maps apps to files or globs there.
+- A recipe needs a `name`, following the action id rules. Only recipes declared in a mapped file are listed.
+- `quack.waitUntil` returns the first truthy value.
+- Only `--init-recipes` writes `quack.d.ts` and `tsconfig.json`.
+- The terminal UI lists recipes with the actions, and groups them by namespace when browsing.
+- The terminal UI hides JSON data until `/toggle-data`.
+- Typing in a param with hints selects the best match.
+- The terminal UI keeps its prompt while no app is connected, and notices when the app is uninstalled.
 
 #### Fixed
-- A recipes file that exports a string with letters outside ASCII loads instead of crashing quack.
+- Recipes files with non-ASCII strings no longer crash quack.
 
 ### MCP
 
 #### Added
-- `run_recipe` gives what the recipe returned as `data`.
+- `run_recipe` returns the recipe's data.
 
 #### Changed
-- Recipes load from `.quack/` and `config.toml`, as in the CLI. `list_recipes` gives the file each recipe is in and the problems that left files out, instead of one `file` for the app.
+- Recipes load as in the CLI, and `list_recipes` shows each recipe's file.
 
 #### Fixed
-- A recipes file that exports a string with letters outside ASCII loads instead of crashing `quack-mcp`.
+- Recipes files with non-ASCII strings no longer crash `quack-mcp`.
 
 ## [0.1.4] - 2026-11-23
 
