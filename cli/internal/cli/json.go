@@ -8,9 +8,8 @@ import (
 	"io"
 
 	"quack/internal/adb"
-	"quack/internal/client"
 	"quack/internal/device"
-	"quack/internal/recipe"
+	"quack/internal/session"
 	"quack/internal/wire"
 )
 
@@ -50,34 +49,19 @@ type paramJSON struct {
 }
 
 func failure(err error) (code, message string, exit int) {
-	var refused wire.Error
 	var usage *usageError
 	var unreachable *adb.Error
 	var app *device.AppError
-	var call *client.CallError
-	var command *recipe.CommandError
 	switch {
-	case errors.As(err, &refused):
-		exit := cmp.Or(errorExits[refused.Code], exitAction)
-		message := refused.Message
-		var thrown *recipe.ScriptError
-		if errors.As(err, &thrown) {
-			message = (&recipe.ScriptError{Err: errors.New(message), Stack: thrown.Stack}).Error()
-		}
-		return string(refused.Code), message, exit
 	case errors.As(err, &usage):
 		return "usage", err.Error(), exitUsage
 	case errors.As(err, &unreachable):
 		return "device", err.Error(), exitDevice
 	case errors.As(err, &app):
 		return "app", err.Error(), exitDevice
-	case errors.As(err, &call):
-		return "no_reply", err.Error(), exitAction
-	case errors.As(err, &command):
-		return "command", err.Error(), exitAction
-	default:
-		return "error", err.Error(), exitAction
 	}
+	code, message = session.Classify(err)
+	return code, message, cmp.Or(errorExits[wire.ErrorCode(code)], exitAction)
 }
 
 func printActionsJSON(w io.Writer, actions []wire.Action) {

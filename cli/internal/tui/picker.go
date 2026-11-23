@@ -15,7 +15,7 @@ import (
 )
 
 type picker struct {
-	step        step
+	step        pickerStep
 	device      adb.Device
 	want        device.Target
 	auto        bool
@@ -29,10 +29,10 @@ type picker struct {
 	width       int
 }
 
-type step int
+type pickerStep int
 
 const (
-	deviceStep step = iota
+	deviceStep pickerStep = iota
 	packageStep
 )
 
@@ -58,7 +58,7 @@ func newPicker(want device.Target, width int) *picker {
 	return p
 }
 
-func (p *picker) toStep(s step) {
+func (p *picker) toStep(s pickerStep) {
 	p.step = s
 	p.input.SetValue("")
 	p.selected = ""

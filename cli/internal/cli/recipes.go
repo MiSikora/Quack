@@ -13,60 +13,56 @@ import (
 	"quack/internal/client"
 	"quack/internal/config"
 	"quack/internal/recipe"
+	"quack/internal/session"
+	"quack/internal/step"
 	"quack/internal/wire"
 )
 
-type stepError struct {
-	step int
-	err  error
-}
-
-func (e *stepError) Error() string { return e.err.Error() }
-
-func (e *stepError) Unwrap() error { return e.err }
-
-func runRecipe(app client.App, c *recipe.Cookbook, name string, args map[string]wire.RawArg, terminal Terminal, json bool) error {
+func runPrinted(app client.App, cookbook *recipe.Cookbook, r session.Runnable, args map[string]wire.RawArg, terminal Terminal, json bool) error {
 	ctx := context.Background()
-	_, actions, err := app.Describe(ctx)
-	if err != nil {
-		return err
-	}
-	step := 0
-	var failure *stepError
-	caught := func() {
-		if failure != nil {
-			printFailure(terminal, json, failure)
-			failure = nil
+	var actions []wire.Action
+	if r.Recipe {
+		var err error
+		if _, actions, err = app.Describe(ctx); err != nil {
+			return err
 		}
 	}
-	data, err := c.Run(ctx, app, name, args, recipe.Observer{
-		Started: func(started recipe.Step) {
-			caught()
-			step++
-			if !json {
-				fmt.Fprintln(terminal.Out, "› "+recipe.Line(started, actions))
-			}
-		},
-		Notified: func(notification wire.Notification) { printNotifications(terminal, json, step)(notification) },
-		Ended: func(ended recipe.Step, result wire.MessageResult) {
-			if json || hasMessage(ended) {
-				printResult(terminal, json, result, step)
-			}
-		},
-		Failed: func(_ recipe.Step, err error) { failure = &stepError{step, err} },
-		Logged: func(text string) {
-			caught()
-			if json {
-				printJSON(terminal.Out, notificationJSON{Code: codeLog, Message: text, Step: step})
-			} else {
-				fmt.Fprintln(terminal.Out, text)
-			}
-		},
-	})
-	if failure != nil && errors.Is(err, failure.err) {
-		return &stepError{failure.step, err}
+	var caught *step.Failed
+	printCaught := func() {
+		if caught != nil {
+			printFailure(terminal, json, *caught)
+			caught = nil
+		}
 	}
-	caught()
+	data, err := session.Run(ctx, app, actions, cookbook, r, args, func(e step.Event) {
+		switch e := e.(type) {
+		case step.Started:
+			printCaught()
+			if r.Recipe && !json {
+				fmt.Fprintln(terminal.Out, "› "+e.Line)
+			}
+		case step.Notified:
+			printNotification(terminal, json, e.Notification, e.Number)
+		case step.Ended:
+			if json || hasMessage(e.Step) {
+				printResult(terminal, json, e.Result, e.Number)
+			}
+		case step.Failed:
+			caught = &e
+		case step.Logged:
+			printCaught()
+			if json {
+				printJSON(terminal.Out, notificationJSON{Code: codeLog, Message: e.Text, Step: e.Number})
+			} else {
+				fmt.Fprintln(terminal.Out, e.Text)
+			}
+		}
+	})
+	var failed *session.StepError
+	if errors.As(err, &failed) {
+		return err
+	}
+	printCaught()
 	switch {
 	case err != nil || data == nil:
 		return err
@@ -78,18 +74,18 @@ func runRecipe(app client.App, c *recipe.Cookbook, name string, args map[string]
 	return nil
 }
 
-func printFailure(terminal Terminal, json bool, failed *stepError) {
-	code, message, _ := failure(failed.err)
+func printFailure(terminal Terminal, json bool, failed step.Failed) {
+	code, message, _ := failure(failed.Err)
 	if json {
-		printJSON(terminal.Out, outcomeJSON{Code: code, Message: message, Step: failed.step})
+		printJSON(terminal.Out, outcomeJSON{Code: code, Message: message, Step: failed.Number})
 		return
 	}
-	fmt.Fprintln(terminal.Out, failed.err.Error())
+	fmt.Fprintln(terminal.Out, failed.Err.Error())
 }
 
-func hasMessage(step recipe.Step) bool {
-	switch step.(type) {
-	case recipe.OpenApp, recipe.Wait, recipe.RunRecipe:
+func hasMessage(s step.Step) bool {
+	switch s.(type) {
+	case step.OpenApp, step.Wait, step.RunRecipe:
 		return false
 	}
 	return true

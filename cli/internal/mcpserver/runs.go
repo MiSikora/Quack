@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"quack/internal/device"
+	"quack/internal/session"
+	"quack/internal/step"
 	"quack/internal/wire"
 )
 
@@ -80,7 +82,15 @@ func (r *runs) start(target device.Target, app App, call wire.Call) string {
 	r.mu.Unlock()
 	go func() {
 		defer cancel()
-		result, err := app.Call(ctx, call, func(n wire.Notification) { r.notified(started, notificationOutput(n)) })
+		var result wire.MessageResult
+		_, err := session.Run(ctx, app, nil, nil, session.Runnable{Name: call.Action}, call.Args, func(e step.Event) {
+			switch e := e.(type) {
+			case step.Notified:
+				r.notified(started, notificationOutput(e.Notification))
+			case step.Ended:
+				result = e.Result
+			}
+		})
 		r.ended(started, result, err, ctx.Err() != nil)
 	}()
 	return started.id

@@ -12,7 +12,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"quack/internal/recipe"
+	"quack/internal/session"
+	"quack/internal/step"
 	"quack/internal/wire"
 )
 
@@ -26,27 +27,15 @@ type run struct {
 	runnable
 	step     string
 	started  time.Time
-	failure  error
 	stopping bool
 	cancel   context.CancelFunc
 }
 
 // Only Update touches the run.
 type (
-	stepStarted struct {
-		run     *run
-		command string
-	}
-	runNotification struct {
-		notification wire.Notification
-	}
-	stepEnded struct {
-		run    *run
-		result wire.MessageResult
-	}
-	stepFailed struct {
-		run *run
-		err error
+	runEvent struct {
+		run   *run
+		event step.Event
 	}
 	runEnded struct {
 		run      *run
@@ -69,24 +58,21 @@ func newRuns() runs {
 	return runs{spinner: spinner.New(spinner.WithSpinner(spinner.Dot)), now: time.Now}
 }
 
-func (r *runs) start(activity activity, started *run, actions []wire.Action, work func(context.Context, recipe.Observer) (json.RawMessage, error)) (string, tea.Cmd) {
+func (r *runs) start(activity activity, started *run, work func(context.Context, func(step.Event)) (json.RawMessage, error)) (string, tea.Cmd) {
 	ctx, cancel := context.WithCancel(activity.ctx)
 	started.started, started.cancel = r.now(), cancel
 	r.active = started
-	observer := recipe.Observer{
-		Started:  func(step recipe.Step) { activity.send(stepStarted{started, recipe.Line(step, actions)}) },
-		Notified: func(notification wire.Notification) { activity.send(runNotification{notification}) },
-		Ended: func(step recipe.Step, result wire.MessageResult) {
-			if _, nested := step.(recipe.RunRecipe); !nested {
-				activity.send(stepEnded{started, result})
+	emit := func(e step.Event) {
+		if ended, ok := e.(step.Ended); ok {
+			if _, nested := ended.Step.(step.RunRecipe); nested {
+				return
 			}
-		},
-		Failed: func(_ recipe.Step, err error) { activity.send(stepFailed{started, err}) },
-		Logged: func(text string) { activity.send(logged{text}) },
+		}
+		activity.send(runEvent{started, e})
 	}
 	do := func() tea.Msg {
 		defer cancel()
-		data, err := work(ctx, observer)
+		data, err := work(ctx, emit)
 		activity.send(runEnded{started, data, err, ctx.Err() != nil})
 		return nil
 	}
@@ -97,30 +83,40 @@ func (r *runs) start(activity activity, started *run, actions []wire.Action, wor
 	return header, tea.Batch(do, r.spinner.Tick)
 }
 
-func (r *runs) stepStarted(e stepStarted) string {
-	e.run.step, e.run.started = e.command, r.now()
-	return commandStyle.Render("› " + e.command)
-}
-
-func (r *runs) stepEnded(e stepEnded) string {
-	text := e.result.Message
-	if text == "" {
-		text = statusStyle.Render("done")
+func (r *runs) event(e runEvent, hideData bool) string {
+	switch event := e.event.(type) {
+	case step.Started:
+		e.run.step, e.run.started = event.Line, r.now()
+		return commandStyle.Render("› " + event.Line)
+	case step.Notified:
+		if hideData {
+			event.Notification.Data = nil
+		}
+		return notificationLines(event.Notification)
+	case step.Ended:
+		if hideData {
+			event.Result.Data = nil
+		}
+		text := event.Result.Message
+		if text == "" {
+			text = statusStyle.Render("done")
+		}
+		now := r.now()
+		lines := text + statusStyle.Render(" · "+duration(now.Sub(e.run.started)))
+		if event.Result.Data != nil {
+			lines += "\n" + indent(event.Result.IndentedData())
+		}
+		e.run.step, e.run.started = "", now
+		return lines
+	case step.Failed:
+		now := r.now()
+		line := problemStyle.Render(event.Err.Error()) + statusStyle.Render(" · "+duration(now.Sub(e.run.started)))
+		e.run.step, e.run.started = "", now
+		return line
+	case step.Logged:
+		return event.Text
 	}
-	now := r.now()
-	lines := text + statusStyle.Render(" · "+duration(now.Sub(e.run.started)))
-	if e.result.Data != nil {
-		lines += "\n" + indent(e.result.IndentedData())
-	}
-	e.run.step, e.run.started = "", now
-	return lines
-}
-
-func (r *runs) stepFailed(e stepFailed) string {
-	now := r.now()
-	line := problemStyle.Render(e.err.Error()) + statusStyle.Render(" · "+duration(now.Sub(e.run.started)))
-	e.run.step, e.run.started, e.run.failure = "", now, e.err
-	return line
+	return ""
 }
 
 func (r *runs) ended(e runEnded) string {
@@ -142,7 +138,8 @@ func (r *runs) ended(e runEnded) string {
 				rest += "\n" + problemStyle.Render(line)
 			}
 		}
-		if e.run.failure != nil && errors.Is(e.err, e.run.failure) {
+		var failed *session.StepError
+		if errors.As(e.err, &failed) {
 			return strings.TrimPrefix(rest, "\n")
 		}
 	}

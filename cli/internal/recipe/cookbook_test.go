@@ -60,10 +60,10 @@ export const second = quack.recipe({ run() { console.log("b") } })`)
 		t.Fatal(err)
 	}
 	var logged []string
-	observer := Observer{Logged: func(text string) { logged = append(logged, text) }}
+	observer := logTo(&logged)
 
 	for _, name := range []string{"second", "first"} {
-		if _, err := c.Run(context.Background(), &fakeApp{}, name, nil, observer); err != nil {
+		if _, err := c.Run(context.Background(), &fakeApp{}, nil, name, nil, observer); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -117,7 +117,7 @@ export const hello = quack.recipe({ run() { greet() } })`)
 		t.Fatalf("got %v, %v, want only hello", names(c), err)
 	}
 	app := &fakeApp{}
-	if _, err := c.Run(context.Background(), app, "hello", nil, Observer{}); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob"}) {
+	if _, err := c.Run(context.Background(), app, nil, "hello", nil, ignore); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob"}) {
 		t.Errorf("run: got %v and calls %v", err, app.calls)
 	}
 }
@@ -138,7 +138,7 @@ export const login = quack.recipe({ run() {} })`)
 		t.Fatalf("got %v, want %v", files(c), want)
 	}
 	app := &fakeApp{}
-	if _, err := c.Run(context.Background(), app, "reset", nil, Observer{}); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob"}) {
+	if _, err := c.Run(context.Background(), app, nil, "reset", nil, ignore); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob"}) {
 		t.Errorf("run: got %v and calls %v", err, app.calls)
 	}
 }
@@ -192,7 +192,7 @@ export const reset = quack.recipe({ run() { greet(); quack.runRecipe(login) } })
 		t.Fatalf("got %v, want %v", files, want)
 	}
 	app := &fakeApp{}
-	if _, err := c.Run(context.Background(), app, "reset", nil, Observer{}); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob", "app.login name=Ann"}) {
+	if _, err := c.Run(context.Background(), app, nil, "reset", nil, ignore); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob", "app.login name=Ann"}) {
 		t.Errorf("run: got %v and calls %v", err, app.calls)
 	}
 }
@@ -414,7 +414,7 @@ func TestInitWithAnAppStartsAProjectWhoseRecipeRuns(t *testing.T) {
 		t.Fatalf("load: got %v, %q, %v", names(c), warnings, err)
 	}
 	app := &fakeApp{}
-	if _, err := c.Run(context.Background(), app, "open", nil, Observer{}); err != nil || !reflect.DeepEqual(app.starts, []client.StartMode{client.OpenApp}) {
+	if _, err := c.Run(context.Background(), app, nil, "open", nil, ignore); err != nil || !reflect.DeepEqual(app.starts, []client.StartMode{client.OpenApp}) {
 		t.Errorf("open: got %v and starts %v", err, app.starts)
 	}
 	if written, err := Init(dir, pkg); err != nil || len(written) != 0 {

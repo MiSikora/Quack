@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"quack/internal/recipe"
+	"quack/internal/step"
 	"quack/internal/wire"
 )
 
@@ -319,7 +320,7 @@ func (r runnable) suffix() string {
 }
 
 func (r runnable) commandLine(args map[string]wire.RawArg) string {
-	line := recipe.CommandLine(r.Action, args)
+	line := step.CommandLine(r.Action, args)
 	if r.recipe {
 		return "--recipe " + line
 	}

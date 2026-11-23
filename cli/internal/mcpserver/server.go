@@ -22,6 +22,8 @@ import (
 	"quack/internal/client"
 	"quack/internal/device"
 	"quack/internal/recipe"
+	"quack/internal/session"
+	"quack/internal/step"
 	"quack/internal/wire"
 )
 
@@ -34,7 +36,7 @@ type Source interface {
 }
 
 type App interface {
-	recipe.App
+	step.App
 	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
 }
 
@@ -298,21 +300,12 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 	if form != nil || err != nil {
 		return form, runActionOutput{}, err
 	}
-	notifications := []notificationOutput{}
-	var messages []string
-	report := progress(ctx, req)
-	result, err := prepared.app.Call(ctx, prepared.call, func(notification wire.Notification) {
-		notifications = append(notifications, notificationOutput(notification))
-		messages = append(messages, notification.Message)
-		report(notification.Message)
-	})
-	if err != nil {
-		if len(messages) > 0 {
-			err = fmt.Errorf("%s\n%w", strings.Join(messages, "\n"), err)
-		}
-		return nil, runActionOutput{}, err
+	t := newTranscript(progress(ctx, req))
+	if _, err := session.Run(ctx, prepared.app, prepared.actions, nil, session.Runnable{Name: prepared.call.Action}, prepared.call.Args, t.record); err != nil {
+		return nil, runActionOutput{}, t.failed(err)
 	}
-	return nil, runActionOutput{Notifications: notifications, Message: result.Message, Data: result.Data}, nil
+	done := t.steps[0]
+	return nil, runActionOutput{Notifications: done.Notifications, Message: done.Message, Data: done.Data}, nil
 }
 
 func (s tools) startAction(ctx context.Context, req *mcp.CallToolRequest, in runActionInput) (*mcp.CallToolResult, startActionOutput, error) {
@@ -399,62 +392,66 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 			}
 		}
 	}
-	report := progress(ctx, req)
-	out := runRecipeOutput{Steps: []stepOutput{}, Log: []string{}}
-	var printed []string
-	print := func(line string) {
-		printed = append(printed, line)
-		report(line)
-	}
-	var done stepOutput
-	out.Data, err = cookbook.Run(ctx, app, in.Recipe, args, recipe.Observer{
-		Started: func(step recipe.Step) {
-			done = stepOutput{Step: recipe.Line(step, actions), Notifications: []notificationOutput{}}
-			print("› " + done.Step)
-		},
-		Notified: func(notification wire.Notification) {
-			done.Notifications = append(done.Notifications, notificationOutput(notification))
-			print(notification.Message)
-		},
-		Ended: func(_ recipe.Step, result wire.MessageResult) {
-			if result.Message != "" {
-				printed = append(printed, result.Message)
-			}
-			done.Message, done.Data = result.Message, result.Data
-			out.Steps = append(out.Steps, done)
-		},
-		Failed: func(_ recipe.Step, err error) {
-			report(err.Error())
-			done.Error = stepError(err)
-			out.Steps = append(out.Steps, done)
-		},
-		Logged: func(text string) {
-			out.Log = append(out.Log, text)
-			print(text)
-		},
-	})
+	t := newTranscript(progress(ctx, req))
+	data, err := session.Run(ctx, app, actions, cookbook, session.Runnable{Name: in.Recipe, Recipe: true}, args, t.record)
 	if err != nil {
-		if len(printed) > 0 {
-			err = fmt.Errorf("%s\n%w", strings.Join(printed, "\n"), err)
-		}
-		return nil, runRecipeOutput{}, err
+		return nil, runRecipeOutput{}, t.failed(err)
 	}
-	return nil, out, nil
+	return nil, runRecipeOutput{Steps: t.steps, Log: t.log, Data: data}, nil
+}
+
+type transcript struct {
+	report  func(string)
+	steps   []stepOutput
+	log     []string
+	printed []string
+}
+
+func newTranscript(report func(string)) *transcript {
+	return &transcript{report: report, steps: []stepOutput{}, log: []string{}}
+}
+
+func (t *transcript) record(e step.Event) {
+	switch e := e.(type) {
+	case step.Started:
+		t.steps = append(t.steps, stepOutput{Step: e.Line, Notifications: []notificationOutput{}})
+		if e.Number > 0 {
+			t.print("› " + e.Line)
+		}
+	case step.Notified:
+		done := &t.steps[len(t.steps)-1]
+		done.Notifications = append(done.Notifications, notificationOutput(e.Notification))
+		t.print(e.Notification.Message)
+	case step.Ended:
+		if e.Result.Message != "" {
+			t.printed = append(t.printed, e.Result.Message)
+		}
+		done := &t.steps[len(t.steps)-1]
+		done.Message, done.Data = e.Result.Message, e.Result.Data
+	case step.Failed:
+		t.report(e.Err.Error())
+		t.steps[len(t.steps)-1].Error = stepError(e.Err)
+	case step.Logged:
+		t.log = append(t.log, e.Text)
+		t.print(e.Text)
+	}
+}
+
+func (t *transcript) print(line string) {
+	t.printed = append(t.printed, line)
+	t.report(line)
+}
+
+func (t *transcript) failed(err error) error {
+	if len(t.printed) > 0 {
+		return fmt.Errorf("%s\n%w", strings.Join(t.printed, "\n"), err)
+	}
+	return err
 }
 
 func stepError(err error) *errorOutput {
-	var refused wire.Error
-	var command *recipe.CommandError
-	var call *client.CallError
-	switch {
-	case errors.As(err, &refused):
-		return &errorOutput{string(refused.Code), refused.Message}
-	case errors.As(err, &command):
-		return &errorOutput{"command", err.Error()}
-	case errors.As(err, &call):
-		return &errorOutput{"no_reply", err.Error()}
-	}
-	return &errorOutput{"error", err.Error()}
+	code, message := session.Classify(err)
+	return &errorOutput{code, message}
 }
 
 // Decides as the SDK's Elicit does.

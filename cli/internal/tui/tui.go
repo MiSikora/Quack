@@ -21,11 +21,13 @@ import (
 	"quack/internal/config"
 	"quack/internal/device"
 	"quack/internal/recipe"
+	"quack/internal/session"
+	"quack/internal/step"
 	"quack/internal/wire"
 )
 
 type App interface {
-	recipe.App
+	step.App
 	Describe(ctx context.Context) (wire.Hello, []wire.Action, error)
 }
 
@@ -223,23 +225,8 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 	case tea.KeyPressMsg:
 		m.log.marked = nil
 		return m.press(msg)
-	case stepStarted:
-		m.log.add(m.runs.stepStarted(msg))
-		return m.activity.listen()
-	case runNotification:
-		if m.hideData {
-			msg.notification.Data = nil
-		}
-		m.log.add(notificationLines(msg.notification))
-		return m.activity.listen()
-	case stepEnded:
-		if m.hideData {
-			msg.result.Data = nil
-		}
-		m.log.add(m.runs.stepEnded(msg))
-		return m.activity.listen()
-	case stepFailed:
-		m.log.add(m.runs.stepFailed(msg))
+	case runEvent:
+		m.log.add(m.runs.event(msg, m.hideData))
 		return m.activity.listen()
 	case runEnded:
 		if m.hideData {
@@ -424,22 +411,10 @@ func (m *model) choose() tea.Cmd {
 }
 
 func (m *model) start(r runnable, args map[string]wire.RawArg) tea.Cmd {
-	app, cookbook := m.app, m.cookbook
-	work := func(ctx context.Context, observer recipe.Observer) (json.RawMessage, error) {
-		step := recipe.Call{Action: r.ID, Args: args}
-		observer.Started(step)
-		result, err := recipe.Do(ctx, app, step, observer.Notified)
-		if err == nil {
-			observer.Ended(step, result)
-		}
-		return nil, err
-	}
-	if r.recipe {
-		work = func(ctx context.Context, observer recipe.Observer) (json.RawMessage, error) {
-			return cookbook.Run(ctx, app, r.ID, args, observer)
-		}
-	}
-	header, cmd := m.runs.start(m.activity, &run{runnable: r}, m.prompt.actions, work)
+	app, actions, cookbook := m.app, m.prompt.actions, m.cookbook
+	header, cmd := m.runs.start(m.activity, &run{runnable: r}, func(ctx context.Context, emit func(step.Event)) (json.RawMessage, error) {
+		return session.Run(ctx, app, actions, cookbook, session.Runnable{Name: r.ID, Recipe: r.recipe}, args, emit)
+	})
 	m.log.add(header)
 	return cmd
 }

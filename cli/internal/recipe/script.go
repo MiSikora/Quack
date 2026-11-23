@@ -20,6 +20,7 @@ import (
 	"quack/internal/client"
 	"quack/internal/config"
 	"quack/internal/device"
+	"quack/internal/step"
 	"quack/internal/wire"
 )
 
@@ -27,16 +28,6 @@ type script struct {
 	path    string
 	recipes []Recipe
 	code    string
-}
-
-// Started and then Ended or Failed frame each Step, with the notifications of a Call between them. Any of them
-// may be nil.
-type Observer struct {
-	Started  func(step Step)
-	Notified func(notification wire.Notification)
-	Ended    func(step Step, result wire.MessageResult)
-	Failed   func(step Step, err error)
-	Logged   func(text string)
 }
 
 // Stack is innermost first.
@@ -64,7 +55,7 @@ func loadScript(path string) (*script, error) {
 		return nil, err
 	}
 	s := &script{path: path, code: code}
-	r := newRuntime(s, nil, nil, Observer{})
+	r := newRuntime(s, nil, nil, nil, func(step.Event) {})
 	exports, err := r.load()
 	if err != nil {
 		return nil, err
@@ -79,8 +70,8 @@ func loadScript(path string) (*script, error) {
 	return s, nil
 }
 
-func (s *script) run(ctx context.Context, app App, name string, args map[string]wire.RawArg, observer Observer) (json.RawMessage, error) {
-	r := newRuntime(s, ctx, app, observer)
+func (s *script) run(ctx context.Context, app step.App, actions []wire.Action, name string, args map[string]wire.RawArg, emit func(step.Event)) (json.RawMessage, error) {
+	r := newRuntime(s, ctx, app, actions, emit)
 	exports, err := r.load()
 	if err != nil {
 		return nil, err
@@ -109,7 +100,7 @@ func (r *runtime) call(declared declaredRecipe, args map[string]wire.RawArg, nes
 		r.env.Get(variable)
 	}
 	if nested {
-		r.do(RunRecipe{declared.Recipe, raw}, nil)
+		r.do(step.RunRecipe{Name: declared.Name, Params: declared.Params, Args: raw}, nil)
 	}
 	returned, threw := declared.run(goja.Undefined(), r.vm.ToValue(argValues(declared.Recipe, raw)))
 	if threw != nil {
@@ -120,14 +111,16 @@ func (r *runtime) call(declared declaredRecipe, args map[string]wire.RawArg, nes
 }
 
 type runtime struct {
-	script   *script
-	vm       *goja.Runtime
-	ctx      context.Context
-	app      App
-	observer Observer
-	recipes  map[*goja.Object]declaredRecipe
-	env      *environment
-	depth    int
+	script  *script
+	vm      *goja.Runtime
+	ctx     context.Context
+	app     step.App
+	actions []wire.Action
+	emit    func(step.Event)
+	steps   int
+	recipes map[*goja.Object]declaredRecipe
+	env     *environment
+	depth   int
 }
 
 // Each runRecipe and each JS call takes Go stack, whose overflow kills quack rather than failing the recipe.
@@ -151,8 +144,8 @@ func (r *runtime) caller() string {
 	return ""
 }
 
-func newRuntime(s *script, ctx context.Context, app App, observer Observer) *runtime {
-	r := &runtime{script: s, vm: goja.New(), ctx: ctx, app: app, observer: observer, recipes: map[*goja.Object]declaredRecipe{}}
+func newRuntime(s *script, ctx context.Context, app step.App, actions []wire.Action, emit func(step.Event)) *runtime {
+	r := &runtime{script: s, vm: goja.New(), ctx: ctx, app: app, actions: actions, emit: emit, recipes: map[*goja.Object]declaredRecipe{}}
 	r.env = newEnvironment(r.vm)
 	r.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	r.vm.SetMaxCallStackSize(maxCallDepth)
@@ -171,10 +164,10 @@ func (r *runtime) load() (*goja.Object, error) {
 		"runAction": r.runAction,
 		"runRecipe": r.runRecipe,
 		"fail":      func(message string) { panic(r.vm.NewGoError(&failure{message})) },
-		"openApp":   func() { r.do(OpenApp{}, nil) },
-		"shell":     func(command string) string { return r.do(Shell{command}, nil).Message },
-		"run":       func(command string) string { return r.do(Run{command}, nil).Message },
-		"wait":      func(d goja.Value) { r.do(Wait{r.duration(d, "wait")}, nil) },
+		"openApp":   func() { r.do(step.OpenApp{}, nil) },
+		"shell":     func(command string) string { return r.do(step.Shell{Command: command}, nil).Message },
+		"run":       func(command string) string { return r.do(step.Run{Command: command}, nil).Message },
+		"wait":      func(d goja.Value) { r.do(step.Wait{Duration: r.duration(d, "wait")}, nil) },
 		"waitUntil": r.waitUntil,
 		"app":       map[string]string{"package": target.Package},
 		"device":    map[string]string{"serial": string(target.Device)},
@@ -188,9 +181,7 @@ func (r *runtime) load() (*goja.Object, error) {
 		for i, value := range call.Arguments {
 			words[i] = value.String()
 		}
-		if r.observer.Logged != nil {
-			r.observer.Logged(strings.Join(words, " "))
-		}
+		r.emit(step.Logged{Number: r.steps, Text: strings.Join(words, " ")})
 		return goja.Undefined()
 	})
 	_ = vm.Set("__quack", quack)
@@ -316,7 +307,7 @@ func param(name string, declaration any) (wire.Param, string, error) {
 		return p, "", nil
 	}
 	variable, ok := fields["env"].(string)
-	if !ok || !isVariable(variable) {
+	if !ok || !step.IsVariable(variable) {
 		return wire.Param{}, "", fmt.Errorf("param '%s': env must name an environment variable", name)
 	}
 	if os.Getenv(variable) == "" {
@@ -349,7 +340,7 @@ type notification struct {
 }
 
 func (r *runtime) runAction(id string, args map[string]any) actionResult {
-	call := Call{Action: id, Args: r.rawArgs(args)}
+	call := step.Call{Action: id, Args: r.rawArgs(args)}
 	notifications := []notification{}
 	result := r.do(call, func(n wire.Notification) {
 		notifications = append(notifications, notification{Message: n.Message, Data: r.parse(n.Data)})
@@ -430,29 +421,23 @@ func (r *runtime) requireRun() {
 	}
 }
 
-func (r *runtime) do(step Step, collect func(wire.Notification)) wire.MessageResult {
+func (r *runtime) do(s step.Step, collect func(wire.Notification)) wire.MessageResult {
 	r.requireRun()
-	shown := r.env.hide(step)
-	if r.observer.Started != nil {
-		r.observer.Started(shown)
-	}
-	result, err := Do(r.ctx, r.app, step, func(notification wire.Notification) {
+	shown := r.env.hide(s)
+	r.steps++
+	number := r.steps
+	r.emit(step.Started{Number: number, Line: step.Line(shown, r.actions)})
+	result, err := step.Do(r.ctx, r.app, s, func(notification wire.Notification) {
 		if collect != nil {
 			collect(notification)
 		}
-		if r.observer.Notified != nil {
-			r.observer.Notified(notification)
-		}
+		r.emit(step.Notified{Number: number, Notification: notification})
 	})
 	if err != nil {
-		if r.observer.Failed != nil {
-			r.observer.Failed(shown, err)
-		}
+		r.emit(step.Failed{Number: number, Err: err})
 		panic(r.vm.NewGoError(err))
 	}
-	if r.observer.Ended != nil {
-		r.observer.Ended(shown, result)
-	}
+	r.emit(step.Ended{Number: number, Step: shown, Result: result})
 	return result
 }
 
@@ -479,7 +464,7 @@ func (r *runtime) waitUntil(check goja.Callable, options *goja.Object) goja.Valu
 			panic(r.vm.NewGoError(fmt.Errorf("waitUntil: the check did not pass within %s", timeout)))
 		}
 		r.requireRun()
-		if _, err := Do(r.ctx, r.app, Wait{every}, nil); err != nil {
+		if _, err := step.Do(r.ctx, r.app, step.Wait{Duration: every}, nil); err != nil {
 			panic(r.vm.NewGoError(err))
 		}
 	}
@@ -719,7 +704,7 @@ func (e *environment) Delete(string) bool { return false }
 
 func (e *environment) Keys() []string { return slices.Sorted(maps.Keys(e.values)) }
 
-func (e *environment) hide(step Step) Step {
+func (e *environment) hide(s step.Step) step.Step {
 	var pairs []string
 	for _, name := range slices.SortedFunc(maps.Keys(e.read), func(a, b string) int { return len(e.read[b]) - len(e.read[a]) }) {
 		if e.read[name] != "" {
@@ -727,7 +712,7 @@ func (e *environment) hide(step Step) Step {
 		}
 	}
 	if pairs == nil {
-		return step
+		return s
 	}
 	replacer := strings.NewReplacer(pairs...)
 	replace := func(args map[string]wire.RawArg) map[string]wire.RawArg {
@@ -740,17 +725,17 @@ func (e *environment) hide(step Step) Step {
 		}
 		return replaced
 	}
-	switch step := step.(type) {
-	case Call:
-		step.Args = replace(step.Args)
-		return step
-	case RunRecipe:
-		step.Args = replace(step.Args)
-		return step
-	case Shell:
-		return Shell{replacer.Replace(step.Command)}
-	case Run:
-		return Run{replacer.Replace(step.Command)}
+	switch s := s.(type) {
+	case step.Call:
+		s.Args = replace(s.Args)
+		return s
+	case step.RunRecipe:
+		s.Args = replace(s.Args)
+		return s
+	case step.Shell:
+		return step.Shell{Command: replacer.Replace(s.Command)}
+	case step.Run:
+		return step.Run{Command: replacer.Replace(s.Command)}
 	}
-	return step
+	return s
 }

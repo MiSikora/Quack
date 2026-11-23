@@ -1,8 +1,10 @@
-package recipe
+package step
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"reflect"
 	"testing"
@@ -10,6 +12,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/device"
 	"quack/internal/wire"
 )
 
@@ -134,4 +137,62 @@ func TestShellReadsAQuotedValueBackAsTyped(t *testing.T) {
 			t.Errorf("sh read %s back as %q (%v), want %q", quote(value), out, err, value)
 		}
 	}
+}
+
+func TestExpandArgsReplacesVariables(t *testing.T) {
+	t.Setenv("QUACK_NAME", "Bob")
+	os.Unsetenv("QUACK_MISSING")
+
+	args, err := ExpandArgs(map[string]wire.RawArg{"name": {"${QUACK_NAME} $$5 $$${QUACK_NAME} $HOME ${QUACK_PACKAGE}"}}, target)
+	if want := "Bob $$5 $${QUACK_NAME} $HOME io.mehow.quack.sample"; err != nil || args["name"][0] != want {
+		t.Errorf("got %v, %v, want %s", args, err, want)
+	}
+	if _, err := ExpandArgs(map[string]wire.RawArg{"name": {"${QUACK_MISSING}"}}, target); err == nil || err.Error() != "arg 'name': environment variable 'QUACK_MISSING' is not set" {
+		t.Errorf("missing: got %v", err)
+	}
+}
+
+var target = device.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}
+
+var actions = []wire.Action{
+	{ID: "app.params", Params: []wire.Param{
+		{Name: "text", Type: wire.ParamTypeString, Presence: wire.Optional{}},
+		{Name: "tag", Type: wire.ParamTypeStringList, Presence: wire.Default{Values: []string{"a", "b"}}},
+	}},
+}
+
+// A key without a value gives the key no values.
+func call(action string, keysAndValues ...string) Call {
+	args := map[string]wire.RawArg{}
+	for i := 0; i < len(keysAndValues); i += 2 {
+		key := keysAndValues[i]
+		args[key] = append(args[key], keysAndValues[i+1:min(i+2, len(keysAndValues))]...)
+		if args[key] == nil {
+			args[key] = wire.RawArg{}
+		}
+	}
+	return Call{Action: action, Args: args}
+}
+
+type fakeApp struct {
+	starts   []client.StartMode
+	commands []string
+	output   adb.Output
+}
+
+func (a *fakeApp) Target() device.Target { return target }
+
+func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
+	a.commands = append(a.commands, cmd)
+	return a.output, nil
+}
+
+func (a *fakeApp) Call(_ context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error) {
+	notify(wire.Notification{Message: "greeting", Data: json.RawMessage(`{"name":"` + call.Args["name"][0] + `"}`)})
+	return wire.MessageResult{Message: "Hello, " + call.Args["name"][0] + "!"}, nil
+}
+
+func (a *fakeApp) Start(mode client.StartMode) error {
+	a.starts = append(a.starts, mode)
+	return nil
 }

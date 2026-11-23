@@ -17,6 +17,8 @@ import (
 	"quack/internal/client"
 	"quack/internal/device"
 	"quack/internal/recipe"
+	"quack/internal/session"
+	"quack/internal/step"
 	"quack/internal/tui"
 	"quack/internal/wire"
 )
@@ -33,9 +35,9 @@ func Run(args []string, terminal Terminal) int {
 	code, message, exit := failure(err)
 	if opts.json {
 		outcome := outcomeJSON{Code: code, Message: message}
-		var step *stepError
-		if errors.As(err, &step) {
-			outcome.Step = step.step
+		var failed *session.StepError
+		if errors.As(err, &failed) {
+			outcome.Step = failed.Step
 		}
 		printJSON(terminal.Out, outcome)
 	} else {
@@ -247,19 +249,14 @@ func run(opts options, terminal Terminal) error {
 		}
 		return nil
 	}
-	args, err := recipe.ExpandArgs(opts.args, app.Target())
+	args, err := step.ExpandArgs(opts.args, app.Target())
 	if err != nil {
 		return usageErrorf("%v", err)
 	}
 	if opts.recipe != "" {
-		return runRecipe(app, cookbook, opts.recipe, args, terminal, opts.json)
+		return runPrinted(app, cookbook, session.Runnable{Name: opts.recipe, Recipe: true}, args, terminal, opts.json)
 	}
-	result, err := app.Call(context.Background(), wire.Call{Action: opts.action, Args: args}, printNotifications(terminal, opts.json, 0))
-	if err != nil {
-		return err
-	}
-	printResult(terminal, opts.json, result, 0)
-	return nil
+	return runPrinted(app, nil, session.Runnable{Name: opts.action}, args, terminal, opts.json)
 }
 
 func printResult(terminal Terminal, json bool, result wire.MessageResult, step int) {
@@ -311,16 +308,14 @@ func parseArgs(words []string) (map[string]wire.RawArg, error) {
 	return args, nil
 }
 
-func printNotifications(terminal Terminal, json bool, step int) client.NotificationFunc {
-	return func(notification wire.Notification) {
-		if json {
-			printJSON(terminal.Out, notificationJSON{Code: codeNotification, Message: notification.Message, Data: notification.Data, Step: step})
-			return
-		}
-		fmt.Fprintln(terminal.Out, notification.Message)
-		if notification.Data != nil {
-			fmt.Fprintln(terminal.Out, notification.IndentedData())
-		}
+func printNotification(terminal Terminal, json bool, notification wire.Notification, step int) {
+	if json {
+		printJSON(terminal.Out, notificationJSON{Code: codeNotification, Message: notification.Message, Data: notification.Data, Step: step})
+		return
+	}
+	fmt.Fprintln(terminal.Out, notification.Message)
+	if notification.Data != nil {
+		fmt.Fprintln(terminal.Out, notification.IndentedData())
 	}
 }
 
