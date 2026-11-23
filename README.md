@@ -97,6 +97,8 @@ export const greetAndGoBack = quack.recipe({
 
 A recipe can run actions (`quack.runAction`), open the app (`quack.openApp`), wait (`quack.wait`, `quack.waitUntil`), and run commands on the phone (`quack.shell`) or on your computer (`quack.run`). A step that fails throws, so the recipe stops unless it catches the error. Recipes can import your own files, but not npm packages.
 
+A param with `env: "QUACK_TOKEN"` takes that environment variable's value when the run leaves it out. quack shows it as `${QUACK_TOKEN}`, not its value, wherever it lists or logs the recipe.
+
 Run it with `quack --recipe greetAndGoBack name=Goose`, or type `$greetAndGoBack` in `quack`.
 
 ## Use it with AI agents

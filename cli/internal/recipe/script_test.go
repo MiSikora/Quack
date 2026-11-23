@@ -521,6 +521,41 @@ export const r = quack.recipe({
 	}
 }
 
+func TestAParamTakesItsEnvironmentVariableWhenTheRunLeavesItOut(t *testing.T) {
+	t.Setenv("QUACK_CODE", "s3cret")
+	os.Unsetenv("QUACK_MISSING")
+	s := load(t, `
+import quack from "quack"
+export const set = quack.recipe({
+  params: { code: { type: "string", required: true, env: "QUACK_CODE" } },
+  run({ code }) { quack.runAction("app.greet", { name: code }) },
+})
+export const unset = quack.recipe({
+  params: { code: { type: "string", required: true, env: "QUACK_MISSING" } },
+  run() {},
+})`)
+	app := &fakeApp{}
+	var started []string
+
+	err := s.Run(context.Background(), app, "set", nil, Observer{Started: func(step Step) { started = append(started, Line(step, nil)) }})
+
+	if want := (wire.Default{Values: []string{"${QUACK_CODE}"}}); !reflect.DeepEqual(s.Recipes[0].Params[0].Presence, want) {
+		t.Errorf("set presence: got %v, want %v", s.Recipes[0].Params[0].Presence, want)
+	}
+	if want := []string{"app.greet name=s3cret"}; err != nil || !reflect.DeepEqual(app.calls, want) {
+		t.Errorf("calls: got %v, %v, want %v", app.calls, err, want)
+	}
+	if want := []string{"app.greet name='${QUACK_CODE}'"}; !reflect.DeepEqual(started, want) {
+		t.Errorf("started: got %v, want %v", started, want)
+	}
+	if want := (wire.Required{}); !reflect.DeepEqual(s.Recipes[1].Params[0].Presence, want) {
+		t.Errorf("unset presence: got %v, want %v", s.Recipes[1].Params[0].Presence, want)
+	}
+	if err := s.Run(context.Background(), app, "unset", nil, Observer{}); err == nil || !strings.HasSuffix(err.Error(), "missing argument 'code'") {
+		t.Errorf("unset: got %v", err)
+	}
+}
+
 func TestExpandArgsReplacesVariables(t *testing.T) {
 	t.Setenv("QUACK_NAME", "Bob")
 	os.Unsetenv("QUACK_MISSING")

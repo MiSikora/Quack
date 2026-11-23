@@ -41,6 +41,11 @@ interface ParamBase<K extends keyof ParamTypes> {
   default?: ParamTypes[K]
   /** Whether a run must give the param. A param with a default never needs one. */
   required?: boolean
+  /**
+   * The environment variable whose value the param takes when the run leaves it out. While it is set, it wins over
+   * default, a required param needs no value, and quack shows it as ${NAME} rather than its value.
+   */
+  env?: string
 }
 
 /** A param of a recipe, which the terminal UI asks for and the command line takes as key=value. */

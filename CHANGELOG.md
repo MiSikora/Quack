@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- CLI: a recipe param with `env: "NAME"` takes that environment variable's value when the run leaves it out, and shows as `${NAME}`.
+
 ### Changed
 - CLI: enter on a recipe with params in the terminal UI opens its params box even when they are all optional.
 

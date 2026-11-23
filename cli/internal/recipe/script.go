@@ -161,6 +161,10 @@ func (s *Script) Run(ctx context.Context, app App, name string, args map[string]
 		return err
 	}
 	r := newRuntime(s, ctx, app, observer)
+	// Steps show the variables of params by name too, as if the recipe read them.
+	for _, variable := range s.Recipes[at].env {
+		r.env.Get(variable)
+	}
 	exports, err := r.load()
 	if err != nil {
 		return err
@@ -266,9 +270,15 @@ func (r *runtime) recipe(definition *goja.Object) goja.Value {
 	if params := definition.Get("params"); params != nil && !goja.IsUndefined(params) {
 		object := params.ToObject(vm)
 		for _, name := range object.Keys() {
-			p, err := param(name, object.Get(name).Export())
+			p, variable, err := param(name, object.Get(name).Export())
 			if err != nil {
 				panic(vm.NewTypeError(err.Error()))
+			}
+			if variable != "" {
+				if declared.env == nil {
+					declared.env = map[string]string{}
+				}
+				declared.env[name] = variable
 			}
 			declared.Params = append(declared.Params, p)
 		}
@@ -279,16 +289,17 @@ func (r *runtime) recipe(definition *goja.Object) goja.Value {
 	return handle
 }
 
-func param(name string, declaration any) (wire.Param, error) {
+// The variable comes back only while it is set, and the param then shows it as its default.
+func param(name string, declaration any) (wire.Param, string, error) {
 	fields, ok := declaration.(map[string]any)
 	if !ok {
-		return wire.Param{}, fmt.Errorf("param '%s' must be an object with a type", name)
+		return wire.Param{}, "", fmt.Errorf("param '%s' must be an object with a type", name)
 	}
 	p := wire.Param{Name: name, Presence: wire.Optional{}}
 	text := func(key string) string { s, _ := fields[key].(string); return s }
 	p.Type, p.Description = wire.ParamType(text("type")), text("description")
 	if !slices.Contains(paramTypes, p.Type) {
-		return wire.Param{}, fmt.Errorf("param '%s' has type '%s', not one of %s", name, p.Type, joinTypes())
+		return wire.Param{}, "", fmt.Errorf("param '%s' has type '%s', not one of %s", name, p.Type, joinTypes())
 	}
 	for key, list := range map[string]*[]string{"hints": &p.Hints, "choices": &p.Choices} {
 		if fields[key] == nil {
@@ -296,12 +307,12 @@ func param(name string, declaration any) (wire.Param, error) {
 		}
 		values, ok := rawValues(fields[key])
 		if !ok {
-			return wire.Param{}, fmt.Errorf("param '%s': %s must be an array of strings", name, key)
+			return wire.Param{}, "", fmt.Errorf("param '%s': %s must be an array of strings", name, key)
 		}
 		*list = values
 	}
 	if p.Type == wire.ParamTypeEnum && len(p.Choices) == 0 {
-		return wire.Param{}, fmt.Errorf("param '%s' is an enum without choices", name)
+		return wire.Param{}, "", fmt.Errorf("param '%s' is an enum without choices", name)
 	}
 	if required, _ := fields["required"].(bool); required {
 		p.Presence = wire.Required{}
@@ -309,11 +320,22 @@ func param(name string, declaration any) (wire.Param, error) {
 	if value, given := fields["default"]; given && value != nil {
 		values, ok := rawValues(value)
 		if !ok || slices.ContainsFunc(values, func(v string) bool { return !parses(p, v) }) {
-			return wire.Param{}, fmt.Errorf("param '%s': its default is not a %s", name, expected(p))
+			return wire.Param{}, "", fmt.Errorf("param '%s': its default is not a %s", name, expected(p))
 		}
 		p.Presence = wire.Default{Values: values}
 	}
-	return p, nil
+	if fields["env"] == nil {
+		return p, "", nil
+	}
+	variable, ok := fields["env"].(string)
+	if !ok || !isVariable(variable) {
+		return wire.Param{}, "", fmt.Errorf("param '%s': env must name an environment variable", name)
+	}
+	if os.Getenv(variable) == "" {
+		return p, "", nil
+	}
+	p.Presence = wire.Default{Values: []string{"${" + variable + "}"}}
+	return p, variable, nil
 }
 
 var paramTypes = []wire.ParamType{wire.ParamTypeString, wire.ParamTypeInt, wire.ParamTypeLong, wire.ParamTypeDouble,
@@ -483,6 +505,9 @@ func recipeArgs(r Recipe, args map[string]wire.RawArg) (map[string]any, error) {
 				return nil, fail("missing argument '%s'", p.Name)
 			case wire.Default:
 				raw = presence.Values
+				if variable, ok := r.env[p.Name]; ok {
+					raw = wire.RawArg{os.Getenv(variable)}
+				}
 			default:
 				continue
 			}

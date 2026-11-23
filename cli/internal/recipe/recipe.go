@@ -24,6 +24,8 @@ type Recipe struct {
 	Name        string
 	Description string
 	Params      []wire.Param
+	// The environment variable of each param that takes one, while it is set.
+	env map[string]string
 }
 
 type Step interface{ step() }
