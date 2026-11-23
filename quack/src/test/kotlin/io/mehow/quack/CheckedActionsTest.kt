@@ -17,8 +17,9 @@ class CheckedActionsTest {
   }
 
   @Test
-  fun `serve ids with capitals, dots, underscores and dashes`() {
-    val actions = listOf("App.greet", "account-create", "app..greet", ".app", "_app", "app_greet").map { FakeAction(id = it) }
+  fun `serve ids with capitals, digits, dots, underscores and dashes`() {
+    val actions =
+      listOf("App.greet", "account-create", "app..greet", ".app", "_app", "app_greet", "app2", "1st").map { FakeAction(id = it) }
 
     val checked = checkActions(actions)
 
@@ -28,7 +29,7 @@ class CheckedActionsTest {
 
   @Test
   fun `do not serve actions with ids the CLI cannot pass`() {
-    val ids = listOf("", " ", "-help", "/exit", "\$login", "app greet", "app\tgreet", "app2", "app:greet", "zażółć")
+    val ids = listOf("", " ", "-help", "/exit", "\$login", "app greet", "app\tgreet", "app:greet", "zażółć")
     val malformed = ids.map { FakeAction(id = it) }
     val valid = FakeAction(id = "app.greet")
 

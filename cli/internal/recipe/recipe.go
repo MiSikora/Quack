@@ -293,10 +293,10 @@ func expected(p wire.Param) string {
 	return string(p.Type)
 }
 
-// Follows the rules of action ids: ASCII letters, '_', '.' and '-', and no '-' first, which would read as a flag.
+// Follows the rules of action ids: ASCII letters, digits, '_', '.' and '-', and no '-' first, which would read as a flag.
 func isName(name string) bool {
 	return name != "" && name[0] != '-' && strings.IndexFunc(name, func(r rune) bool {
-		return !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || strings.ContainsRune("_.-", r))
+		return !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || strings.ContainsRune("_.-", r))
 	}) < 0
 }
 

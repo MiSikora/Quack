@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### SDK
 
 #### Changed
-- An action's id holds only ASCII letters, `_`, `.` and `-`, and does not start with `-`. The server leaves out other actions, or throws after `throwOnMisconfiguration()`.
+- An action's id holds only ASCII letters, digits, `_`, `.` and `-`, and does not start with `-`. The server leaves out other actions, or throws after `throwOnMisconfiguration()`.
 
 ### CLI
 

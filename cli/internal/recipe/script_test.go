@@ -84,6 +84,21 @@ const helper = quack.recipe({ run() {} })`)
 	}
 }
 
+func TestARecipeNameHoldsDigits(t *testing.T) {
+	s := load(t, `
+import quack from "quack"
+quack.recipe({ name: "seed100", run() {} })
+export const login2fa = quack.recipe({ run() {} })`)
+
+	var names []string
+	for _, r := range s.Recipes {
+		names = append(names, r.Name)
+	}
+	if want := []string{"login2fa", "seed100"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("got %v, want %v", names, want)
+	}
+}
+
 func TestLoadReadsAJavaScriptFile(t *testing.T) {
 	writeFile(t, "recipes.js", `import quack from "quack"
 export const clean = quack.recipe({ description: "Clean", run() {} })`)
@@ -123,16 +138,14 @@ export const a = quack.recipe({ params: { x: { type: "int", default: "many" } },
 		{`import quack from "quack"
 export const a = quack.recipe({ description: "no run" })`, "TypeError: recipe() takes a definition with a run function"},
 		{`import quack from "quack"
-export const $a = quack.recipe({ run() {} })`, "recipe '$a': its name may hold only ASCII letters, '_', '.' and '-', and must not start with '-'"},
+export const $a = quack.recipe({ run() {} })`, "recipe '$a': its name may hold only ASCII letters, digits, '_', '.' and '-', and must not start with '-'"},
 		{`import quack from "quack"
 quack.openApp()`, `TypeError: the "quack" module runs steps only inside a recipe's run`},
 		{`import quack from "quack"
-quack.recipe({ name: "$a", run() {} })`, "recipe '$a': its name may hold only ASCII letters, '_', '.' and '-', and must not start with '-'"},
+quack.recipe({ name: "$a", run() {} })`, "recipe '$a': its name may hold only ASCII letters, digits, '_', '.' and '-', and must not start with '-'"},
 		{`import quack from "quack"
 quack.recipe({ name: "a", run() {} })
 export const a = quack.recipe({ run() {} })`, "two recipes are named 'a'"},
-		{`import quack from "quack"
-export const reset2 = quack.recipe({ run() {} })`, "recipe 'reset2': its name may hold only"},
 		{`import quack from "quack"
 quack.recipe({ name: "-reset", run() {} })`, "recipe '-reset': its name may hold only"},
 		{`import quack from "quack"

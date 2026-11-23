@@ -35,7 +35,7 @@ class GreetAction : QuackAction {
 }
 ```
 
-An id holds letters, `_`, `.` and `-`. Dots group actions by namespace, such as `app.` here, when you browse them in `quack`.
+An id holds letters, digits, `_`, `.` and `-`. Dots group actions by namespace, such as `app.` here, when you browse them in `quack`.
 
 While it runs, an action can report progress with `terminal.send("Syncing")`, and hand over data as JSON with `terminal.send("Pairing code", json = """{"code": "$code"}""")`. `Outcome.Ok` takes `json` the same way.
 

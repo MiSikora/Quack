@@ -275,7 +275,7 @@ func (r *runtime) named(exports *goja.Object) ([]declaredRecipe, error) {
 	slices.SortFunc(named, func(a, b declaredRecipe) int { return strings.Compare(a.Name, b.Name) })
 	for i, declared := range named {
 		if !isName(declared.Name) {
-			return nil, fmt.Errorf("recipe '%s': its name may hold only ASCII letters, '_', '.' and '-', and must not start with '-'", declared.Name)
+			return nil, fmt.Errorf("recipe '%s': its name may hold only ASCII letters, digits, '_', '.' and '-', and must not start with '-'", declared.Name)
 		}
 		if i > 0 && named[i-1].Name == declared.Name {
 			return nil, fmt.Errorf("two recipes are named '%s'", declared.Name)
