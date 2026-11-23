@@ -35,9 +35,7 @@ class GreetAction : QuackAction {
 }
 ```
 
-An id holds letters, digits, `_`, `.` and `-`. Dots group actions by namespace, such as `app.` here, when you browse them in `quack`.
-
-While it runs, an action can report progress with `terminal.send("Syncing")`, and hand over data as JSON with `terminal.send("Pairing code", json = """{"code": "$code"}""")`. `Outcome.Ok` takes `json` the same way.
+Dots in an id group actions by namespace, such as `app.`. An action can report progress with `terminal.send("Syncing")` and hand over JSON with `terminal.send("Pairing code", json = """{"code": "$code"}""")`. `Outcome.Ok` takes `json` too.
 
 Start Quack when your app starts:
 
@@ -61,98 +59,53 @@ Install the `quack` command with Homebrew:
 brew install MiSikora/tap/quack
 ```
 
-Connect your phone or start an emulator, then run `quack`. It lets you pick a device and an app, search the actions, and run them. Your app doesn't need to be open. When there is only one app to pick, `quack` connects to it by itself. Type `/` for commands, such as `/pick-device` to switch to another device, and press ↑ on an empty prompt to browse the actions.
+Connect a phone or start an emulator, then run `quack` to pick a device and an app, search the actions, and run them. Type `/` for commands and ↑ on an empty prompt to browse.
 
-`quack` reads its settings from `~/.config/quack/config.toml`:
+Settings live in `~/.config/quack/config.toml`:
 
 ```toml
-show-data = false        # show the JSON data of notifications and results, which /toggle-data flips
-group-namespaces = true  # group the actions that share a namespace when you browse them
+show-data = false        # show the JSON data of notifications and results; /toggle-data flips it
+group-namespaces = true  # group actions by namespace when browsing
 ```
 
-You can also run an action directly, which is handy in scripts:
-
-```
-quack app.greet name=Duck
-```
-
-Run `quack --help` to see everything else.
+Run an action directly, for example in a script, with `quack app.greet name=Duck`. See `quack --help` for the rest.
 
 ## Script your setups as recipes
 
-A recipe is a small TypeScript or JavaScript function that runs actions and commands, and decides what to do with what they return. A project keeps its recipes in a `.quack/` dir, which quack finds in the dir you run it from or above it, up to your home dir. To start one, with a first recipe and what your editor needs to autocomplete and check it, run this in your project:
+A recipe is a TypeScript or JavaScript function that runs actions and commands and acts on what they return. Start a project's recipes with:
 
 ```
 quack --init-recipes --app <app package>
 ```
 
-or type `/init-recipes` in `quack`. Commit the whole `.quack/` dir, type files included, so that your team shares the recipes.
-
-`.quack/quack.toml` maps apps to files in `.quack/recipes/`:
-
-```toml
-[recipes]
-'com\.example\.app' = "recipes.ts"
-'com\.example\..*' = ["accounts.ts", "sync.ts"]
-```
-
-Each key is a regex that has to match the whole package. Keep it in single quotes, which TOML leaves as written, so that `\.` reaches the regex. Each value is a path in `recipes/`, or an array of them, and a path can be in a subdir, such as `"features/login.ts"`, or a glob, such as `"features/*.ts"`. A glob's `*`, `?` and `[...]` match within one dir. An app gets the recipes that every file a matching key names declares itself. Recipes of your own go in the same kind of `[recipes]` table in `~/.config/quack/config.toml`, with the files in `~/.config/quack/recipes/`. quack merges both, and fails to load an app's recipes when two of them share a name. quack warns when the type files are older than it, and `/init-recipes` then updates them. They change only when the recipe API does, not with every quack release. When a teammate's newer quack wrote them, quack asks you to upgrade instead of writing older ones over them.
-
-Each recipe needs a `name`, which quack lists it by:
-
-```ts
-import quack from "quack"
-
-quack.recipe({
-  name: "greetAndGoBack",
-  description: "Open the app, say hello, then press back",
-  params: { name: { type: "string", default: "Duck", hints: ["Duck", "Goose"] } },
-  run({ name }) {
-    quack.openApp()
-    quack.wait("1s")
-    const greeting = quack.runAction("app.greet", { name })
-    console.log(greeting.message)
-    quack.shell("input keyevent KEYCODE_BACK")
-  },
-})
-```
-
-A recipe can run actions (`quack.runAction`), open the app (`quack.openApp`), wait (`quack.wait`, `quack.waitUntil`), and run commands on the phone (`quack.shell`) or on your computer (`quack.run`). A step that fails throws, so the recipe stops unless it catches the error. Recipes can import your own files, but not npm packages.
-
-Recipes build on each other. `quack.runRecipe` runs another recipe with args and returns what it returned. Its steps show under a `recipe <name>` line, as if the caller took them. A recipe can return any value JSON holds, and `quack --recipe` prints it after the last step. `quack.waitUntil` returns the first truthy value of its check, and `quack.fail("message")` ends the run with that message:
-
-```ts
-export const signIn = quack.recipe({
-  name: "signIn",
-  params: { user: { type: "string", required: true } },
-  run({ user }) {
-    return quack.runAction<{ token: string }>("account.signIn", { user }).data
-  },
-})
-
-export const seed = quack.recipe({
-  name: "seed",
-  run() {
-    const { token } = quack.runRecipe(signIn, { user: "duck" })
-    const id = quack.waitUntil(() => quack.runAction<{ id?: string }>("sync.status").data.id)
-    if (!token) quack.fail("signing in gave no token")
-    return { token, id }
-  },
-})
-```
-
-A param with `env: "QUACK_TOKEN"` takes that environment variable's value when the run leaves it out. quack shows it as `${QUACK_TOKEN}`, not its value, wherever it lists or logs the recipe.
-
-Run it with `quack --recipe greetAndGoBack name=Goose`, or find it in `quack`, which lists recipes with the actions and marks them `ƒ`. Type `$` there to list only the recipes.
-
-### Growing past one file
-
-When one file gets long, split the recipes into a dir and map a glob to it, with helpers next to it in a dir that no key names:
+or `/init-recipes` in `quack`. This creates `.quack/`, which you commit. `.quack/quack.toml` maps apps to files in `.quack/recipes/`:
 
 ```toml
 [recipes]
 'com\.example(\.debug)?' = ["features/*.ts"]
 ```
+
+Keys are regexes matching the whole package, in single quotes. Values are paths or globs in `recipes/`. Personal recipes go in the same kind of table in `~/.config/quack/config.toml`, with files in `~/.config/quack/recipes/`.
+
+```ts
+// .quack/recipes/features/greet.ts
+import quack from "quack"
+
+quack.recipe({
+  name: "greetAndGoBack",
+  description: "Open the app, say hello, then press back",
+  params: { name: { type: "string", default: "Duck" } },
+  run({ name }) {
+    quack.openApp()
+    console.log(quack.runAction("app.greet", { name }).message)
+    quack.shell("input keyevent KEYCODE_BACK")
+  },
+})
+```
+
+Run it with `quack --recipe greetAndGoBack name=Goose`, or find it in `quack`, where recipes are marked `ƒ` and `$` lists only them. A step that fails throws. `quack.d.ts` in `.quack/recipes/` documents the whole API.
+
+Recipes can run other recipes and import your own files, but not npm packages. Only a recipe declared in a mapped file is listed, so shared recipes can live in an unmapped dir:
 
 ```ts
 // .quack/recipes/lib/accounts.ts
@@ -162,7 +115,7 @@ export const signIn = quack.recipe({
   name: "signIn",
   params: { user: { type: "string", required: true } },
   run({ user }) {
-    quack.runAction("account.signIn", { user })
+    return quack.runAction<{ token: string }>("account.signIn", { user }).data
   },
 })
 ```
@@ -175,13 +128,11 @@ import { signIn } from "../lib/accounts"
 quack.recipe({
   name: "checkout",
   run() {
-    quack.runRecipe(signIn, { user: "duck" })
-    quack.runAction("cart.fill")
+    const { token } = quack.runRecipe(signIn, { user: "duck" })
+    quack.runAction("cart.fill", { token })
   },
 })
 ```
-
-quack lists a recipe only when a mapped file declares it, so the app gets `checkout` and not `signIn`. Importing a recipe from another file lets a recipe run it with `quack.runRecipe`, and never lists it, even when that file is mapped too: its recipes list from its own mapping.
 
 ## Use it with AI agents
 
