@@ -51,6 +51,8 @@ type model struct {
 	activity activity
 	app      App
 	target   client.Target
+	// Counts the apps connected and dropped, so that a reload's answer applies only to the app that asked.
+	connection int
 	// The flags choose how the first pick starts its app, and Wake starts every later one.
 	mode    client.StartMode
 	devices []seenDevice
@@ -108,6 +110,8 @@ type described struct {
 	actions []wire.Action
 	err     error
 	recipes recipes
+	// The connection it answers; a reply to one that ended is dropped.
+	connection int
 }
 
 type recipes struct {
@@ -459,10 +463,10 @@ func (m *model) openBox(r runnable) tea.Cmd {
 
 // The answer goes through activity, so that it comes after the status lines on the way to it.
 func (m *model) reload() tea.Cmd {
-	app, activity, dir, pkg := m.app, m.activity, m.dir, m.target.Package
+	app, activity, dir, pkg, connection := m.app, m.activity, m.dir, m.target.Package, m.connection
 	return func() tea.Msg {
 		hello, actions, err := app.Describe(activity.ctx)
-		activity.send(described{hello, actions, err, loadRecipes(dir, pkg)})
+		activity.send(described{hello, actions, err, loadRecipes(dir, pkg), connection})
 		return nil
 	}
 }
@@ -514,6 +518,9 @@ func (m *model) clear() tea.Cmd {
 }
 
 func (m *model) describe(msg described) {
+	if msg.connection != m.connection {
+		return
+	}
 	m.setRecipes(msg.recipes)
 	if msg.err != nil {
 		m.log.add(problemStyle.Render("reload: " + msg.err.Error()))
@@ -635,6 +642,7 @@ func (m *model) connected(msg connected) tea.Cmd {
 		return m.advance()
 	}
 	m.app, m.target, m.hello, m.mode = msg.app, msg.target, msg.hello, client.Wake
+	m.connection++
 	m.picker = nil
 	m.prompt.clear()
 	m.prompt.connect(true)
@@ -757,6 +765,7 @@ func (m *model) drop(line string) tea.Cmd {
 	m.log.add(statusStyle.Render(line))
 	m.runs.stop()
 	m.app = nil
+	m.connection++
 	m.picker = nil
 	m.refused.showing = false
 	m.prompt.clear()
