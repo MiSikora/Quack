@@ -474,7 +474,7 @@ func TestQuestionMarkIsAnOrdinaryCharacter(t *testing.T) {
 	h.waitFor("no match", "> ?")
 }
 
-func TestEnterRunsAnActionWithoutRequiredParamsAndPrintsItsError(t *testing.T) {
+func TestEnterRunsAnActionWithoutParamsAndPrintsItsError(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
 
@@ -1023,6 +1023,21 @@ export const login = quack.recipe({
 	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"bob"}, "times": {"1"}}}}
 	if got := app.received(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestEnterOnAnActionWithOnlyOptionalParamsOpensTheBoxAndRunsWithoutThem(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+
+	h.typing("app.params")
+	h.press("enter")
+	h.waitFor("▸ text", "› app.params\n")
+	h.press("enter", "enter", "enter", "enter", "enter", "enter", "enter")
+
+	h.waitForLog("› app.params\ndone · ")
+	if got := app.received(); len(got) != 1 || len(got[0].Args) != 0 {
+		t.Errorf("calls: got %v, want app.params without args", got)
 	}
 }
 
