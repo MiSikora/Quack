@@ -176,8 +176,17 @@ func initRecipes(w io.Writer, pkg string) error {
 	if pkg == "" {
 		fmt.Fprintln(w, "Map apps to recipe files under [recipes] in .quack/quack.toml, or in "+config.Path()+".\n"+
 			"quack --init-recipes --app <package> starts .quack/ here.")
-	} else {
-		fmt.Fprintln(w, "The recipes of "+pkg+" are in the files that [recipes] in .quack/quack.toml maps it to.")
+		return nil
+	}
+	mapped, err := recipe.Maps(dir, pkg)
+	switch {
+	case err != nil:
+		return err
+	case mapped:
+		fmt.Fprintln(w, "The recipes of "+pkg+" are in the files that [recipes] maps it to.")
+	default:
+		fmt.Fprintln(w, "Nothing maps "+pkg+" to a recipes file yet. Add a line under [recipes] in .quack/quack.toml, such as\n"+
+			"'"+regexp.QuoteMeta(pkg)+"' = \"recipes.ts\"")
 	}
 	return nil
 }

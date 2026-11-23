@@ -96,7 +96,7 @@ or type `/init-recipes` in `quack`. Commit the whole `.quack/` dir, type files i
 'com\.example\..*' = ["accounts.ts", "sync.ts"]
 ```
 
-Each key is a regex that has to match the whole package. Keep it in single quotes, which TOML leaves as written, so that `\.` reaches the regex. An app gets the recipes of every file that a matching key names. Files no key names can still be imported by those that are. Recipes of your own go in the same kind of `[recipes]` table in `~/.config/quack/config.toml`, with the files in `~/.config/quack/recipes/`. quack merges both, and fails to load an app's recipes when two of them share a name. Run `/init-recipes` again after updating quack, so that the type files match it.
+Each key is a regex that has to match the whole package. Keep it in single quotes, which TOML leaves as written, so that `\.` reaches the regex. An app gets the recipes of every file that a matching key names. Files no key names can still be imported by those that are. Recipes of your own go in the same kind of `[recipes]` table in `~/.config/quack/config.toml`, with the files in `~/.config/quack/recipes/`. quack merges both, and fails to load an app's recipes when two of them share a name. quack warns when the type files are older than it, and `/init-recipes` then updates them. They change only when the recipe API does, not with every quack release. When a teammate's newer quack wrote them, quack asks you to upgrade instead of writing older ones over them.
 
 Each recipe gets the name it declares, or else the name of its export:
 

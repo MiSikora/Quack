@@ -27,6 +27,8 @@ type script struct {
 	path string
 	// Sorted by name.
 	recipes []Recipe
+	// The source of each recipe by name, as declaredRecipe has it.
+	sources map[string]string
 	code    string
 }
 
@@ -64,7 +66,7 @@ func loadScript(path string) (*script, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &script{path: path, code: code}
+	s := &script{path: path, code: code, sources: map[string]string{}}
 	r := newRuntime(s, nil, nil, Observer{})
 	exports, err := r.load()
 	if err != nil {
@@ -76,6 +78,7 @@ func loadScript(path string) (*script, error) {
 	}
 	for _, declared := range named {
 		s.recipes = append(s.recipes, declared.Recipe)
+		s.sources[declared.Name] = declared.source
 	}
 	return s, nil
 }
@@ -137,6 +140,18 @@ type declaredRecipe struct {
 	run goja.Callable
 	// The name of the first export that holds a recipe without a name of its own.
 	exported string
+	// The absolute path of the file whose code declares it: the script's, or one the script imports.
+	source string
+}
+
+// The file of the code that called into Go, as the source map gives it. "" when it is unknown.
+func (r *runtime) caller() string {
+	for _, frame := range r.vm.CaptureCallStack(0, nil) {
+		if file := frame.Position().Filename; file != "" {
+			return filepath.Join(filepath.Dir(r.script.path), file)
+		}
+	}
+	return ""
 }
 
 func newRuntime(s *script, ctx context.Context, app App, observer Observer) *runtime {
@@ -208,7 +223,7 @@ func (r *runtime) recipe(definition *goja.Object) goja.Value {
 	if !ok {
 		panic(vm.NewTypeError("recipe() takes a definition with a run function"))
 	}
-	declared := declaredRecipe{Recipe: Recipe{File: r.script.path}, run: run}
+	declared := declaredRecipe{Recipe: Recipe{File: r.script.path}, run: run, source: r.caller()}
 	if description := definition.Get("description"); description != nil && !goja.IsUndefined(description) {
 		declared.Description = description.String()
 	}

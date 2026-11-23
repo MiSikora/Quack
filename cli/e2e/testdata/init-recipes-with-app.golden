@@ -7,6 +7,6 @@ wrote $PWD/.quack/recipes/quack.d.ts
 wrote $PWD/.quack/recipes/tsconfig.json
 wrote $PWD/.quack/quack.toml
 wrote $PWD/.quack/recipes/recipes.ts
-The recipes of io.mehow.quack.sample are in the files that [recipes] in .quack/quack.toml maps it to.
+The recipes of io.mehow.quack.sample are in the files that [recipes] maps it to.
 --- stderr
 --- device

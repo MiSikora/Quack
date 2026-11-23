@@ -1711,6 +1711,23 @@ func TestInitRecipesStartsTheRecipesOfTheAppAndListsThem(t *testing.T) {
 	h.waitForLog("the recipe files are up to date")
 }
 
+func TestInitRecipesSaysWhenTheProjectLeavesTheAppUnmapped(t *testing.T) {
+	h := start(t, newFakeApp())
+	h.resize(300, 30)
+	project := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), ".quack")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "quack.toml"), []byte("[recipes]\n'io\\.other' = \"other.ts\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h.typing("/init-recipes")
+	h.press("enter")
+
+	h.waitForLog(`nothing maps io.mehow.quack.sample to a recipes file yet: add a line under [recipes] in .quack/quack.toml, such as 'io\.mehow\.quack\.sample' = "recipes.ts"`)
+}
+
 func TestCtrlOOpensTheAppEvenDuringARun(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"quack/internal/config"
@@ -67,6 +68,10 @@ func Load(dir, pkg string) (*Cookbook, []string, error) {
 			return nil, nil, err
 		}
 		for _, r := range s.recipes {
+			// A mapped file that another one imports has its recipes itself.
+			if source := s.sources[r.Name]; source != path && slices.Contains(paths, source) {
+				continue
+			}
 			if at := slices.IndexFunc(cookbook.Recipes, func(other Recipe) bool { return other.Name == r.Name }); at >= 0 {
 				return nil, nil, fmt.Errorf("recipe '%s' is in both %s and %s", r.Name, cookbook.Recipes[at].File, path)
 			}
@@ -76,8 +81,11 @@ func Load(dir, pkg string) (*Cookbook, []string, error) {
 	}
 	slices.SortFunc(cookbook.Recipes, func(a, b Recipe) int { return strings.Compare(a.Name, b.Name) })
 	for _, dir := range dirs {
-		if staleTypes(dir) {
+		switch typesIn(dir) {
+		case olderTypes:
 			warnings = append(warnings, "the recipe types in "+dir+" are out of date: init-recipes updates them")
+		case newerTypes:
+			warnings = append(warnings, newerTypesProblem(dir))
 		}
 	}
 	return cookbook, warnings, nil
@@ -121,6 +129,15 @@ func Init(dir, pkg string) ([]string, error) {
 		return written, err
 	}
 	return append(written, recipes), nil
+}
+
+// Maps reports whether a [recipes] table of the project that dir is in, or of the user's config, maps pkg to a file.
+func Maps(dir, pkg string) (bool, error) {
+	tables, _, err := readTables(dir)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(tables, func(t table) bool { return len(t.files(pkg)) > 0 }), nil
 }
 
 var (
@@ -282,9 +299,13 @@ func home() string {
 	return filepath.Clean(dir)
 }
 
+// It leaves a dir whose types a newer quack wrote, so that a project's types do not go back to an older version.
 func writeTypes(dir string) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
+	}
+	if typesIn(dir) == newerTypes {
+		return nil, errors.New(newerTypesProblem(dir))
 	}
 	var written []string
 	for _, name := range slices.Sorted(maps.Keys(types)) {
@@ -300,14 +321,45 @@ func writeTypes(dir string) ([]string, error) {
 	return written, nil
 }
 
-// A missing file counts as out of date.
-func staleTypes(dir string) bool {
+func newerTypesProblem(dir string) string {
+	return "the recipe types in " + dir + " are from a newer quack: upgrade quack"
+}
+
+type typesState int
+
+const (
+	currentTypes typesState = iota
+	olderTypes
+	newerTypes
+)
+
+// The version of the recipe types goes up only when quack.d.ts or tsconfig.json change, so that quack's releases
+// leave the files of a project alone, and quacks of different versions that share a project tell which is newer.
+var typesVersionPattern = regexp.MustCompile(`recipe types (\d+)`)
+
+// 0 for a file without a version, such as one from before versions.
+func typesVersion(content []byte) int {
+	match := typesVersionPattern.FindSubmatch(content)
+	if match == nil {
+		return 0
+	}
+	version, _ := strconv.Atoi(string(match[1]))
+	return version
+}
+
+// A missing file, or one edited by hand, counts as older.
+func typesIn(dir string) typesState {
+	state := currentTypes
 	for name, content := range types {
-		if current, err := os.ReadFile(filepath.Join(dir, name)); err != nil || !bytes.Equal(current, content) {
-			return true
+		current, err := os.ReadFile(filepath.Join(dir, name))
+		switch {
+		case err == nil && typesVersion(current) > typesVersion(content):
+			return newerTypes
+		case err != nil || !bytes.Equal(current, content):
+			state = olderTypes
 		}
 	}
-	return false
+	return state
 }
 
 func exists(path string) bool {

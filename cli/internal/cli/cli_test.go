@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -68,5 +70,29 @@ func TestTUIOpensOnlyForAPersonAtATerminal(t *testing.T) {
 				t.Errorf("got %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+func TestInitRecipesSaysWhenNothingMapsTheApp(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.MkdirAll(filepath.Join(dir, ".quack"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".quack", "quack.toml"), []byte("[recipes]\n'io\\.a' = \"recipes.ts\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for pkg, want := range map[string]string{
+		"io.a": "The recipes of io.a are in the files that [recipes] maps it to.\n",
+		"io.b": "Nothing maps io.b to a recipes file yet. Add a line under [recipes] in .quack/quack.toml, such as\n'io\\.b' = \"recipes.ts\"\n",
+	} {
+		var out strings.Builder
+
+		err := initRecipes(&out, pkg)
+
+		if err != nil || !strings.HasSuffix(out.String(), want) {
+			t.Errorf("%s: got %q, %v, want it to end with %q", pkg, out.String(), err, want)
+		}
 	}
 }

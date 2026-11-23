@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -501,6 +502,13 @@ func (m *model) initRecipes() tea.Cmd {
 	}
 	if len(written) == 0 {
 		m.log.add(statusStyle.Render("the recipe files are up to date"))
+	}
+	switch mapped, err := recipe.Maps(m.dir, pkg); {
+	case err != nil:
+		m.log.add(problemStyle.Render("init-recipes: " + err.Error()))
+	case !mapped:
+		m.log.add(statusStyle.Render("nothing maps " + pkg + " to a recipes file yet: add a line under [recipes] in .quack/quack.toml, such as '" +
+			regexp.QuoteMeta(pkg) + "' = \"recipes.ts\""))
 	}
 	m.setRecipes(loadRecipes(m.dir, pkg))
 	return nil

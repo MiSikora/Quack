@@ -2,6 +2,8 @@ package recipe
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -116,6 +118,35 @@ export const hello = quack.recipe({ run() { greet() } })`)
 	}
 	app := &fakeApp{}
 	if _, err := c.Run(context.Background(), app, "hello", nil, Observer{}); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob"}) {
+		t.Errorf("run: got %v and calls %v", err, app.calls)
+	}
+}
+
+func TestAMappedFileThatAnotherImportsHasItsRecipesOnlyItself(t *testing.T) {
+	common := writeFile(t, "common.ts", `import quack from "quack"
+export const login = quack.recipe({ name: "login", run() { quack.runAction("app.login", { name: "Ann" }) } })
+export const seed = quack.recipe({ run() {} })
+export function greet() { quack.runAction("app.greet", { name: "Bob" }) }`)
+	debug := writeFile(t, "debug.ts", `import quack from "quack"
+import { greet, login } from "./common"
+export { seed } from "./common"
+export const reset = quack.recipe({ run() { greet(); quack.runRecipe(login) } })`)
+	writeConfig(t, "[recipes]\n'.*' = [\"common.ts\", \"debug.ts\"]\n")
+
+	c, err := loadApp(t)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, r := range c.Recipes {
+		files[r.Name] = r.File
+	}
+	if want := map[string]string{"login": common, "reset": debug, "seed": common}; !reflect.DeepEqual(files, want) {
+		t.Fatalf("got %v, want %v", files, want)
+	}
+	app := &fakeApp{}
+	if _, err := c.Run(context.Background(), app, "reset", nil, Observer{}); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob", "app.login name=Ann"}) {
 		t.Errorf("run: got %v and calls %v", err, app.calls)
 	}
 }
@@ -252,6 +283,43 @@ func TestLoadWritesNothingAndWarnsOfOutOfDateTypesInEachDirItLoadedFrom(t *testi
 	}
 	if _, warnings, _ := Load(t.TempDir(), "com.other"); warnings != nil {
 		t.Errorf("for an app without files: got %q, want no warnings", warnings)
+	}
+}
+
+// The hash of each version of the recipe types. A change to quack.d.ts or tsconfig.json raises the version in both and
+// adds its hash here, so that quacks sharing a project tell older types from newer ones.
+var typesHashes = map[int]string{
+	1: "089d231843cb3df7c40ef09c0e652b08c0615f7e72b6eeda739a653c0276d7f7",
+}
+
+func TestEachChangeOfTheRecipeTypesRaisesTheirVersion(t *testing.T) {
+	version := typesVersion(quackTypes)
+	if got := typesVersion(tsconfig); got != version {
+		t.Fatalf("quack.d.ts is recipe types %d and tsconfig.json %d, want the same", version, got)
+	}
+	hash := sha256.Sum256(append(slices.Clone(quackTypes), tsconfig...))
+	if got := hex.EncodeToString(hash[:]); typesHashes[version] != got {
+		t.Errorf("the recipe types changed: raise 'recipe types %d' in quack.d.ts and tsconfig.json, and add %q to typesHashes", version, got)
+	}
+}
+
+func TestLoadSaysToUpgradeQuackForTypesANewerQuackWrote(t *testing.T) {
+	dir := writeProject(t, "[recipes]\n'.*' = \"recipes.ts\"\n", map[string]string{"recipes.ts": recipeNamed("open")})
+	recipes := filepath.Join(dir, ".quack", "recipes")
+	newer := strings.Replace(string(quackTypes), "recipe types 1.", "recipe types 99.", 1)
+	os.WriteFile(filepath.Join(recipes, "quack.d.ts"), []byte(newer), 0o644)
+
+	_, warnings, err := Load(dir, pkg)
+
+	want := []string{"the recipe types in " + recipes + " are from a newer quack: upgrade quack"}
+	if err != nil || !reflect.DeepEqual(warnings, want) {
+		t.Errorf("got %q, %v, want %q", warnings, err, want)
+	}
+	if _, err := Init(dir, ""); err == nil || err.Error() != want[0] {
+		t.Errorf("Init: got %v, want %s", err, want[0])
+	}
+	if got, _ := os.ReadFile(filepath.Join(recipes, "quack.d.ts")); string(got) != newer {
+		t.Error("Init wrote over the newer types")
 	}
 }
 
