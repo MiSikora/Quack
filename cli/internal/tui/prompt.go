@@ -18,6 +18,8 @@ type prompt struct {
 	input   textinput.Model
 	actions []wire.Action
 	recipes []recipe.Recipe
+	// The commands that work now. Those that need an app leave while there is none.
+	commands []command
 	// Browsing lists the runnables of an empty prompt, sorted by id. With grouped, the ids that share a namespace with
 	// another go into its group, and group names the group that browsing shows, or is empty at the top level.
 	browsing bool
@@ -54,6 +56,15 @@ func newInput(placeholder string) textinput.Model {
 	return input
 }
 
+// Without an app, the prompt offers only the commands that need none.
+func (p *prompt) connect(app bool) {
+	p.commands = slices.DeleteFunc(commands(), func(c command) bool { return c.needsApp && !app })
+	p.input.Placeholder = "find an action or a recipe, $ for recipes only, / for commands"
+	if !app {
+		p.input.Placeholder = "/ for commands"
+	}
+}
+
 func (p *prompt) choices() ([]choice, int) {
 	text := strings.TrimSpace(p.input.Value())
 	var all []choice
@@ -62,7 +73,7 @@ func (p *prompt) choices() ([]choice, int) {
 		text = query
 		all = p.runnables(false)
 	case strings.HasPrefix(text, "/"):
-		for _, c := range commands() {
+		for _, c := range p.commands {
 			all = append(all, choice{id: c.name, description: c.description, command: &c})
 		}
 	default:

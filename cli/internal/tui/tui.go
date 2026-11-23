@@ -98,6 +98,7 @@ type command struct {
 	name        string
 	key         string
 	description string
+	needsApp    bool
 	run         func(*model) tea.Cmd
 }
 
@@ -148,13 +149,14 @@ func newModel(source Source, activity activity, want client.Target, mode client.
 		mode:      mode,
 		picker:    newPicker(want, 0),
 		clock:     wallClock{},
-		prompt:    prompt{input: newInput("find an action or a recipe, $ for recipes only, / for commands"), grouped: settings.GroupNamespaces},
+		prompt:    prompt{input: newInput(""), grouped: settings.GroupNamespaces},
 		hideData:  !settings.ShowData,
 		runs:      newRuns(),
 		clipboard: clipboard.WriteAll,
 		header:    header(version),
 	}
-	m.picker.auto, m.picker.skipPackage = true, true
+	m.picker.auto, m.picker.skipPackage, m.picker.quiet, m.picker.startup = true, true, true, true
+	m.prompt.connect(false)
 	m.log.add(m.header)
 	for _, problem := range problems {
 		m.log.add(problemStyle.Render(problem))
@@ -167,8 +169,26 @@ func (m *model) Init() tea.Cmd {
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	return m, m.update(msg)
+	cmd := m.update(msg)
+	return m, tea.Batch(cmd, m.focus())
 }
+
+// A quiet picker shows and hides as devices come and go, and the input on screen takes the keys.
+func (m *model) focus() tea.Cmd {
+	switch {
+	case m.picker == nil || m.box != nil:
+		return nil
+	case m.picking() && !m.picker.input.Focused():
+		m.prompt.input.Blur()
+		return m.picker.input.Focus()
+	case !m.picking() && !m.prompt.input.Focused():
+		m.picker.input.Blur()
+		return m.prompt.input.Focus()
+	}
+	return nil
+}
+
+func (m *model) picking() bool { return m.picker != nil && m.picker.showing(m.devices) }
 
 // The mouse reports clicks, drags and the wheel, so that the TUI scrolls the log itself.
 func (m *model) View() tea.View {
@@ -278,10 +298,10 @@ func (m *model) press(msg tea.KeyPressMsg) tea.Cmd {
 		m.log.scrolled = 0
 		return nil
 	}
-	if m.picker != nil {
+	if m.picking() {
 		return m.pressPicker(msg)
 	}
-	for _, c := range commands() {
+	for _, c := range m.prompt.commands {
 		if c.key == key && key != "ctrl+c" && key != "ctrl+d" {
 			return c.run(m)
 		}
@@ -334,6 +354,9 @@ func (m *model) pressPicker(msg tea.KeyPressMsg) tea.Cmd {
 		case m.app != nil:
 			m.picker = nil
 			return m.prompt.input.Focus()
+		case !p.quiet:
+			p.quiet = true
+			p.clear()
 		default:
 			p.clear()
 		}
@@ -382,7 +405,7 @@ func (m *model) interrupt() tea.Cmd {
 }
 
 func (m *model) clearInput() bool {
-	if m.picker != nil {
+	if m.picking() {
 		return m.picker.clear()
 	}
 	return m.prompt.clear()
@@ -532,6 +555,10 @@ func (m *model) pickDevice() tea.Cmd {
 	if m.runs.active != nil {
 		return m.refused.show(m.clock, refusedDuringRun)
 	}
+	if m.app == nil {
+		m.picker.quiet = false
+		return nil
+	}
 	return m.openPicker(func(p *picker) { p.skipPackage = true })
 }
 
@@ -612,6 +639,7 @@ func (m *model) connected(msg connected) tea.Cmd {
 	m.app, m.target, m.hello, m.mode = msg.app, msg.target, msg.hello, client.Wake
 	m.picker = nil
 	m.prompt.clear()
+	m.prompt.connect(true)
 	m.prompt.setActions(msg.actions)
 	where := string(msg.target.Device)
 	if i := m.deviceIndex(msg.target.Device); i >= 0 && m.devices[i].Model != "" {
@@ -668,7 +696,12 @@ func (m *model) list(listings []adb.Listing) tea.Cmd {
 		m.app = nil
 		m.picker = nil
 		m.refused.showing = false
-		cmds = append(cmds, m.openPicker(func(p *picker) { p.auto, p.skipPackage = true, true }))
+		m.prompt.clear()
+		m.prompt.connect(false)
+		m.prompt.setActions(nil)
+		m.setRecipes(recipes{})
+		// Only the start picks by itself, so that a device that comes back does not take over the prompt.
+		cmds = append(cmds, m.openPicker(func(p *picker) { p.quiet = true }))
 	}
 	if p := m.picker; p != nil && p.step == packageStep && m.deviceIndex(p.device) < 0 {
 		p.toStep(deviceStep)
@@ -759,7 +792,7 @@ func (m *model) screen() []string {
 func (m *model) overlay() []string {
 	rows := min(maxListRows, m.logHeight()+1)
 	switch {
-	case m.picker != nil:
+	case m.picking():
 		return m.picker.list(m.devices, m.listed, rows)
 	case m.box != nil:
 		return m.box.view(rows)
@@ -769,7 +802,7 @@ func (m *model) overlay() []string {
 
 func (m *model) inputRow() string {
 	switch {
-	case m.picker != nil:
+	case m.picking():
 		return m.picker.view(m.devices)
 	case m.box != nil:
 		return m.box.preview()
@@ -785,19 +818,28 @@ func (m *model) footer() string {
 		return m.copied.text
 	case m.refused.showing:
 		return m.refused.text
-	case m.picker != nil:
-		return m.picker.keys(m.app != nil)
+	case m.picking():
+		return m.picker.keys(m.app != nil || !m.picker.quiet)
 	case m.runs.active != nil:
 		return m.runs.footer()
 	case m.box != nil:
 		return m.box.keys()
 	case m.log.scrolled > 0:
 		return "scrolled back · end newest · " + m.prompt.keys()
+	case m.app == nil && !m.prompt.open():
+		return "/ for commands · ctrl+c quit"
 	}
 	return m.prompt.keys()
 }
 
 func (m *model) title() string {
+	if m.app == nil && m.picker != nil {
+		style := statusStyle
+		if m.listed && len(m.devices) == 0 {
+			style = problemStyle
+		}
+		return selectedStyle.Render("quack") + style.Render(" · "+m.picker.status(m.devices, m.listed))
+	}
 	if m.app == nil {
 		return selectedStyle.Render("quack")
 	}
@@ -840,15 +882,15 @@ func after(c clock, d time.Duration, msg tea.Msg) tea.Cmd {
 // ctrl+c and ctrl+d do more than their command, so the picker handles them itself.
 func commands() []command {
 	return []command{
-		{"/cancel", "ctrl+c", "Cancel the running action", (*model).cancel},
-		{"/clear", "ctrl+l", "Clear the log", (*model).clear},
-		{"/exit", "ctrl+d", "Cancel the run and exit", (*model).exit},
-		{"/init-recipes", "", "Start the recipes of the app in .quack/ and let editors check them", (*model).initRecipes},
-		{"/open-app", "ctrl+o", "Show the app's main screen", (*model).openApp},
-		{"/pick-app", "", "Pick another app on this device", (*model).pickApp},
-		{"/pick-device", "", "Pick another device", (*model).pickDevice},
-		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", (*model).reload},
-		{"/toggle-data", "", "Show or hide the JSON data of notifications and results", (*model).toggleData},
+		{"/cancel", "ctrl+c", "Cancel the running action", false, (*model).cancel},
+		{"/clear", "ctrl+l", "Clear the log", false, (*model).clear},
+		{"/exit", "ctrl+d", "Cancel the run and exit", false, (*model).exit},
+		{"/init-recipes", "", "Start the recipes of the app in .quack/ and let editors check them", true, (*model).initRecipes},
+		{"/open-app", "ctrl+o", "Show the app's main screen", true, (*model).openApp},
+		{"/pick-app", "", "Pick another app on this device", true, (*model).pickApp},
+		{"/pick-device", "", "Pick another device", false, (*model).pickDevice},
+		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", true, (*model).reload},
+		{"/toggle-data", "", "Show or hide the JSON data of notifications and results", false, (*model).toggleData},
 	}
 }
 

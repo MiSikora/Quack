@@ -23,8 +23,12 @@ type picker struct {
 	auto        bool
 	skipPackage bool
 	back        bool
-	connecting  *client.Target
-	input       textinput.Model
+	// A quiet picker hides, so that the prompt and its commands work meanwhile, and /pick-device shows it. At startup it
+	// shows by itself once it has something to pick.
+	quiet      bool
+	startup    bool
+	connecting *client.Target
+	input      textinput.Model
 	// Rows come and go as devices do, so the selection follows its row's key rather than its place.
 	selected string
 	width    int
@@ -149,6 +153,32 @@ func (p *picker) onlyDevice(devices []seenDevice) (pickRow, bool) {
 		return pickRow{}, false
 	}
 	return only[0], true
+}
+
+// While starting an app the picker shows, so that it says which one.
+func (p *picker) showing(devices []seenDevice) bool {
+	return !p.quiet || p.connecting != nil || p.startup && slices.ContainsFunc(p.allRows(devices), func(r pickRow) bool { return r.ok })
+}
+
+// status says what a quiet picker waits for, as the rows would.
+func (p *picker) status(devices []seenDevice, listed bool) string {
+	rows := p.allRows(devices)
+	pickable := slices.ContainsFunc(rows, func(r pickRow) bool { return r.ok })
+	switch {
+	case len(rows) == 0 && !p.startup && listed:
+		return "no device"
+	case len(rows) == 0 || p.step == packageStep:
+		return p.waiting(listed, 0)
+	case len(rows) == 1 && pickable:
+		return rows[0].label + " · " + rows[0].note + " · /pick-device to connect"
+	case len(rows) == 1:
+		return rows[0].label + " · " + rows[0].note
+	case pickable:
+		return strconv.Itoa(len(rows)) + " devices · /pick-device to pick one"
+	case slices.ContainsFunc(rows, func(r pickRow) bool { return r.note == "looking for apps…" }):
+		return strconv.Itoa(len(rows)) + " devices · looking for apps…"
+	}
+	return strconv.Itoa(len(rows)) + " devices · no quack-enabled app · /pick-device to see them"
 }
 
 func (p *picker) packages(devices []seenDevice, device adb.Device) []string {
