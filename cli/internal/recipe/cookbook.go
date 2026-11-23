@@ -161,6 +161,15 @@ func Maps(dir, pkg string) (bool, error) {
 	return slices.ContainsFunc(tables, func(t table) bool { return len(t.files(pkg)) > 0 }), nil
 }
 
+// MapsAny reports whether a [recipes] table of the project that dir is in, or of the user's config, maps any app.
+func MapsAny(dir string) (bool, error) {
+	tables, _, err := readTables(dir)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(tables, func(t table) bool { return len(t.entries) > 0 }), nil
+}
+
 var (
 	//go:embed types/quack.d.ts
 	quackTypes []byte

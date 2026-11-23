@@ -193,6 +193,7 @@ var scenarios = []scenario{
 	{name: "init-recipes", args: []string{"--init-recipes"}},
 	{name: "init-recipes-with-json", args: []string{"--init-recipes", "--json"}},
 	{name: "init-recipes-with-app", args: []string{"--init-recipes", "-a", "io.mehow.quack.sample"}},
+	{name: "init-recipes-in-mapped-project", args: []string{"--init-recipes"}, recipes: sampleRecipes, inProject: true},
 	{name: "init-recipes-with-app-keeps-quack-toml", args: []string{"--init-recipes", "-a", "io.mehow.quack.sample"}, recipes: sampleRecipes, inProject: true},
 	{name: "init-recipes-with-device", args: []string{"--init-recipes", "-d", "emulator-5554"}},
 	{name: "init-recipes-with-android-serial", args: []string{"--init-recipes"}, env: []string{"ANDROID_SERIAL=emulator-5554"}},

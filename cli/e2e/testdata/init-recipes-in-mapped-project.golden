@@ -1,0 +1,7 @@
+$ quack --init-recipes
+--- exit 0
+--- stdout
+wrote $XDG_CONFIG_HOME/quack/recipes/quack.d.ts
+wrote $XDG_CONFIG_HOME/quack/recipes/tsconfig.json
+--- stderr
+--- device

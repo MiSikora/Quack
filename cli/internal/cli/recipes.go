@@ -164,6 +164,10 @@ func initRecipes(w io.Writer, pkg string) error {
 		fmt.Fprintln(w, "The files that let editors check recipes are up to date.")
 	}
 	if pkg == "" {
+		mapped, err := recipe.MapsAny(dir)
+		if err != nil || mapped {
+			return err
+		}
 		fmt.Fprintln(w, "Map apps to recipe files under [recipes] in .quack/quack.toml, or in "+config.Path()+".\n"+
 			"quack --init-recipes --app <package> starts .quack/ here.")
 		return nil
