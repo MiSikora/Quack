@@ -41,7 +41,8 @@ type textField struct {
 	input textinput.Model
 	list  bool
 	hints []string
-	// -1 while no hint is selected, so that enter keeps the text as typed.
+	// -1 while no hint is selected, so that enter keeps the text as typed. Typed text that a hint matches selects the
+	// best match, and ↓ from it goes back to the text.
 	selected int
 }
 
@@ -279,6 +280,9 @@ func (f *textField) press(msg tea.KeyPressMsg) tea.Cmd {
 	cmd := f.forward(msg)
 	if f.input.Value() != text {
 		f.selected = -1
+		if strings.TrimSpace(f.input.Value()) != "" && len(f.matches()) > 0 {
+			f.selected = 0
+		}
 	}
 	return cmd
 }

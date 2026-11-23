@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- CLI: typing in a param with hints in the terminal UI selects the best matching hint, so that enter picks it. ↓ goes back to the text as typed.
+
 ## [0.1.4] - 2026-11-23
 
 ### Added

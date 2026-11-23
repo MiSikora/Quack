@@ -645,35 +645,82 @@ func TestHintsNarrowToTheTextAndSayWhenNoneMatches(t *testing.T) {
 	h.waitFor("3/3")
 
 	h.typing("bo")
-	h.waitFor("  Bob\n", "1/3")
+	h.waitFor("▸ Bob\n", "1/3")
 	h.waitForNo("Albert")
 	h.typing("zz")
 	h.waitFor("no match", "0/3")
 }
 
-func TestEnterPicksTheSelectedHintOrElseKeepsTheText(t *testing.T) {
+func TestTypingSelectsTheBestHintSoThatEnterPicksIt(t *testing.T) {
 	app := withNameHints(newFakeApp(), "Alice", "Albert", "Bob")
 	h := start(t, app)
 	h.press("up", "enter")
 	h.waitFor("3/3")
 
 	h.typing("Bo")
-	h.waitFor("› app.greet name=Bo\n", "↑ hints · enter next")
-	h.press("up")
-	h.waitFor("▸ Bob", "enter pick · ↑↓ select · esc deselect")
+	h.waitFor("▸ Bob", "› app.greet name=Bob\n", "enter pick · ↑↓ select · esc deselect")
 	h.press("enter")
 	h.waitFor("▸ times", "› app.greet name=Bob\n")
-	h.press("shift+tab")
-	h.waitFor("▸ name", "1/3")
-	h.typing("x")
 	h.press("enter")
-	h.waitFor("▸ times", "› app.greet name=Bobx\n")
+
+	h.waitForLog("› app.greet name=Bob\nHello, Bob! · ")
+	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bob"}}}}
+	if got := app.received(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestDownFromTheBestHintKeepsTheTextAsTyped(t *testing.T) {
+	app := withNameHints(newFakeApp(), "Alice", "Albert", "Bob")
+	h := start(t, app)
+	h.press("up", "enter")
+	h.waitFor("3/3")
+
+	h.typing("Bo")
+	h.waitFor("▸ Bob", "› app.greet name=Bob\n")
+	h.press("down")
+	h.waitFor("  Bob", "› app.greet name=Bo\n", "↑ hints · enter next")
+	h.press("up")
+	h.waitFor("▸ Bob", "› app.greet name=Bob\n")
+	h.press("down", "enter")
+	h.waitFor("▸ times", "› app.greet name=Bo\n")
 	h.press("enter")
+
+	h.waitForLog("› app.greet name=Bo\nHello, Bo! · ")
+	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bo"}}}}
+	if got := app.received(); !reflect.DeepEqual(got, want) {
+		t.Errorf("calls: got %v, want %v", got, want)
+	}
+}
+
+func TestTextThatNoHintMatchesStaysAsTyped(t *testing.T) {
+	app := withNameHints(newFakeApp(), "Alice", "Albert", "Bob")
+	h := start(t, app)
+	h.press("up", "enter")
+	h.waitFor("3/3")
+
+	h.typing("Bobx")
+	h.waitFor("no match", "0/3", "› app.greet name=Bobx\n", "↑ hints · enter next")
+	h.press("enter", "enter")
+
 	h.waitForLog("› app.greet name=Bobx\nHello, Bobx! · ")
 	want := []wire.Call{{Action: "app.greet", Args: map[string]wire.RawArg{"name": {"Bobx"}}}}
 	if got := app.received(); !reflect.DeepEqual(got, want) {
 		t.Errorf("calls: got %v, want %v", got, want)
 	}
+}
+
+func TestEmptyTextSelectsNoHint(t *testing.T) {
+	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
+	h.press("up", "enter")
+	h.waitFor("3/3", "› app.greet\n", "↑ hints · enter next")
+	h.waitForNo("▸ A")
+
+	h.typing("B")
+	h.waitFor("▸ Bob")
+	h.press("backspace")
+	h.waitFor("  Bob\n", "› app.greet\n", "↑ hints · enter next")
+	h.waitForNo("▸ Bob")
 }
 
 func TestCallPreviewsTheSelectedHintInsteadOfTheText(t *testing.T) {
@@ -687,14 +734,9 @@ func TestCallPreviewsTheSelectedHintInsteadOfTheText(t *testing.T) {
 	h.waitFor("▸ Albert", "› app.greet name=Albert\n")
 	h.press("esc")
 	h.waitFor("▸ name", "› app.greet\n", "↑ hints")
-	h.typing("B")
-	h.press("up")
-	h.waitFor("▸ Bob", "› app.greet name=Bob\n")
-	h.press("down")
-	h.waitFor("› app.greet name=B\n")
 }
 
-func TestUpPastTheFirstHintAndTypingSelectNone(t *testing.T) {
+func TestUpPastTheFirstHintSelectsNone(t *testing.T) {
 	h := start(t, withNameHints(newFakeApp(), "Alice", "Albert", "Bob"))
 	h.press("up", "enter")
 	h.waitFor("3/3")
@@ -706,9 +748,6 @@ func TestUpPastTheFirstHintAndTypingSelectNone(t *testing.T) {
 	h.waitForNo("▸ A")
 	h.press("up")
 	h.waitFor("▸ Alice")
-	h.typing("A")
-	h.waitFor("↑ hints · enter next")
-	h.waitForNo("▸ A")
 }
 
 func TestEscDeselectsTheHintAndThenClosesTheBox(t *testing.T) {
@@ -1046,9 +1085,7 @@ export const login = quack.recipe({
 	h.press("enter")
 	h.waitFor("$login · Log in", "bob", "alice", "▸ user", "2/2", "› $login\n")
 	h.typing("bo")
-	h.waitFor("    bob", "▸ user  bo", "1/2", "› $login user=bo\n")
-	h.press("up")
-	h.waitFor("› $login user=bob\n")
+	h.waitFor("▸ bob", "▸ user  bo", "1/2", "› $login user=bob\n")
 	h.press("enter")
 	h.waitFor("▸ times", "› $login user=bob\n")
 	h.press("enter")
