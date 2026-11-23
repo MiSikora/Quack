@@ -122,7 +122,15 @@ type runtime struct {
 	observer Observer
 	recipes  map[*goja.Object]declaredRecipe
 	env      *environment
+	// How many runRecipe calls the current step is inside.
+	depth int
 }
+
+// Each runRecipe and each JS call takes Go stack, whose overflow kills quack rather than failing the recipe.
+const (
+	maxRecipeDepth = 100
+	maxCallDepth   = 10000
+)
 
 type declaredRecipe struct {
 	Recipe
@@ -135,6 +143,7 @@ func newRuntime(s *script, ctx context.Context, app App, observer Observer) *run
 	r := &runtime{script: s, vm: goja.New(), ctx: ctx, app: app, observer: observer, recipes: map[*goja.Object]declaredRecipe{}}
 	r.env = newEnvironment(r.vm)
 	r.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
+	r.vm.SetMaxCallStackSize(maxCallDepth)
 	return r
 }
 
@@ -364,6 +373,11 @@ func (r *runtime) runRecipe(handle goja.Value, args map[string]any) goja.Value {
 		panic(r.vm.NewTypeError("runRecipe() takes a recipe that quack.recipe() returned"))
 	}
 	r.requireRun()
+	if r.depth == maxRecipeDepth {
+		panic(r.vm.NewGoError(fmt.Errorf("recipes run each other more than %d deep", maxRecipeDepth)))
+	}
+	r.depth++
+	defer func() { r.depth-- }()
 	declared.Name = cmp.Or(declared.Name, declared.exported)
 	maps.DeleteFunc(args, func(_ string, value any) bool { return value == nil })
 	raw, err := recipeArgs(declared.Recipe, r.rawArgs(args))
@@ -507,6 +521,10 @@ func (r *runtime) thrown(err error) error {
 	var interrupted *goja.InterruptedError
 	if errors.As(err, &interrupted) {
 		return canceled
+	}
+	var overflow *goja.StackOverflowError
+	if errors.As(err, &overflow) {
+		return fmt.Errorf("the recipe calls functions more than %d deep", maxCallDepth)
 	}
 	var exception *goja.Exception
 	if !errors.As(err, &exception) {

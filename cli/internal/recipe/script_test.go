@@ -580,6 +580,32 @@ quack.runRecipe(r)`)
 	}
 }
 
+func TestRecipesThatRunEachOtherWithoutEndFailTheRun(t *testing.T) {
+	s := load(t, `
+import quack from "quack"
+const ping: any = quack.recipe({ name: "ping", run() { quack.runRecipe(pong) } })
+const pong: any = quack.recipe({ name: "pong", run() { quack.runRecipe(ping) } })
+export const self = quack.recipe({ run() { quack.runRecipe(self) } })
+export const deep = quack.recipe({
+  run() {
+    function down(n: number): number { return n === 0 ? 0 : down(n - 1) + 1 }
+    return down(1e6)
+  },
+})
+export const nested = quack.recipe({ run() { quack.runRecipe(deep) } })`)
+
+	for name, want := range map[string]string{
+		"ping":   "recipes run each other more than 100 deep",
+		"self":   "recipes run each other more than 100 deep",
+		"deep":   "the recipe calls functions more than 10000 deep",
+		"nested": "the recipe calls functions more than 10000 deep",
+	} {
+		if _, err := s.Run(context.Background(), &fakeApp{}, name, nil, Observer{}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v, want %s", name, err, want)
+		}
+	}
+}
+
 func TestARecipeThatReturnsNothingJSONCanHoldReturnsNoData(t *testing.T) {
 	s := load(t, `
 import quack from "quack"
