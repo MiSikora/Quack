@@ -19,6 +19,7 @@ import (
 	"quack/internal/adb"
 	"quack/internal/client"
 	"quack/internal/config"
+	"quack/internal/device"
 	"quack/internal/recipe"
 	"quack/internal/wire"
 )
@@ -29,7 +30,7 @@ type App interface {
 }
 
 // The app's status lines go into the log, since anything printed around the TUI would break the screen.
-func Run(want client.Target, mode client.StartMode, startTimeout time.Duration, version string) error {
+func Run(want device.Target, mode client.StartMode, startTimeout time.Duration, version string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	settings, problems := config.Load()
@@ -40,16 +41,16 @@ func Run(want client.Target, mode client.StartMode, startTimeout time.Duration, 
 
 type Source interface {
 	Track(ctx context.Context, send func([]adb.Listing)) error
-	Inspect(listing adb.Listing) (client.Device, error)
-	Packages(device adb.Device) ([]string, error)
-	Connect(target client.Target, mode client.StartMode, status io.Writer) (App, error)
+	Inspect(listing adb.Listing) (device.Info, error)
+	Packages(serial adb.Device) ([]string, error)
+	Connect(target device.Target, mode client.StartMode, status io.Writer) (App, error)
 }
 
 type model struct {
 	source     Source
 	activity   activity
 	app        App
-	target     client.Target
+	target     device.Target
 	connection int
 	mode       client.StartMode
 	devices    []seenDevice
@@ -117,7 +118,7 @@ type listed struct {
 type (
 	inspected struct {
 		serial adb.Device
-		device client.Device
+		device device.Info
 		asked  int
 		err    error
 	}
@@ -125,7 +126,7 @@ type (
 )
 
 type connected struct {
-	target client.Target
+	target device.Target
 	app    App
 	described
 }
@@ -134,7 +135,7 @@ type clientSource struct {
 	startTimeout time.Duration
 }
 
-func newModel(source Source, activity activity, want client.Target, mode client.StartMode, version, dir string, settings config.Config, problems []string) *model {
+func newModel(source Source, activity activity, want device.Target, mode client.StartMode, version, dir string, settings config.Config, problems []string) *model {
 	m := &model{
 		source:    source,
 		activity:  activity,
@@ -573,7 +574,7 @@ func (m *model) pickApp() tea.Cmd {
 func (m *model) openPicker(setup func(*picker)) tea.Cmd {
 	m.box = nil
 	m.prompt.input.Blur()
-	m.picker = newPicker(client.Target{}, m.width)
+	m.picker = newPicker(device.Target{}, m.width)
 	setup(m.picker)
 	return tea.Batch(m.picker.input.Focus(), m.inspectAll(), m.poll())
 }
@@ -585,7 +586,7 @@ func (m *model) pick() tea.Cmd {
 	case !ok:
 		return nil
 	case p.step == packageStep:
-		return m.connect(client.Target{Device: row.device, Package: row.pkg})
+		return m.connect(device.Target{Device: row.device, Package: row.pkg})
 	}
 	p.device, p.back, p.skipPackage = row.device, true, true
 	p.toStep(packageStep)
@@ -602,12 +603,12 @@ func (m *model) advance() tea.Cmd {
 		p.toStep(packageStep)
 	}
 	if pkgs := p.packages(m.devices, p.device); p.step == packageStep && p.skipPackage && len(pkgs) == 1 {
-		return m.connect(client.Target{Device: p.device, Package: pkgs[0]})
+		return m.connect(device.Target{Device: p.device, Package: pkgs[0]})
 	}
 	return nil
 }
 
-func (m *model) connect(target client.Target) tea.Cmd {
+func (m *model) connect(target device.Target) tea.Cmd {
 	m.picker.connecting = &target
 	source, activity, mode, dir := m.source, m.activity, m.mode, m.dir
 	return func() tea.Msg {
@@ -677,7 +678,7 @@ func (m *model) list(listings []adb.Listing) tea.Cmd {
 			devices = append(devices, m.devices[i])
 			continue
 		}
-		devices = append(devices, seenDevice{Device: client.Device{Listing: l}})
+		devices = append(devices, seenDevice{Info: device.Info{Listing: l}})
 		cmds = append(cmds, m.inspect(l))
 	}
 	m.devices = devices
@@ -700,10 +701,10 @@ func (m *model) inspect(listing adb.Listing) tea.Cmd {
 		return nil
 	}
 	source := m.source
-	return m.ask(listing.Device, func() (client.Device, error) { return source.Inspect(listing) })
+	return m.ask(listing.Device, func() (device.Info, error) { return source.Inspect(listing) })
 }
 
-func (m *model) ask(serial adb.Device, inspect func() (client.Device, error)) tea.Cmd {
+func (m *model) ask(serial adb.Device, inspect func() (device.Info, error)) tea.Cmd {
 	m.asked++
 	asked := m.asked
 	m.pending[serial] = asked
@@ -729,11 +730,11 @@ func (m *model) inspectPicked() tea.Cmd {
 		return m.inspect(seen.Listing)
 	}
 	source := m.source
-	return m.ask(seen.Device.Device, func() (client.Device, error) {
-		device := seen.Device
-		packages, err := source.Packages(device.Device)
-		device.Packages = packages
-		return device, err
+	return m.ask(seen.Device, func() (device.Info, error) {
+		info := seen.Info
+		packages, err := source.Packages(info.Device)
+		info.Packages = packages
+		return info, err
 	})
 }
 
@@ -765,7 +766,7 @@ func (m *model) drop(line string) tea.Cmd {
 func (m *model) inspectAll() tea.Cmd {
 	var cmds []tea.Cmd
 	for _, d := range m.devices {
-		if _, waiting := m.pending[d.Device.Device]; !waiting {
+		if _, waiting := m.pending[d.Device]; !waiting {
 			cmds = append(cmds, m.inspect(d.Listing))
 		}
 	}
@@ -781,7 +782,7 @@ func (m *model) inspected(msg inspected) {
 	if msg.err != nil || i < 0 || m.devices[i].State != msg.device.State {
 		return
 	}
-	m.devices[i] = seenDevice{Device: msg.device, inspected: true}
+	m.devices[i] = seenDevice{Info: msg.device, inspected: true}
 }
 
 func (m *model) poll() tea.Cmd {
@@ -792,8 +793,8 @@ func (m *model) poll() tea.Cmd {
 	return after(m.clock, pollTime, polled{})
 }
 
-func (m *model) deviceIndex(device adb.Device) int {
-	return slices.IndexFunc(m.devices, func(d seenDevice) bool { return d.Device.Device == device })
+func (m *model) deviceIndex(serial adb.Device) int {
+	return slices.IndexFunc(m.devices, func(d seenDevice) bool { return d.Device == serial })
 }
 
 func (m *model) logHeight() int { return max(0, m.height-panelRows) }
@@ -934,15 +935,15 @@ func (clientSource) Track(ctx context.Context, send func([]adb.Listing)) error {
 	return adb.Track(ctx, send)
 }
 
-func (clientSource) Inspect(listing adb.Listing) (client.Device, error) {
-	return client.Inspect(listing)
+func (clientSource) Inspect(listing adb.Listing) (device.Info, error) {
+	return device.Inspect(listing)
 }
 
-func (clientSource) Packages(device adb.Device) ([]string, error) {
-	return client.Packages(device)
+func (clientSource) Packages(serial adb.Device) ([]string, error) {
+	return device.Packages(serial)
 }
 
-func (s clientSource) Connect(target client.Target, mode client.StartMode, status io.Writer) (App, error) {
+func (s clientSource) Connect(target device.Target, mode client.StartMode, status io.Writer) (App, error) {
 	app, err := client.Resolve(client.Options{Target: target, Mode: mode, StartTimeout: s.startTimeout, Status: status})
 	if err != nil {
 		return nil, err

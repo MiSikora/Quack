@@ -23,6 +23,7 @@ import (
 	"quack/internal/adb"
 	"quack/internal/client"
 	"quack/internal/config"
+	"quack/internal/device"
 	"quack/internal/recipe"
 	"quack/internal/wire"
 )
@@ -380,7 +381,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 
 func TestViewTakesTheAlternateScreenAndTheMouse(t *testing.T) {
 	app := newFakeApp()
-	m := newModel(newFakeSource(app), newActivity(t.Context()), client.Target{}, client.Wake, "dev", t.TempDir(), config.Default(), nil)
+	m := newModel(newFakeSource(app), newActivity(t.Context()), device.Target{}, client.Wake, "dev", t.TempDir(), config.Default(), nil)
 
 	view := m.View()
 
@@ -1616,7 +1617,7 @@ export const clean = quack.recipe({ run() {} })`)
 
 // The app left while it was asked, and nothing of its answer may come back with no app to run it on.
 func TestReloadThatEndsAfterTheAppLeftChangesNothing(t *testing.T) {
-	m := newModel(newFakeSource(newFakeApp()), newActivity(t.Context()), client.Target{}, client.Wake, "dev", t.TempDir(), config.Default(), nil)
+	m := newModel(newFakeSource(newFakeApp()), newActivity(t.Context()), device.Target{}, client.Wake, "dev", t.TempDir(), config.Default(), nil)
 	asked := m.connection
 	m.drop("io.mehow.quack.sample left emulator-5554")
 	cookbook := &recipe.Cookbook{Recipes: []recipe.Recipe{{Name: "clean"}}}
@@ -1798,7 +1799,7 @@ type probe struct {
 }
 
 func start(t *testing.T, app *fakeApp, options ...func(*model)) *harness {
-	h := startPicking(t, newFakeSource(app), client.Target{}, client.Wake, options...)
+	h := startPicking(t, newFakeSource(app), device.Target{}, client.Wake, options...)
 	h.waitFor("quack · ", "type or ↑ to find an action")
 	return h
 }
@@ -1812,19 +1813,19 @@ func startWithConfig(t *testing.T, app *fakeApp, file string, options ...func(*m
 	if err := os.WriteFile(filepath.Join(dir, "quack", "config.toml"), []byte(file), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := startIn(t, dir, newFakeSource(app), client.Target{}, client.Wake, options...)
+	h := startIn(t, dir, newFakeSource(app), device.Target{}, client.Wake, options...)
 	h.waitFor("quack · ", "type or ↑ to find an action")
 	return h
 }
 
 // The apps read their recipes and settings from a config dir of the test's own, which has none.
-func startPicking(t *testing.T, source *fakeSource, want client.Target, mode client.StartMode, options ...func(*model)) *harness {
+func startPicking(t *testing.T, source *fakeSource, want device.Target, mode client.StartMode, options ...func(*model)) *harness {
 	return startIn(t, t.TempDir(), source, want, mode, options...)
 }
 
 // The settings come from the config dir as Run reads them, and quack starts in it too, so that its .quack is the
 // project.
-func startIn(t *testing.T, configDir string, source *fakeSource, want client.Target, mode client.StartMode, options ...func(*model)) *harness {
+func startIn(t *testing.T, configDir string, source *fakeSource, want device.Target, mode client.StartMode, options ...func(*model)) *harness {
 	t.Setenv("XDG_CONFIG_HOME", configDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	activity := newActivity(ctx)
@@ -2326,7 +2327,7 @@ func newFakeApp() *fakeApp {
 func (a *fakeApp) Describe(context.Context) (wire.Hello, []wire.Action, error) {
 	actions := a.actions()
 	if actions == nil {
-		return wire.Hello{}, nil, &client.AppError{Message: "the app is gone"}
+		return wire.Hello{}, nil, &device.AppError{Message: "the app is gone"}
 	}
 	return wire.Hello{Protocol: 1, Package: a.pkg, Version: "1.0"}, actions, nil
 }
@@ -2388,13 +2389,13 @@ func (a *fakeApp) reply(ctx context.Context, call wire.Call, notify client.Notif
 		if held != nil {
 			<-held
 		}
-		return "", &client.CallError{Message: "canceled"}
+		return "", client.ErrCanceled
 	}
 	return "", wire.Error{Code: wire.ErrorCodeUnknownAction, Message: "no action '" + call.Action + "'"}
 }
 
-func (a *fakeApp) Target() client.Target {
-	return client.Target{Device: "emulator-5554", Package: a.pkg}
+func (a *fakeApp) Target() device.Target {
+	return device.Target{Device: "emulator-5554", Package: a.pkg}
 }
 
 func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
@@ -2458,25 +2459,25 @@ type fakeSource struct {
 	app *fakeApp
 
 	mu             sync.Mutex
-	devices        []client.Device
-	apps           map[client.Target]*fakeApp
+	devices        []device.Info
+	apps           map[device.Target]*fakeApp
 	send           func([]adb.Listing)
 	started        []string
 	failTracks     int
-	held           map[client.Target]chan struct{}
+	held           map[device.Target]chan struct{}
 	inspected      int
 	listedPackages int
 }
 
-func newFakeSource(app *fakeApp, devices ...client.Device) *fakeSource {
+func newFakeSource(app *fakeApp, devices ...device.Info) *fakeSource {
 	if len(devices) == 0 {
-		devices = []client.Device{device("emulator-5554", "Pixel 8", "device", app.pkg)}
+		devices = []device.Info{deviceInfo("emulator-5554", "Pixel 8", "device", app.pkg)}
 	}
-	return &fakeSource{app: app, devices: devices, apps: map[client.Target]*fakeApp{}, held: map[client.Target]chan struct{}{}}
+	return &fakeSource{app: app, devices: devices, apps: map[device.Target]*fakeApp{}, held: map[device.Target]chan struct{}{}}
 }
 
-func device(serial, model, state string, pkgs ...string) client.Device {
-	return client.Device{Listing: adb.Listing{Device: adb.Device(serial), State: state}, Model: model, Packages: pkgs}
+func deviceInfo(serial, model, state string, pkgs ...string) device.Info {
+	return device.Info{Listing: adb.Listing{Device: adb.Device(serial), State: state}, Model: model, Packages: pkgs}
 }
 
 func (s *fakeSource) Track(ctx context.Context, send func([]adb.Listing)) error {
@@ -2494,7 +2495,7 @@ func (s *fakeSource) Track(ctx context.Context, send func([]adb.Listing)) error 
 	return nil
 }
 
-func (s *fakeSource) Inspect(listing adb.Listing) (client.Device, error) {
+func (s *fakeSource) Inspect(listing adb.Listing) (device.Info, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inspected++
@@ -2504,22 +2505,22 @@ func (s *fakeSource) Inspect(listing adb.Listing) (client.Device, error) {
 			return d, nil
 		}
 	}
-	return client.Device{}, errors.New(string(listing.Device) + " is not connected")
+	return device.Info{}, errors.New(string(listing.Device) + " is not connected")
 }
 
-func (s *fakeSource) Packages(device adb.Device) ([]string, error) {
+func (s *fakeSource) Packages(serial adb.Device) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.listedPackages++
 	for _, d := range s.devices {
-		if d.Device == device {
+		if d.Device == serial {
 			return d.Packages, nil
 		}
 	}
-	return nil, errors.New(string(device) + " is not connected")
+	return nil, errors.New(string(serial) + " is not connected")
 }
 
-func (s *fakeSource) Connect(target client.Target, mode client.StartMode, status io.Writer) (App, error) {
+func (s *fakeSource) Connect(target device.Target, mode client.StartMode, status io.Writer) (App, error) {
 	s.mu.Lock()
 	held := s.held[target]
 	s.started = append(s.started, string(target.Device)+" "+target.Package+" "+string(mode))
@@ -2541,7 +2542,7 @@ func (s *fakeSource) hold(serial, pkg string) (release func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	held := make(chan struct{})
-	s.held[client.Target{Device: adb.Device(serial), Package: pkg}] = held
+	s.held[device.Target{Device: adb.Device(serial), Package: pkg}] = held
 	return sync.OnceFunc(func() { close(held) })
 }
 
@@ -2563,7 +2564,7 @@ func (s *fakeSource) starts() []string {
 	return slices.Clone(s.started)
 }
 
-func (s *fakeSource) set(devices ...client.Device) {
+func (s *fakeSource) set(devices ...device.Info) {
 	s.mu.Lock()
 	s.devices = devices
 	send, listings := s.send, s.listings()
@@ -2589,7 +2590,7 @@ func (s *fakeSource) appFor(serial, pkg string) *fakeApp {
 	app.pkg = pkg
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.apps[client.Target{Device: adb.Device(serial), Package: pkg}] = app
+	s.apps[device.Target{Device: adb.Device(serial), Package: pkg}] = app
 	return app
 }
 

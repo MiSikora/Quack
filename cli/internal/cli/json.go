@@ -9,6 +9,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/device"
 	"quack/internal/recipe"
 	"quack/internal/wire"
 )
@@ -51,8 +52,8 @@ type paramJSON struct {
 func failure(err error) (code, message string, exit int) {
 	var refused wire.Error
 	var usage *usageError
-	var device *adb.Error
-	var app *client.AppError
+	var unreachable *adb.Error
+	var app *device.AppError
 	var call *client.CallError
 	var command *recipe.CommandError
 	switch {
@@ -66,7 +67,7 @@ func failure(err error) (code, message string, exit int) {
 		return string(refused.Code), message, exit
 	case errors.As(err, &usage):
 		return "usage", err.Error(), exitUsage
-	case errors.As(err, &device):
+	case errors.As(err, &unreachable):
 		return "device", err.Error(), exitDevice
 	case errors.As(err, &app):
 		return "app", err.Error(), exitDevice
@@ -90,16 +91,13 @@ func printActionsJSON(w io.Writer, actions []wire.Action) {
 func paramsJSON(params []wire.Param) []paramJSON {
 	out := make([]paramJSON, len(params))
 	for i, p := range params {
-		out[i] = paramJSON{Name: p.Name, Type: string(p.Type), Description: p.Description, Choices: p.Choices}
-		switch presence := p.Presence.(type) {
-		case wire.Required:
-			out[i].Required = true
-		case wire.Default:
-			if p.Type.IsList() {
-				out[i].Default = presence.Values
-			} else if len(presence.Values) > 0 {
-				out[i].Default = presence.Values[0]
-			}
+		out[i] = paramJSON{
+			Name:        p.Name,
+			Type:        string(p.Type),
+			Description: p.Description,
+			Choices:     p.Choices,
+			Required:    p.Required(),
+			Default:     p.DefaultValue(),
 		}
 	}
 	return out

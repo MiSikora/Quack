@@ -3,10 +3,9 @@ package cli
 import (
 	"fmt"
 	"io"
-	"slices"
 
 	"quack/internal/adb"
-	"quack/internal/client"
+	"quack/internal/device"
 )
 
 type deviceJSON struct {
@@ -20,24 +19,10 @@ type appJSON struct {
 	Package string `json:"package"`
 }
 
-func printDevices(w io.Writer, device adb.Device, pkg string, asJSON bool) error {
-	listings, err := adb.Devices()
+func printDevices(w io.Writer, serial adb.Device, pkg string, asJSON bool) error {
+	devices, err := device.List(serial, pkg)
 	if err != nil {
 		return err
-	}
-	var devices []client.Device
-	for _, l := range listings {
-		if device != "" && l.Device != device {
-			continue
-		}
-		d, err := client.Inspect(l)
-		if err != nil {
-			return err
-		}
-		if pkg != "" && !slices.Contains(d.Packages, pkg) {
-			continue
-		}
-		devices = append(devices, d)
 	}
 	if asJSON {
 		for _, d := range devices {

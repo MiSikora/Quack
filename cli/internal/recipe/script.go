@@ -19,6 +19,7 @@ import (
 
 	"quack/internal/client"
 	"quack/internal/config"
+	"quack/internal/device"
 	"quack/internal/wire"
 )
 
@@ -90,7 +91,7 @@ func (s *script) run(ctx context.Context, app App, name string, args map[string]
 		return nil, err
 	}
 	declared := named[slices.IndexFunc(named, func(d declaredRecipe) bool { return d.Name == name })]
-	stop := context.AfterFunc(ctx, func() { r.vm.Interrupt(canceled) })
+	stop := context.AfterFunc(ctx, func() { r.vm.Interrupt(client.ErrCanceled) })
 	defer stop()
 	data, threw, err := r.call(declared, args, false)
 	if threw != nil {
@@ -117,8 +118,6 @@ func (r *runtime) call(declared declaredRecipe, args map[string]wire.RawArg, nes
 	data, err = r.stringify(returned, declared.Name)
 	return data, nil, err
 }
-
-var canceled = &client.CallError{Message: "canceled"}
 
 type runtime struct {
 	script   *script
@@ -163,7 +162,7 @@ func newRuntime(s *script, ctx context.Context, app App, observer Observer) *run
 func (r *runtime) load() (*goja.Object, error) {
 	vm := r.vm
 	quack := vm.NewObject()
-	target := client.Target{}
+	target := device.Target{}
 	if r.app != nil {
 		target = r.app.Target()
 	}
@@ -308,8 +307,8 @@ func param(name string, declaration any) (wire.Param, string, error) {
 	}
 	if value, given := fields["default"]; given && value != nil {
 		values, ok := rawValues(value)
-		if !ok || slices.ContainsFunc(values, func(v string) bool { return !parses(p, v) }) {
-			return wire.Param{}, "", fmt.Errorf("param '%s': its default is not a %s", name, expected(p))
+		if !ok || slices.ContainsFunc(values, func(v string) bool { return !p.Parses(v) }) {
+			return wire.Param{}, "", fmt.Errorf("param '%s': its default is not a %s", name, p.Expected())
 		}
 		p.Presence = wire.Default{Values: values}
 	}
@@ -404,7 +403,7 @@ func (r *runtime) stringify(value goja.Value, name string) (json.RawMessage, err
 	stringify, _ := goja.AssertFunction(r.vm.Get("JSON").ToObject(r.vm).Get("stringify"))
 	text, err := stringify(goja.Undefined(), value)
 	if err != nil {
-		if err = r.thrown(err); err == canceled {
+		if err = r.thrown(err); err == client.ErrCanceled {
 			return nil, err
 		}
 		return nil, fmt.Errorf("recipe '%s' returned a value that JSON cannot hold: %w", name, err)
@@ -514,7 +513,7 @@ func (f *failure) Error() string { return f.message }
 func (r *runtime) thrown(err error) error {
 	var interrupted *goja.InterruptedError
 	if errors.As(err, &interrupted) {
-		return canceled
+		return client.ErrCanceled
 	}
 	var overflow *goja.StackOverflowError
 	if errors.As(err, &overflow) {
@@ -576,11 +575,11 @@ func recipeArgs(r Recipe, args map[string]wire.RawArg) (map[string]wire.RawArg, 
 		case !p.Type.IsList() && len(raw) > 1:
 			return nil, fail("'%s' given more than once", p.Name)
 		case !p.Type.IsList() && len(raw) == 0:
-			return nil, fail("'%s' expects %s, got none", p.Name, expected(p))
+			return nil, fail("'%s' expects %s, got none", p.Name, p.Expected())
 		}
 		for _, value := range raw {
-			if !parses(p, value) {
-				return nil, fail("'%s' expects %s, got '%s'", p.Name, expected(p), value)
+			if !p.Parses(value) {
+				return nil, fail("'%s' expects %s, got '%s'", p.Name, p.Expected(), value)
 			}
 		}
 		values[p.Name] = raw

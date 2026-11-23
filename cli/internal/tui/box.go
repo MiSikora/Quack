@@ -58,7 +58,6 @@ func newParamBox(r runnable, width int) *paramBox {
 }
 
 func newField(p wire.Param) field {
-	_, required := p.Presence.(wire.Required)
 	var choices []string
 	switch p.Type {
 	case wire.ParamTypeEnum:
@@ -68,7 +67,7 @@ func newField(p wire.Param) field {
 	}
 	if choices != nil {
 		var options []string
-		if !required {
+		if !p.Required() {
 			options = append(options, "")
 		}
 		return &choiceField{options: append(options, choices...)}
@@ -109,7 +108,7 @@ func (b *paramBox) press(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		for i := range b.fields {
 			f := &b.fields[i]
-			if _, required := f.param.Presence.(wire.Required); required && len(f.field.value()) == 0 {
+			if f.param.Required() && len(f.field.value()) == 0 {
 				f.missing = true
 				return false, b.focus(i)
 			}

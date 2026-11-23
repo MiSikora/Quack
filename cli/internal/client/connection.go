@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"quack/internal/adb"
+	"quack/internal/device"
 	"quack/internal/wire"
 )
 
@@ -29,21 +30,21 @@ func (a App) connectRetrying(ctx context.Context) (*connection, error) {
 			return c, err
 		}
 		if ctx.Err() != nil {
-			return nil, &CallError{"canceled"}
+			return nil, ErrCanceled
 		}
 		if time.Now().After(deadline) {
 			// adbd refuses a socket of a device that went away the same way as one nobody listens on.
-			if state, err := a.device.State(); err != nil || state != "device" {
+			if state, err := a.device.State(); err != nil || state != adb.Ready {
 				return nil, a.device.Unreachable(errors.New("no answer"))
 			}
-			return nil, &AppError{fmt.Sprintf("%s did not answer within %v. Is it a quack-enabled app?", a.pkg, a.startTimeout)}
+			return nil, &device.AppError{Message: fmt.Sprintf("%s did not answer within %v. Is it a quack-enabled app?", a.pkg, a.startTimeout)}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-func connect(device adb.Device, socketName string) (*connection, error) {
-	conn, err := device.Open("localabstract:" + socketName)
+func connect(serial adb.Device, socketName string) (*connection, error) {
+	conn, err := serial.Open("localabstract:" + socketName)
 	var refused *adb.ServiceFailure
 	if errors.As(err, &refused) {
 		// The device answers "closed" when nothing listens on the socket.
@@ -63,11 +64,11 @@ func connect(device adb.Device, socketName string) (*connection, error) {
 	hello, ok := wire.DecodeFrame(bytes.TrimSuffix(first, []byte("\n"))).(wire.Hello)
 	if !ok {
 		conn.Close()
-		return nil, &AppError{fmt.Sprintf("expected hello, got %s", first)}
+		return nil, &device.AppError{Message: fmt.Sprintf("expected hello, got %s", first)}
 	}
 	if hello.Protocol != wire.ProtocolVersion {
 		conn.Close()
-		return nil, &AppError{fmt.Sprintf("app speaks protocol %d, this quack speaks %d. Upgrade quack.", hello.Protocol, wire.ProtocolVersion)}
+		return nil, &device.AppError{Message: fmt.Sprintf("app speaks protocol %d, this quack speaks %d. Upgrade quack.", hello.Protocol, wire.ProtocolVersion)}
 	}
 	conn.SetReadDeadline(time.Time{})
 	return &connection{conn, reader, hello}, nil
@@ -76,7 +77,7 @@ func connect(device adb.Device, socketName string) (*connection, error) {
 func (c *connection) exchange(request []byte, notify NotificationFunc) (wire.Frame, error) {
 	// Never half-close the connection: adb drops the app's reply when the host side shuts down writes.
 	if _, err := c.conn.Write(append(request, '\n')); err != nil {
-		return nil, &AppError{fmt.Sprintf("send: %v", err)}
+		return nil, &device.AppError{Message: fmt.Sprintf("send: %v", err)}
 	}
 	var last wire.Frame
 	for {

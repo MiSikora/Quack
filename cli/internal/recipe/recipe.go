@@ -6,17 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"os"
 	"os/exec"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/device"
 	"quack/internal/wire"
 )
 
@@ -80,7 +79,7 @@ type App interface {
 	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
 	Start(mode client.StartMode) error
 	Command(ctx context.Context, cmd string) (adb.Output, error)
-	Target() client.Target
+	Target() device.Target
 }
 
 // A step that starts after ctx ended does not get far: the app cancels a call, the app does not open, and a
@@ -91,7 +90,7 @@ func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc)
 		return app.Call(ctx, wire.Call(step), notify)
 	case OpenApp:
 		if ctx.Err() != nil {
-			return wire.MessageResult{}, &client.CallError{Message: "canceled"}
+			return wire.MessageResult{}, client.ErrCanceled
 		}
 		return wire.MessageResult{}, app.Start(client.OpenApp)
 	case Wait:
@@ -100,12 +99,12 @@ func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc)
 		select {
 		case <-timer.C:
 		case <-ctx.Done():
-			return wire.MessageResult{}, &client.CallError{Message: "canceled"}
+			return wire.MessageResult{}, client.ErrCanceled
 		}
 	case Shell:
 		out, err := app.Command(ctx, step.Command)
 		if ctx.Err() != nil {
-			return wire.MessageResult{}, &client.CallError{Message: "canceled"}
+			return wire.MessageResult{}, client.ErrCanceled
 		}
 		if err != nil {
 			return wire.MessageResult{}, err
@@ -119,7 +118,7 @@ func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc)
 
 // ANDROID_SERIAL makes adb in command reach the recipe's device. A command that sh started in the background can
 // hold its output open after sh exits, so WaitDelay bounds the wait for it.
-func run(ctx context.Context, command string, target client.Target) (wire.MessageResult, error) {
+func run(ctx context.Context, command string, target device.Target) (wire.MessageResult, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Env = append(os.Environ(), "QUACK_PACKAGE="+target.Package, "ANDROID_SERIAL="+string(target.Device))
 	var stdout, stderr bytes.Buffer
@@ -129,7 +128,7 @@ func run(ctx context.Context, command string, target client.Target) (wire.Messag
 	var exited *exec.ExitError
 	switch {
 	case ctx.Err() != nil:
-		return wire.MessageResult{}, &client.CallError{Message: "canceled"}
+		return wire.MessageResult{}, client.ErrCanceled
 	case errors.As(err, &exited):
 		return commandResult(adb.Output{Stdout: stdout.String(), Stderr: stderr.String(), Exit: exited.ExitCode()})
 	case err != nil:
@@ -152,9 +151,8 @@ func commandResult(out adb.Output) (wire.MessageResult, error) {
 func Line(step Step, actions []wire.Action) string {
 	switch step := step.(type) {
 	case Call:
-		at := slices.IndexFunc(actions, func(a wire.Action) bool { return a.ID == step.Action })
-		if at >= 0 {
-			return CommandLine(actions[at], step.Args)
+		if action, ok := wire.FindAction(actions, step.Action); ok {
+			return CommandLine(action, step.Args)
 		}
 		action := wire.Action{ID: step.Action}
 		for _, key := range slices.Sorted(maps.Keys(step.Args)) {
@@ -186,7 +184,7 @@ func CommandLine(action wire.Action, args map[string]wire.RawArg) string {
 }
 
 // Only args typed on the command line or in the TUI take variables. A recipe reads the environment through env.
-func ExpandArgs(args map[string]wire.RawArg, target client.Target) (map[string]wire.RawArg, error) {
+func ExpandArgs(args map[string]wire.RawArg, target device.Target) (map[string]wire.RawArg, error) {
 	if args == nil {
 		return nil, nil
 	}
@@ -205,7 +203,7 @@ func ExpandArgs(args map[string]wire.RawArg, target client.Target) (map[string]w
 	return expanded, nil
 }
 
-func expand(text string, target client.Target) (string, error) {
+func expand(text string, target device.Target) (string, error) {
 	var out strings.Builder
 	rest := text
 	for {
@@ -246,7 +244,7 @@ func expand(text string, target client.Target) (string, error) {
 	}
 }
 
-func lookup(target client.Target, name string) (string, bool) {
+func lookup(target device.Target, name string) (string, bool) {
 	switch name {
 	case "QUACK_PACKAGE":
 		return target.Package, true
@@ -263,33 +261,6 @@ func isVariable(name string) bool {
 		}
 	}
 	return name != ""
-}
-
-// Matches the Kotlin library's parsing. A type this CLI does not know takes any value.
-func parses(p wire.Param, value string) bool {
-	switch p.Type {
-	case wire.ParamTypeInt:
-		_, err := strconv.ParseInt(value, 10, 32)
-		return err == nil
-	case wire.ParamTypeLong:
-		_, err := strconv.ParseInt(value, 10, 64)
-		return err == nil
-	case wire.ParamTypeDouble:
-		f, err := strconv.ParseFloat(value, 64)
-		return err == nil && !math.IsInf(f, 0) && !math.IsNaN(f)
-	case wire.ParamTypeBoolean:
-		return value == "true" || value == "false"
-	case wire.ParamTypeEnum:
-		return slices.ContainsFunc(p.Choices, func(c string) bool { return strings.EqualFold(c, value) })
-	}
-	return true
-}
-
-func expected(p wire.Param) string {
-	if p.Type == wire.ParamTypeEnum {
-		return "one of " + strings.Join(p.Choices, ", ")
-	}
-	return string(p.Type)
 }
 
 // Follows the rules of action ids: ASCII letters, digits, '_', '.' and '-', and no '-' first, which would read as a flag.

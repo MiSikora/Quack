@@ -15,6 +15,7 @@ import (
 	"quack/internal/adb"
 	"quack/internal/client"
 	"quack/internal/config"
+	"quack/internal/device"
 	"quack/internal/wire"
 )
 
@@ -698,7 +699,7 @@ func TestExpandArgsReplacesVariables(t *testing.T) {
 
 const pkg = "io.mehow.quack.sample"
 
-var target = client.Target{Device: "emulator-5554", Package: pkg}
+var target = device.Target{Device: "emulator-5554", Package: pkg}
 
 var actions = []wire.Action{
 	{ID: "app.params", Params: []wire.Param{
@@ -784,7 +785,7 @@ type fakeApp struct {
 	calls    []string
 }
 
-func (a *fakeApp) Target() client.Target { return target }
+func (a *fakeApp) Target() device.Target { return target }
 
 func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {
 	a.commands = append(a.commands, cmd)

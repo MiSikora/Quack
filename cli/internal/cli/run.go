@@ -15,6 +15,7 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/device"
 	"quack/internal/recipe"
 	"quack/internal/tui"
 	"quack/internal/wire"
@@ -145,7 +146,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	if opts.device == "" {
 		opts.device = os.Getenv("ANDROID_SERIAL")
 	}
-	if opts.pkg != "" && !client.IsPackageName(opts.pkg) {
+	if opts.pkg != "" && !device.IsPackageName(opts.pkg) {
 		return opts, usageErrorf("%q is not a package name", opts.pkg)
 	}
 	rest := fs.Args()
@@ -207,9 +208,9 @@ func run(opts options, terminal Terminal) error {
 		mode = client.OpenApp
 	}
 	if opts.interactive {
-		return tui.Run(client.Target{Device: adb.Device(opts.device), Package: opts.pkg}, mode, opts.startTimeout, version)
+		return tui.Run(device.Target{Device: adb.Device(opts.device), Package: opts.pkg}, mode, opts.startTimeout, version)
 	}
-	target, err := client.Find(adb.Device(opts.device), opts.pkg)
+	target, err := device.Find(adb.Device(opts.device), opts.pkg)
 	if err != nil {
 		return err
 	}

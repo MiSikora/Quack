@@ -11,19 +11,19 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"quack/internal/adb"
-	"quack/internal/client"
+	"quack/internal/device"
 )
 
 type picker struct {
 	step        step
 	device      adb.Device
-	want        client.Target
+	want        device.Target
 	auto        bool
 	skipPackage bool
 	back        bool
 	quiet       bool
 	startup     bool
-	connecting  *client.Target
+	connecting  *device.Target
 	input       textinput.Model
 	selected    string
 	width       int
@@ -37,7 +37,7 @@ const (
 )
 
 type seenDevice struct {
-	client.Device
+	device.Info
 	inspected bool
 }
 
@@ -51,7 +51,7 @@ type pickRow struct {
 	matched []int
 }
 
-func newPicker(want client.Target, width int) *picker {
+func newPicker(want device.Target, width int) *picker {
 	p := &picker{want: want, input: newInput("")}
 	p.toStep(deviceStep)
 	p.resize(width)
@@ -96,14 +96,14 @@ func (p *picker) allRows(devices []seenDevice) []pickRow {
 		return rows
 	}
 	for _, d := range devices {
-		if p.want.Device != "" && d.Device.Device != p.want.Device {
+		if p.want.Device != "" && d.Device != p.want.Device {
 			continue
 		}
-		label := string(d.Device.Device)
+		label := string(d.Device)
 		if d.Model != "" {
 			label = d.Model + " · " + label
 		}
-		row := pickRow{key: string(d.Device.Device), label: label, device: d.Device.Device}
+		row := pickRow{key: string(d.Device), label: label, device: d.Device}
 		count := len(p.packages(devices, row.device))
 		if p.want.Package != "" && d.inspected && count == 0 {
 			continue
@@ -132,7 +132,7 @@ func (p *picker) allRows(devices []seenDevice) []pickRow {
 func (p *picker) onlyDevice(devices []seenDevice) (pickRow, bool) {
 	var only []pickRow
 	for _, d := range devices {
-		wanted := p.want.Device == "" || d.Device.Device == p.want.Device
+		wanted := p.want.Device == "" || d.Device == p.want.Device
 		if wanted && d.State == adb.Ready && !d.inspected {
 			return pickRow{}, false
 		}
@@ -157,7 +157,7 @@ func (p *picker) alarm(devices []seenDevice, listed bool) string {
 	switch {
 	case !listed:
 		return ""
-	case len(devices) == 0 && p.want == client.Target{}:
+	case len(devices) == 0 && p.want == device.Target{}:
 		return "no device"
 	case len(devices) == 0:
 		return ""
@@ -195,8 +195,8 @@ func (p *picker) status(devices []seenDevice, listed bool) string {
 	return strconv.Itoa(len(rows)) + " devices · no quack-enabled app · /pick-device to see them"
 }
 
-func (p *picker) packages(devices []seenDevice, device adb.Device) []string {
-	i := slices.IndexFunc(devices, func(d seenDevice) bool { return d.Device.Device == device })
+func (p *picker) packages(devices []seenDevice, serial adb.Device) []string {
+	i := slices.IndexFunc(devices, func(d seenDevice) bool { return d.Device == serial })
 	if i < 0 {
 		return nil
 	}

@@ -18,12 +18,13 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/device"
 	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
 func TestListDevicesGivesEachDeviceWithItsApps(t *testing.T) {
-	source := &fakeSource{devices: []client.Device{
+	source := &fakeSource{devices: []device.Info{
 		{Listing: adb.Listing{Device: "emulator-5554", State: "device"}, Model: "Pixel 8", Packages: []string{"io.mehow.quack.sample"}},
 		{Listing: adb.Listing{Device: "R5CT20ABCDE", State: "unauthorized"}},
 	}}
@@ -200,7 +201,7 @@ func TestRunActionFailsWhenTheUserDeclinesToGiveParams(t *testing.T) {
 
 func TestToolsReportWhyNoAppWasFound(t *testing.T) {
 	source := newFakeSource()
-	source.findErr = &client.AppError{Message: "several quack packages on emulator-5554, pick one:\n  --device emulator-5554 --app a.b\n  --device emulator-5554 --app c.d"}
+	source.findErr = &device.AppError{Message: "several quack packages on emulator-5554, pick one:\n  --device emulator-5554 --app a.b\n  --device emulator-5554 --app c.d"}
 	session := connect(t, source)
 
 	for tool, args := range map[string]map[string]any{"list_actions": nil, "run_action": {"action": "account.create"}} {
@@ -771,7 +772,7 @@ func text(result *mcp.CallToolResult) string {
 }
 
 type fakeSource struct {
-	devices []client.Device
+	devices []device.Info
 	app     *fakeApp
 	findErr error
 	finds   []string
@@ -782,17 +783,17 @@ func newFakeSource() *fakeSource {
 	return &fakeSource{app: &fakeApp{release: make(chan struct{})}}
 }
 
-func (s *fakeSource) Devices() ([]client.Device, error) { return s.devices, nil }
+func (s *fakeSource) Devices() ([]device.Info, error) { return s.devices, nil }
 
-func (s *fakeSource) Find(device adb.Device, pkg string) (client.Target, error) {
-	s.finds = append(s.finds, string(device)+" "+pkg)
+func (s *fakeSource) Find(serial adb.Device, pkg string) (device.Target, error) {
+	s.finds = append(s.finds, string(serial)+" "+pkg)
 	if s.findErr != nil {
-		return client.Target{}, s.findErr
+		return device.Target{}, s.findErr
 	}
-	return client.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}, nil
+	return device.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}, nil
 }
 
-func (s *fakeSource) Connect(_ client.Target, mode client.StartMode) (App, error) {
+func (s *fakeSource) Connect(_ device.Target, mode client.StartMode) (App, error) {
 	s.modes = append(s.modes, mode)
 	return s.app, nil
 }
@@ -810,8 +811,8 @@ type fakeApp struct {
 	release chan struct{}
 }
 
-func (a *fakeApp) Target() client.Target {
-	return client.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}
+func (a *fakeApp) Target() device.Target {
+	return device.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}
 }
 
 func (a *fakeApp) Command(_ context.Context, cmd string) (adb.Output, error) {

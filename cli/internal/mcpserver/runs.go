@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"quack/internal/client"
+	"quack/internal/device"
 	"quack/internal/wire"
 )
 
@@ -64,7 +64,7 @@ func newRuns(ctx context.Context) *runs {
 	return &runs{ctx: ctx}
 }
 
-func (r *runs) start(target client.Target, app App, call wire.Call) string {
+func (r *runs) start(target device.Target, app App, call wire.Call) string {
 	ctx, cancel := context.WithCancel(r.ctx)
 	r.mu.Lock()
 	r.count++
@@ -209,18 +209,18 @@ func (held *run) wake() {
 func noRun(id string) error { return errors.New("no run " + id) }
 
 func checkCall(actions []wire.Action, call wire.Call) error {
-	i := slices.IndexFunc(actions, func(a wire.Action) bool { return a.ID == call.Action })
-	if i < 0 {
+	action, ok := wire.FindAction(actions, call.Action)
+	if !ok {
 		return wire.Error{Code: wire.ErrorCodeUnknownAction, Message: fmt.Sprintf("no action '%s'", call.Action)}
 	}
-	params := actions[i].Params
+	params := action.Params
 	for _, key := range slices.Sorted(maps.Keys(call.Args)) {
 		if !slices.ContainsFunc(params, func(p wire.Param) bool { return p.Name == key }) {
 			return wire.Error{Code: wire.ErrorCodeInvalidArgs, Message: fmt.Sprintf("unknown argument '%s'", key)}
 		}
 	}
 	for _, p := range params {
-		if _, required := p.Presence.(wire.Required); required && len(call.Args[p.Name]) == 0 {
+		if p.Required() && len(call.Args[p.Name]) == 0 {
 			return wire.Error{Code: wire.ErrorCodeInvalidArgs, Message: fmt.Sprintf("missing argument '%s'", p.Name)}
 		}
 	}

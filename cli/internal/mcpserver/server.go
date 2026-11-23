@@ -20,14 +20,15 @@ import (
 
 	"quack/internal/adb"
 	"quack/internal/client"
+	"quack/internal/device"
 	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
 type Source interface {
-	Devices() ([]client.Device, error)
-	Find(device adb.Device, pkg string) (client.Target, error)
-	Connect(target client.Target, mode client.StartMode) (App, error)
+	Devices() ([]device.Info, error)
+	Find(serial adb.Device, pkg string) (device.Target, error)
+	Connect(target device.Target, mode client.StartMode) (App, error)
 	// Recipes gives the app's recipes, and the problems that left some files or entries out.
 	Recipes(pkg string) (*recipe.Cookbook, []string, error)
 }
@@ -474,7 +475,7 @@ func askForParams(req *mcp.CallToolRequest, what string, params []wire.Param, ar
 	schema := &jsonschema.Schema{Type: "object", Properties: map[string]*jsonschema.Schema{}}
 	missing := map[string]wire.Param{}
 	for _, p := range params {
-		if _, required := p.Presence.(wire.Required); required && len(args[p.Name]) == 0 {
+		if p.Required() && len(args[p.Name]) == 0 {
 			schema.Properties[p.Name] = fieldSchema(p)
 			schema.Required = append(schema.Required, p.Name)
 			missing[p.Name] = p
@@ -541,7 +542,7 @@ func fieldSchema(p wire.Param) *jsonschema.Schema {
 }
 
 type preparedCall struct {
-	target  client.Target
+	target  device.Target
 	app     App
 	call    wire.Call
 	actions []wire.Action
@@ -571,20 +572,18 @@ func (s tools) prepareCall(ctx context.Context, req *mcp.CallToolRequest, in run
 	if !canElicit(req.Session) {
 		return prepared, nil, nil
 	}
-	for _, a := range prepared.actions {
-		if a.ID == in.Action {
-			if form, err := askForParams(req, in.Action, a.Params, args); form != nil || err != nil {
-				return preparedCall{}, form, err
-			}
+	if a, ok := wire.FindAction(prepared.actions, in.Action); ok {
+		if form, err := askForParams(req, in.Action, a.Params, args); form != nil || err != nil {
+			return preparedCall{}, form, err
 		}
 	}
 	return prepared, nil, nil
 }
 
-func (s tools) connect(device, pkg string, mode client.StartMode) (client.Target, App, error) {
-	target, err := s.source.Find(adb.Device(device), pkg)
+func (s tools) connect(serial, pkg string, mode client.StartMode) (device.Target, App, error) {
+	target, err := s.source.Find(adb.Device(serial), pkg)
 	if err != nil {
-		return client.Target{}, nil, err
+		return device.Target{}, nil, err
 	}
 	app, err := s.source.Connect(target, mode)
 	return target, app, err
@@ -610,18 +609,15 @@ func progress(ctx context.Context, req *mcp.CallToolRequest) func(message string
 func action(a wire.Action) actionOutput {
 	params := []paramOutput{}
 	for _, p := range a.Params {
-		param := paramOutput{Name: p.Name, Type: string(p.Type), Description: p.Description, Choices: p.Choices, Hints: p.Hints}
-		switch presence := p.Presence.(type) {
-		case wire.Required:
-			param.Required = true
-		case wire.Default:
-			if p.Type.IsList() {
-				param.Default = presence.Values
-			} else if len(presence.Values) > 0 {
-				param.Default = presence.Values[0]
-			}
-		}
-		params = append(params, param)
+		params = append(params, paramOutput{
+			Name:        p.Name,
+			Type:        string(p.Type),
+			Description: p.Description,
+			Choices:     p.Choices,
+			Hints:       p.Hints,
+			Required:    p.Required(),
+			Default:     p.DefaultValue(),
+		})
 	}
 	return actionOutput{ID: a.ID, Description: a.Description, Params: params}
 }
@@ -659,30 +655,18 @@ type clientSource struct {
 	status       io.Writer
 }
 
-func (clientSource) Devices() ([]client.Device, error) {
-	listings, err := adb.Devices()
-	if err != nil {
-		return nil, err
-	}
-	var devices []client.Device
-	for _, l := range listings {
-		d, err := client.Inspect(l)
-		if err != nil {
-			return nil, err
-		}
-		devices = append(devices, d)
-	}
-	return devices, nil
+func (clientSource) Devices() ([]device.Info, error) {
+	return device.List("", "")
 }
 
-func (clientSource) Find(device adb.Device, pkg string) (client.Target, error) {
-	if pkg != "" && !client.IsPackageName(pkg) {
-		return client.Target{}, errors.New(pkg + " is not a package name")
+func (clientSource) Find(serial adb.Device, pkg string) (device.Target, error) {
+	if pkg != "" && !device.IsPackageName(pkg) {
+		return device.Target{}, errors.New(pkg + " is not a package name")
 	}
-	return client.Find(device, pkg)
+	return device.Find(serial, pkg)
 }
 
-func (s clientSource) Connect(target client.Target, mode client.StartMode) (App, error) {
+func (s clientSource) Connect(target device.Target, mode client.StartMode) (App, error) {
 	app, err := client.Resolve(client.Options{Target: target, Mode: mode, StartTimeout: s.startTimeout, Status: s.status})
 	return app, err
 }
