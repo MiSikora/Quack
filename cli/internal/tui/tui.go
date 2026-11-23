@@ -7,13 +7,11 @@ import (
 	"os"
 	"regexp"
 	"slices"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/x/ansi"
 
 	"quack/internal/adb"
 	"quack/internal/config"
@@ -37,25 +35,15 @@ func Run(want device.Target, openApp bool, startTimeout time.Duration, version s
 }
 
 type model struct {
-	backend    session.Backend
 	activity   activity
-	app        session.App
-	target     device.Target
-	connection int
-	opensApp   bool
-	devices    []seenDevice
-	listed     bool
-	asked      int
-	pending    map[adb.Device]int
+	tracker    tracker
+	connection connection
 	picker     *picker
-	polling    bool
-	hello      wire.Hello
 	prompt     prompt
 	box        *paramBox
 	runs       runs
 	hideData   bool
 	dir        string
-	cookbook   *recipe.Cookbook
 	quit       notice
 	copied     notice
 	refused    notice
@@ -87,54 +75,19 @@ type command struct {
 	run         func(*model) tea.Cmd
 }
 
-type described struct {
-	hello      wire.Hello
-	actions    []wire.Action
-	err        error
-	recipes    recipes
-	connection int
-}
-
-type recipes struct {
-	cookbook *recipe.Cookbook
-	warnings []string
-	err      error
-}
-
-type listed struct {
-	listings []adb.Listing
-}
-
-type (
-	inspected struct {
-		serial adb.Device
-		device device.Info
-		asked  int
-		err    error
-	}
-	polled struct{}
-)
-
-type connected struct {
-	target device.Target
-	app    session.App
-	described
-}
-
 func newModel(backend session.Backend, activity activity, want device.Target, openApp bool, version, dir string, settings config.Config, problems []string) *model {
 	m := &model{
-		backend:   backend,
-		activity:  activity,
-		dir:       dir,
-		pending:   map[adb.Device]int{},
-		opensApp:  openApp,
-		picker:    newPicker(want, 0),
-		clock:     wallClock{},
-		prompt:    prompt{input: newInput(""), grouped: settings.GroupNamespaces},
-		hideData:  !settings.ShowData,
-		runs:      newRuns(),
-		clipboard: clipboard.WriteAll,
-		header:    header(version),
+		activity:   activity,
+		tracker:    newTracker(backend),
+		connection: connection{backend: backend, opensApp: openApp},
+		dir:        dir,
+		picker:     newPicker(want, 0),
+		clock:      wallClock{},
+		prompt:     prompt{input: newInput(""), grouped: settings.GroupNamespaces},
+		hideData:   !settings.ShowData,
+		runs:       newRuns(),
+		clipboard:  clipboard.WriteAll,
+		header:     header(version),
 	}
 	m.picker.auto, m.picker.skipPackage, m.picker.quiet, m.picker.startup = true, true, true, true
 	m.prompt.connect(false)
@@ -146,7 +99,7 @@ func newModel(backend session.Backend, activity activity, want device.Target, op
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(m.activity.listen(), m.track(), m.picker.input.Focus(), m.poll())
+	return tea.Batch(m.activity.listen(), m.tracker.track(m.activity, m.clock), m.picker.input.Focus(), m.tracker.poll(m.clock))
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -168,14 +121,7 @@ func (m *model) focus() tea.Cmd {
 	return nil
 }
 
-func (m *model) picking() bool { return m.picker != nil && m.picker.showing(m.devices) }
-
-func (m *model) View() tea.View {
-	view := tea.NewView(strings.Join(m.screen(), "\n"))
-	view.AltScreen = true
-	view.MouseMode = tea.MouseModeCellMotion
-	return view
-}
+func (m *model) picking() bool { return m.picker != nil && m.picker.showing(m.tracker.devices) }
 
 func (m *model) update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
@@ -229,11 +175,11 @@ func (m *model) update(msg tea.Msg) tea.Cmd {
 	case listed:
 		return tea.Batch(m.list(msg.listings), m.activity.listen())
 	case inspected:
-		m.inspected(msg)
+		m.tracker.inspected(msg)
 		return tea.Batch(m.checkApp(), m.advance())
 	case polled:
-		m.polling = false
-		return tea.Batch(m.inspectPicked(), m.poll())
+		m.tracker.polling = false
+		return tea.Batch(m.inspectPicked(), m.tracker.poll(m.clock))
 	case connected:
 		return tea.Batch(m.connected(msg), m.activity.listen())
 	case noticeEnded:
@@ -312,7 +258,7 @@ func (m *model) pressPicker(msg tea.KeyPressMsg) tea.Cmd {
 		case p.step == packageStep && p.back:
 			p.auto = false
 			p.toStep(deviceStep)
-		case m.app != nil:
+		case m.connection.app != nil:
 			m.picker = nil
 			return m.prompt.input.Focus()
 		case !p.quiet:
@@ -328,7 +274,7 @@ func (m *model) pressPicker(msg tea.KeyPressMsg) tea.Cmd {
 	case "tab":
 		return nil
 	}
-	return p.update(msg, m.devices)
+	return p.update(msg, m.tracker.devices)
 }
 
 func (m *model) pressBox(msg tea.KeyPressMsg) tea.Cmd {
@@ -395,7 +341,7 @@ func (m *model) choose() tea.Cmd {
 }
 
 func (m *model) start(r runnable, args map[string]wire.RawArg) tea.Cmd {
-	app, actions, cookbook := m.app, m.prompt.actions, m.cookbook
+	app, actions, cookbook := m.connection.app, m.prompt.actions, m.connection.cookbook
 	header, cmd := m.runs.start(m.activity, &run{runnable: r}, func(ctx context.Context, emit func(step.Event)) (json.RawMessage, error) {
 		return session.Run(ctx, app, actions, cookbook, session.Runnable{Name: r.ID, Recipe: r.recipe}, args, emit)
 	})
@@ -409,17 +355,8 @@ func (m *model) openBox(r runnable) tea.Cmd {
 	return m.box.init()
 }
 
-func (m *model) reload() tea.Cmd {
-	app, activity, dir, pkg, connection := m.app, m.activity, m.dir, m.target.Package, m.connection
-	return func() tea.Msg {
-		hello, actions, err := app.Describe(activity.ctx)
-		activity.send(described{hello, actions, err, loadRecipes(dir, pkg), connection})
-		return nil
-	}
-}
-
 func (m *model) openApp() tea.Cmd {
-	app, activity := m.app, m.activity
+	app, activity := m.connection.app, m.activity
 	return func() tea.Msg {
 		line := statusStyle.Render("showed the app's main screen")
 		if _, err := step.Do(context.Background(), app, step.OpenApp{}, nil); err != nil {
@@ -431,7 +368,7 @@ func (m *model) openApp() tea.Cmd {
 }
 
 func (m *model) initRecipes() tea.Cmd {
-	pkg := m.target.Package
+	pkg := m.connection.target.Package
 	written, err := recipe.Init(m.dir, pkg)
 	if err != nil {
 		m.log.add(problemStyle.Render("init-recipes: " + err.Error()))
@@ -471,7 +408,7 @@ func (m *model) clear() tea.Cmd {
 }
 
 func (m *model) describe(msg described) {
-	if msg.connection != m.connection {
+	if msg.connection != m.connection.generation {
 		return
 	}
 	m.setRecipes(msg.recipes)
@@ -479,7 +416,7 @@ func (m *model) describe(msg described) {
 		m.log.add(problemStyle.Render("reload: " + msg.err.Error()))
 		return
 	}
-	m.hello = msg.hello
+	m.connection.hello = msg.hello
 	m.prompt.setActions(msg.actions)
 	line := fmt.Sprintf("reloaded %d actions", len(msg.actions))
 	if msg.recipes.err == nil {
@@ -489,7 +426,7 @@ func (m *model) describe(msg described) {
 }
 
 func (m *model) setRecipes(r recipes) {
-	m.cookbook = r.cookbook
+	m.connection.cookbook = r.cookbook
 	m.prompt.setRecipes(r.list())
 	for _, warning := range r.warnings {
 		m.log.add(problemStyle.Render(warning))
@@ -513,7 +450,7 @@ func (m *model) pickDevice() tea.Cmd {
 	if m.runs.active != nil {
 		return m.refused.show(m.clock, refusedDuringRun)
 	}
-	if m.app == nil {
+	if m.connection.app == nil {
 		m.picker.quiet = false
 		return nil
 	}
@@ -525,7 +462,7 @@ func (m *model) pickApp() tea.Cmd {
 		return m.refused.show(m.clock, refusedDuringRun)
 	}
 	return m.openPicker(func(p *picker) {
-		p.device = m.target.Device
+		p.device = m.connection.target.Device
 		p.toStep(packageStep)
 	})
 }
@@ -535,12 +472,12 @@ func (m *model) openPicker(setup func(*picker)) tea.Cmd {
 	m.prompt.input.Blur()
 	m.picker = newPicker(device.Target{}, m.width)
 	setup(m.picker)
-	return tea.Batch(m.picker.input.Focus(), m.inspectAll(), m.poll())
+	return tea.Batch(m.picker.input.Focus(), m.tracker.inspectAll(), m.tracker.poll(m.clock))
 }
 
 func (m *model) pick() tea.Cmd {
 	p := m.picker
-	row, ok := p.selection(m.devices)
+	row, ok := p.selection(m.tracker.devices)
 	switch {
 	case !ok:
 		return nil
@@ -557,11 +494,11 @@ func (m *model) advance() tea.Cmd {
 	if p == nil || p.connecting != nil {
 		return nil
 	}
-	if row, ok := p.onlyDevice(m.devices); p.step == deviceStep && p.auto && ok {
+	if row, ok := p.onlyDevice(m.tracker.devices); p.step == deviceStep && p.auto && ok {
 		p.device, p.back = row.device, false
 		p.toStep(packageStep)
 	}
-	if pkgs := p.packages(m.devices, p.device); p.step == packageStep && p.skipPackage && len(pkgs) == 1 {
+	if pkgs := p.packages(m.tracker.devices, p.device); p.step == packageStep && p.skipPackage && len(pkgs) == 1 {
 		return m.connect(device.Target{Device: p.device, Package: pkgs[0]})
 	}
 	return nil
@@ -569,17 +506,7 @@ func (m *model) advance() tea.Cmd {
 
 func (m *model) connect(target device.Target) tea.Cmd {
 	m.picker.connecting = &target
-	backend, activity, openApp, dir := m.backend, m.activity, m.opensApp, m.dir
-	return func() tea.Msg {
-		app, err := backend.Connect(target, openApp)
-		msg := connected{target: target, app: app, described: described{err: err}}
-		if err == nil {
-			msg.hello, msg.actions, msg.err = app.Describe(activity.ctx)
-			msg.recipes = loadRecipes(dir, target.Package)
-		}
-		activity.send(msg)
-		return nil
-	}
+	return m.connection.connect(target, m.activity, m.dir)
 }
 
 func (m *model) connected(msg connected) tea.Cmd {
@@ -591,128 +518,54 @@ func (m *model) connected(msg connected) tea.Cmd {
 		m.log.add(problemStyle.Render(msg.target.Package + ": " + msg.err.Error()))
 		return m.advance()
 	}
-	m.app, m.target, m.hello, m.opensApp = msg.app, msg.target, msg.hello, false
-	m.connection++
+	m.connection.open(msg)
 	m.picker = nil
 	m.prompt.clear()
 	m.prompt.connect(true)
 	m.prompt.setActions(msg.actions)
 	where := string(msg.target.Device)
-	if i := m.deviceIndex(msg.target.Device); i >= 0 && m.devices[i].Model != "" {
-		where = m.devices[i].Model + " · " + where
+	if i := m.tracker.index(msg.target.Device); i >= 0 && m.tracker.devices[i].Model != "" {
+		where = m.tracker.devices[i].Model + " · " + where
 	}
 	m.log.add(statusStyle.Render("switched to " + msg.target.Package + " on " + where))
 	m.setRecipes(msg.recipes)
 	return m.prompt.input.Focus()
 }
 
-func (m *model) track() tea.Cmd {
-	backend, activity, clock := m.backend, m.activity, m.clock
-	return func() tea.Msg {
-		failing := false
-		for activity.ctx.Err() == nil {
-			err := backend.Track(activity.ctx, func(listings []adb.Listing) {
-				failing = false
-				activity.send(listed{listings})
-			})
-			if err != nil && !failing {
-				failing = true
-				activity.send(logged{problemStyle.Render(err.Error())})
-			}
-			select {
-			case <-activity.ctx.Done():
-			case <-clock.After(pollTime):
-			}
-		}
-		return nil
-	}
-}
-
 func (m *model) list(listings []adb.Listing) tea.Cmd {
-	m.listed = true
-	var devices []seenDevice
-	var cmds []tea.Cmd
-	for _, l := range listings {
-		if i := m.deviceIndex(l.Device); i >= 0 && m.devices[i].State == l.State {
-			devices = append(devices, m.devices[i])
-			continue
-		}
-		devices = append(devices, seenDevice{Info: device.Info{Listing: l}})
-		cmds = append(cmds, m.inspect(l))
+	cmds := m.tracker.list(listings)
+	if c := &m.connection; c.app != nil && m.tracker.index(c.target.Device) < 0 {
+		cmds = append(cmds, m.drop(string(c.target.Device)+" disconnected"))
 	}
-	m.devices = devices
-	for device := range m.pending {
-		if m.deviceIndex(device) < 0 {
-			delete(m.pending, device)
-		}
-	}
-	if m.app != nil && m.deviceIndex(m.target.Device) < 0 {
-		cmds = append(cmds, m.drop(string(m.target.Device)+" disconnected"))
-	}
-	if p := m.picker; p != nil && p.step == packageStep && m.deviceIndex(p.device) < 0 {
+	if p := m.picker; p != nil && p.step == packageStep && m.tracker.index(p.device) < 0 {
 		p.toStep(deviceStep)
 	}
 	return tea.Batch(append(cmds, m.advance())...)
 }
 
-func (m *model) inspect(listing adb.Listing) tea.Cmd {
-	if listing.State != adb.Ready {
-		return nil
-	}
-	backend := m.backend
-	return m.ask(listing.Device, func() (device.Info, error) { return backend.Inspect(listing) })
-}
-
-func (m *model) ask(serial adb.Device, inspect func() (device.Info, error)) tea.Cmd {
-	m.asked++
-	asked := m.asked
-	m.pending[serial] = asked
-	return func() tea.Msg {
-		device, err := inspect()
-		return inspected{serial, device, asked, err}
-	}
-}
-
 func (m *model) inspectPicked() tea.Cmd {
 	if m.picker != nil {
-		return m.inspectAll()
+		return m.tracker.inspectAll()
 	}
-	i := m.deviceIndex(m.target.Device)
-	if i < 0 {
-		return nil
-	}
-	if _, waiting := m.pending[m.target.Device]; waiting {
-		return nil
-	}
-	seen := m.devices[i]
-	if !seen.inspected || seen.State != adb.Ready {
-		return m.inspect(seen.Listing)
-	}
-	backend := m.backend
-	return m.ask(seen.Device, func() (device.Info, error) {
-		info := seen.Info
-		packages, err := backend.Packages(info.Device)
-		info.Packages = packages
-		return info, err
-	})
+	return m.tracker.refresh(m.connection.target.Device)
 }
 
 func (m *model) checkApp() tea.Cmd {
-	if m.app == nil {
+	c := &m.connection
+	if c.app == nil {
 		return nil
 	}
-	i := m.deviceIndex(m.target.Device)
-	if i < 0 || !m.devices[i].inspected || slices.Contains(m.devices[i].Packages, m.target.Package) {
+	i := m.tracker.index(c.target.Device)
+	if i < 0 || !m.tracker.devices[i].inspected || slices.Contains(m.tracker.devices[i].Packages, c.target.Package) {
 		return nil
 	}
-	return m.drop(m.target.Package + " left " + string(m.target.Device))
+	return m.drop(c.target.Package + " left " + string(c.target.Device))
 }
 
 func (m *model) drop(line string) tea.Cmd {
 	m.log.add(statusStyle.Render(line))
 	m.runs.stop()
-	m.app = nil
-	m.connection++
+	m.connection.drop()
 	m.picker = nil
 	m.refused.showing = false
 	m.prompt.clear()
@@ -721,44 +574,6 @@ func (m *model) drop(line string) tea.Cmd {
 	m.setRecipes(recipes{})
 	return m.openPicker(func(p *picker) { p.quiet = true })
 }
-
-func (m *model) inspectAll() tea.Cmd {
-	var cmds []tea.Cmd
-	for _, d := range m.devices {
-		if _, waiting := m.pending[d.Device]; !waiting {
-			cmds = append(cmds, m.inspect(d.Listing))
-		}
-	}
-	return tea.Batch(cmds...)
-}
-
-func (m *model) inspected(msg inspected) {
-	if m.pending[msg.serial] != msg.asked {
-		return
-	}
-	delete(m.pending, msg.serial)
-	i := m.deviceIndex(msg.serial)
-	if msg.err != nil || i < 0 || m.devices[i].State != msg.device.State {
-		return
-	}
-	m.devices[i] = seenDevice{Info: msg.device, inspected: true}
-}
-
-func (m *model) poll() tea.Cmd {
-	if m.polling {
-		return nil
-	}
-	m.polling = true
-	return after(m.clock, pollTime, polled{})
-}
-
-func (m *model) deviceIndex(serial adb.Device) int {
-	return slices.IndexFunc(m.devices, func(d seenDevice) bool { return d.Device == serial })
-}
-
-func (m *model) logHeight() int { return max(0, m.height-panelRows) }
-
-func (m *model) logShown() int { return min(m.logHeight(), m.logHeight()+1-len(m.overlay())) }
 
 func (m *model) forward(msg tea.Msg) tea.Cmd {
 	cmd := m.prompt.forward(msg)
@@ -769,87 +584,6 @@ func (m *model) forward(msg tea.Msg) tea.Cmd {
 		cmd = tea.Batch(cmd, m.box.forward(msg))
 	}
 	return cmd
-}
-
-func (m *model) screen() []string {
-	rows := m.log.view(m.logHeight())
-	if m.width < minWidth || m.height < minHeight {
-		return fit(append(rows, "Make the window larger."), m.width, m.height)
-	}
-	rule := ruleStyle.Render(strings.Repeat("─", m.width))
-	rows = append(rows, "", m.title())
-	if overlay := m.overlay(); overlay != nil {
-		copy(rows[len(rows)-len(overlay)-1:], append([]string{rule}, overlay...))
-	}
-	rows = append(rows, rule, m.inputRow(), rule, footerStyle.Render(" "+m.footer()))
-	return fit(rows, m.width, m.height)
-}
-
-func (m *model) overlay() []string {
-	rows := min(maxListRows, m.logHeight()+1)
-	switch {
-	case m.picking():
-		return m.picker.list(m.devices, m.listed, rows)
-	case m.box != nil:
-		return m.box.view(rows)
-	}
-	return m.prompt.list(rows)
-}
-
-func (m *model) inputRow() string {
-	switch {
-	case m.picking():
-		return m.picker.view(m.devices)
-	case m.box != nil:
-		return m.box.preview()
-	}
-	return m.prompt.view()
-}
-
-func (m *model) footer() string {
-	switch {
-	case m.quit.showing:
-		return m.quit.text
-	case m.copied.showing:
-		return m.copied.text
-	case m.refused.showing:
-		return m.refused.text
-	case m.picking():
-		return m.picker.keys(m.app != nil || !m.picker.quiet || m.picker.startup)
-	case m.runs.active != nil:
-		return m.runs.footer()
-	case m.box != nil:
-		return m.box.keys()
-	case m.log.scrolled > 0:
-		return "scrolled back · end newest · " + m.prompt.keys()
-	case m.app == nil && !m.prompt.open():
-		return "/ for commands · ctrl+c quit"
-	}
-	return m.prompt.keys()
-}
-
-func (m *model) title() string {
-	if m.app == nil && m.picker != nil {
-		status := " · " + m.picker.status(m.devices, m.listed)
-		alarm := m.picker.alarm(m.devices, m.listed)
-		before, after, found := strings.Cut(status, alarm)
-		if alarm == "" || !found {
-			return selectedStyle.Render("quack") + statusStyle.Render(status)
-		}
-		return selectedStyle.Render("quack") + statusStyle.Render(before) + problemStyle.Render(alarm) + statusStyle.Render(after)
-	}
-	if m.app == nil {
-		return selectedStyle.Render("quack")
-	}
-	return selectedStyle.Render("quack") + statusStyle.Render(" · "+m.hello.Package+" "+m.hello.Version+" · "+string(m.target.Device))
-}
-
-func fit(lines []string, width, height int) []string {
-	lines = append(lines, make([]string, max(0, height-len(lines)))...)[:height]
-	for i, line := range lines {
-		lines[i] = ansi.Truncate(line, width, "…")
-	}
-	return lines
 }
 
 func (n *notice) show(c clock, text string) tea.Cmd {
@@ -885,37 +619,18 @@ func commands() []command {
 		{"/open-app", "ctrl+o", "Show the app's main screen", true, (*model).openApp},
 		{"/pick-app", "", "Pick another app on this device", true, (*model).pickApp},
 		{"/pick-device", "", "Pick another device", false, (*model).pickDevice},
-		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", true, (*model).reload},
+		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", true, func(m *model) tea.Cmd { return m.connection.reload(m.activity, m.dir) }},
 		{"/toggle-data", "", "Show or hide the JSON data of notifications and results", false, (*model).toggleData},
 	}
-}
-
-func loadRecipes(dir, pkg string) recipes {
-	cookbook, warnings, err := recipe.Load(dir, pkg)
-	return recipes{cookbook, warnings, err}
-}
-
-func (r recipes) list() []recipe.Recipe {
-	if r.cookbook == nil {
-		return nil
-	}
-	return r.cookbook.Recipes
 }
 
 var (
 	statusStyle  = lipgloss.NewStyle().Faint(true)
 	problemStyle = lipgloss.NewStyle().Foreground(lipgloss.Red)
-	footerStyle  = lipgloss.NewStyle().Faint(true)
-	ruleStyle    = lipgloss.NewStyle().Faint(true)
 )
 
 const (
-	maxListRows      = 10
-	panelRows        = 6
-	minWidth         = 24
-	minHeight        = panelRows + 2
 	noticeTime       = 2 * time.Second
-	pollTime         = 5 * time.Second
 	refusedDuringRun = "cancel the running action first (ctrl+c)"
 	wheelRows        = 3
 )

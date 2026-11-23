@@ -9,6 +9,65 @@ import (
 	"quack/internal/wire"
 )
 
+func usage(flags string) string {
+	return "quack runs the debug actions of a quack-enabled Android app over adb.\n\n" +
+		"With no action, quack opens a terminal UI to pick a device and an app, then find and run actions. It prints\n" +
+		"this help instead when stdin or stdout is not a terminal, AI_AGENT is set, or CI is set. With an action,\n" +
+		"quack runs it once, prints the outcome and exits. Scripts and agents: list the actions with --list-actions,\n" +
+		"run them with quack <action>, and add --json for output to parse.\n\n" +
+		"usage: quack [options]                                open the terminal UI\n" +
+		"       quack [options] <action> [key=value]...        run an action\n" +
+		"       quack [options] --recipe <name> [key=value]... run a recipe\n" +
+		"       quack [options] --list-actions [regex]         list the app's actions and their params\n" +
+		"       quack [options] --list-recipes [regex]         list the app's recipes and their params\n" +
+		"       quack [--app <package>] --init-recipes         set up recipes and editors to check them\n" +
+		"       quack [options] --list-devices                 list the devices and their quack-enabled apps\n\n" +
+		"arguments:\n" +
+		"  key=value   a param of the action or the recipe. Repeat the key for a list: tag=a tag=b. The value takes the\n" +
+		"              environment variable NAME as ${NAME}, and $${NAME} writes ${NAME}:\n" +
+		"              quack account.login 'token=${API_TOKEN}'\n\n" +
+		"options:\n" + flags + "\n" +
+		"recipes:\n" +
+		"  A recipe is a TypeScript or JavaScript function that runs actions and commands, and decides what to do with\n" +
+		"  what they return. A project keeps them in .quack/recipes/, which quack finds in the current dir or above it,\n" +
+		"  up to the home dir. [recipes] in .quack/quack.toml maps the apps whose packages a regex fully matches to\n" +
+		"  files there, and [recipes] in config.toml maps apps to your own files in $XDG_CONFIG_HOME/quack/recipes/:\n\n" +
+		"    [recipes]\n" +
+		"    'io\\.example\\.app' = \"recipes.ts\"\n" +
+		"    'io\\.example\\..*' = [\"common.ts\", \"debug.ts\"]\n\n" +
+		"  An app gets the recipes of every file it matches in both, and two recipes of one name fail them all. Files\n" +
+		"  may import other local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json\n" +
+		"  next to the recipes, so that editors check them, and with --app starts .quack/ in the current dir when there\n" +
+		"  is none. The terminal UI lists the recipes with the actions, marked ƒ, and $ lists only the recipes:\n\n" +
+		"    import quack from \"quack\"\n\n" +
+		"    export const login = quack.recipe({\n" +
+		"      description: \"Log in as the test user\",\n" +
+		"      params: { user: { type: \"string\", default: \"foo\", hints: [\"foo\", \"bar\"] } },\n" +
+		"      run({ user }) {\n" +
+		"        quack.openApp()\n" +
+		"        const status = quack.runAction<{ loggedIn: boolean }>(\"account.status\")\n" +
+		"        if (!status.data.loggedIn) quack.runAction(\"account.login\", { user, remember: true })\n" +
+		"        quack.shell(\"pm grant io.example android.permission.POST_NOTIFICATIONS\")\n" +
+		"        quack.wait(\"2s\")\n" +
+		"      },\n" +
+		"    })\n\n" +
+		"  A step that fails throws, and ends the recipe unless it catches the error.\n\n" +
+		"settings:\n" +
+		"  The terminal UI reads its settings from $XDG_CONFIG_HOME/quack/config.toml, or from\n" +
+		"  ~/.config/quack/config.toml when XDG_CONFIG_HOME is unset or empty. quack never writes the file, and its\n" +
+		"  keys are optional:\n\n" +
+		"    show-data = true          # show the JSON data of notifications and results; /toggle-data flips it for\n" +
+		"                              # the session\n" +
+		"    group-namespaces = true   # while browsing with ↑, group the ids that share a namespace, such as sync.\n\n" +
+		"  The terminal UI logs each problem with the file when it starts, and leaves the keys it could not read at\n" +
+		"  their defaults.\n\n" +
+		"exit codes:\n" +
+		"  0  done\n" +
+		"  1  the action rejected the call, failed, or ended without an answer, or a recipe failed\n" +
+		"  2  bad usage, an unknown action, or invalid args\n" +
+		"  3  no device or app to reach\n"
+}
+
 func matching(actions []wire.Action, filter *regexp.Regexp) ([]wire.Action, error) {
 	if filter == nil {
 		return actions, nil

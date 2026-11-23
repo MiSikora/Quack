@@ -1619,14 +1619,14 @@ export const clean = quack.recipe({ run() {} })`)
 // The app left while it was asked, and nothing of its answer may come back with no app to run it on.
 func TestReloadThatEndsAfterTheAppLeftChangesNothing(t *testing.T) {
 	m := newModel(newFakeSource(newFakeApp()), newActivity(t.Context()), device.Target{}, false, "dev", t.TempDir(), config.Default(), nil)
-	asked := m.connection
+	asked := m.connection.generation
 	m.drop("io.mehow.quack.sample left emulator-5554")
 	cookbook := &recipe.Cookbook{Recipes: []recipe.Recipe{{Name: "clean"}}}
 
 	m.describe(described{actions: []wire.Action{{ID: "account.show"}}, recipes: recipes{cookbook: cookbook}, connection: asked})
 
-	if m.cookbook != nil || m.prompt.recipes != nil || m.prompt.actions != nil {
-		t.Errorf("the reload left the cookbook %v, the recipes %v and the actions %v, want none", m.cookbook, m.prompt.recipes, m.prompt.actions)
+	if m.connection.cookbook != nil || m.prompt.recipes != nil || m.prompt.actions != nil {
+		t.Errorf("the reload left the cookbook %v, the recipes %v and the actions %v, want none", m.connection.cookbook, m.prompt.recipes, m.prompt.actions)
 	}
 }
 

@@ -4,16 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/spf13/pflag"
-
 	"quack/internal/adb"
+	"quack/internal/command"
 	"quack/internal/device"
 	"quack/internal/recipe"
 	"quack/internal/session"
@@ -67,77 +64,20 @@ type options struct {
 
 func parseOptions(argv []string, terminal Terminal) (options, error) {
 	var opts options
-	fs := pflag.NewFlagSet("quack", pflag.ContinueOnError)
-	fs.SortFlags = false
-	fs.SetOutput(io.Discard)
+	fs := command.NewFlagSet("quack")
 	fs.StringVarP(&opts.pkg, "app", "a", "", "the app, by its `package` (default: the only quack-enabled app on the device)")
 	fs.StringVarP(&opts.device, "device", "d", "", "the device, by its `serial` as adb devices lists it (default: $ANDROID_SERIAL)")
-	boolFlag(fs, &opts.json, "json", "j", "print JSON lines: each notification, then the outcome with its code")
-	boolFlag(fs, &opts.listActions, "list-actions", "l", "list the app's actions, or only those whose id matches regex")
-	boolFlag(fs, &opts.listDevices, "list-devices", "", "list the devices and the quack-enabled apps on each")
-	boolFlag(fs, &opts.listRecipes, "list-recipes", "", "list the app's recipes, or only those whose name matches regex")
-	boolFlag(fs, &opts.initRecipes, "init-recipes", "", "write the files that let editors check recipes, and with --app start .quack/ here with a recipe of the app")
-	boolFlag(fs, &opts.openApp, "open-app", "", "show the app's main screen first, instead of starting it in the background")
+	command.BoolFlag(fs, &opts.json, "json", "j", "print JSON lines: each notification, then the outcome with its code")
+	command.BoolFlag(fs, &opts.listActions, "list-actions", "l", "list the app's actions, or only those whose id matches regex")
+	command.BoolFlag(fs, &opts.listDevices, "list-devices", "", "list the devices and the quack-enabled apps on each")
+	command.BoolFlag(fs, &opts.listRecipes, "list-recipes", "", "list the app's recipes, or only those whose name matches regex")
+	command.BoolFlag(fs, &opts.initRecipes, "init-recipes", "", "write the files that let editors check recipes, and with --app start .quack/ here with a recipe of the app")
+	command.BoolFlag(fs, &opts.openApp, "open-app", "", "show the app's main screen first, instead of starting it in the background")
 	fs.StringVar(&opts.recipe, "recipe", "", "run the app's recipe `name`")
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
-	boolFlag(fs, &opts.version, "version", "", "show quack's version")
-	boolFlag(fs, &opts.help, "help", "h", "show this help")
-	opts.usage = "quack runs the debug actions of a quack-enabled Android app over adb.\n\n" +
-		"With no action, quack opens a terminal UI to pick a device and an app, then find and run actions. It prints\n" +
-		"this help instead when stdin or stdout is not a terminal, AI_AGENT is set, or CI is set. With an action,\n" +
-		"quack runs it once, prints the outcome and exits. Scripts and agents: list the actions with --list-actions,\n" +
-		"run them with quack <action>, and add --json for output to parse.\n\n" +
-		"usage: quack [options]                                open the terminal UI\n" +
-		"       quack [options] <action> [key=value]...        run an action\n" +
-		"       quack [options] --recipe <name> [key=value]... run a recipe\n" +
-		"       quack [options] --list-actions [regex]         list the app's actions and their params\n" +
-		"       quack [options] --list-recipes [regex]         list the app's recipes and their params\n" +
-		"       quack [--app <package>] --init-recipes         set up recipes and editors to check them\n" +
-		"       quack [options] --list-devices                 list the devices and their quack-enabled apps\n\n" +
-		"arguments:\n" +
-		"  key=value   a param of the action or the recipe. Repeat the key for a list: tag=a tag=b. The value takes the\n" +
-		"              environment variable NAME as ${NAME}, and $${NAME} writes ${NAME}:\n" +
-		"              quack account.login 'token=${API_TOKEN}'\n\n" +
-		"options:\n" + fs.FlagUsages() + "\n" +
-		"recipes:\n" +
-		"  A recipe is a TypeScript or JavaScript function that runs actions and commands, and decides what to do with\n" +
-		"  what they return. A project keeps them in .quack/recipes/, which quack finds in the current dir or above it,\n" +
-		"  up to the home dir. [recipes] in .quack/quack.toml maps the apps whose packages a regex fully matches to\n" +
-		"  files there, and [recipes] in config.toml maps apps to your own files in $XDG_CONFIG_HOME/quack/recipes/:\n\n" +
-		"    [recipes]\n" +
-		"    'io\\.example\\.app' = \"recipes.ts\"\n" +
-		"    'io\\.example\\..*' = [\"common.ts\", \"debug.ts\"]\n\n" +
-		"  An app gets the recipes of every file it matches in both, and two recipes of one name fail them all. Files\n" +
-		"  may import other local files, but no packages. quack --init-recipes writes quack.d.ts and tsconfig.json\n" +
-		"  next to the recipes, so that editors check them, and with --app starts .quack/ in the current dir when there\n" +
-		"  is none. The terminal UI lists the recipes with the actions, marked ƒ, and $ lists only the recipes:\n\n" +
-		"    import quack from \"quack\"\n\n" +
-		"    export const login = quack.recipe({\n" +
-		"      description: \"Log in as the test user\",\n" +
-		"      params: { user: { type: \"string\", default: \"foo\", hints: [\"foo\", \"bar\"] } },\n" +
-		"      run({ user }) {\n" +
-		"        quack.openApp()\n" +
-		"        const status = quack.runAction<{ loggedIn: boolean }>(\"account.status\")\n" +
-		"        if (!status.data.loggedIn) quack.runAction(\"account.login\", { user, remember: true })\n" +
-		"        quack.shell(\"pm grant io.example android.permission.POST_NOTIFICATIONS\")\n" +
-		"        quack.wait(\"2s\")\n" +
-		"      },\n" +
-		"    })\n\n" +
-		"  A step that fails throws, and ends the recipe unless it catches the error.\n\n" +
-		"settings:\n" +
-		"  The terminal UI reads its settings from $XDG_CONFIG_HOME/quack/config.toml, or from\n" +
-		"  ~/.config/quack/config.toml when XDG_CONFIG_HOME is unset or empty. quack never writes the file, and its\n" +
-		"  keys are optional:\n\n" +
-		"    show-data = true          # show the JSON data of notifications and results; /toggle-data flips it for\n" +
-		"                              # the session\n" +
-		"    group-namespaces = true   # while browsing with ↑, group the ids that share a namespace, such as sync.\n\n" +
-		"  The terminal UI logs each problem with the file when it starts, and leaves the keys it could not read at\n" +
-		"  their defaults.\n\n" +
-		"exit codes:\n" +
-		"  0  done\n" +
-		"  1  the action rejected the call, failed, or ended without an answer, or a recipe failed\n" +
-		"  2  bad usage, an unknown action, or invalid args\n" +
-		"  3  no device or app to reach\n"
+	command.BoolFlag(fs, &opts.version, "version", "", "show quack's version")
+	command.BoolFlag(fs, &opts.help, "help", "h", "show this help")
+	opts.usage = usage(fs.FlagUsages())
 	if err := fs.Parse(argv); err != nil {
 		return opts, usageErrorf("%v. See quack --help.", err)
 	}
@@ -195,7 +135,7 @@ func run(opts options, terminal Terminal) error {
 		return nil
 	}
 	if opts.version {
-		fmt.Fprintln(terminal.Out, "quack", version)
+		fmt.Fprintln(terminal.Out, "quack", command.Version)
 		return nil
 	}
 	if opts.initRecipes {
@@ -206,7 +146,7 @@ func run(opts options, terminal Terminal) error {
 		return printDevices(terminal.Out, backend, adb.Device(opts.device), opts.pkg, opts.json)
 	}
 	if opts.interactive {
-		return tui.Run(device.Target{Device: adb.Device(opts.device), Package: opts.pkg}, opts.openApp, opts.startTimeout, version)
+		return tui.Run(device.Target{Device: adb.Device(opts.device), Package: opts.pkg}, opts.openApp, opts.startTimeout, command.Version)
 	}
 	target, err := backend.Find(adb.Device(opts.device), opts.pkg)
 	if err != nil {
@@ -275,18 +215,6 @@ func parseFilter(rest []string, flag string) (*regexp.Regexp, error) {
 	return nil, usageErrorf("%s takes at most one regex", flag)
 }
 
-// pflag prints [=true|false] after every bool flag in help, and nothing after a BoolFunc flag, which parses the same.
-func boolFlag(fs *pflag.FlagSet, p *bool, name, shorthand, usage string) {
-	fs.BoolFuncP(name, shorthand, usage, func(value string) error {
-		on, err := strconv.ParseBool(value)
-		if err != nil {
-			return errors.New("must be true or false")
-		}
-		*p = on
-		return nil
-	})
-}
-
 func parseArgs(words []string) (map[string]wire.RawArg, error) {
 	args := map[string]wire.RawArg{}
 	for _, word := range words {
@@ -332,6 +260,3 @@ var errorExits = map[wire.ErrorCode]int{
 	wire.ErrorCodeUnknownAction: exitUsage,
 	wire.ErrorCodeInvalidArgs:   exitUsage,
 }
-
-// Release builds set it with -ldflags "-X quack/internal/cli.version=<version>".
-var version = "dev"

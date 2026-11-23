@@ -29,18 +29,10 @@ cat >"$noticesTemplate" <<'EOF'
 {{ end }}
 EOF
 
-# The variable that holds each binary's version, set with -ldflags -X.
-function versionVariable {
-  case $1 in
-  quack) echo "quack/internal/cli.version" ;;
-  quack-mcp) echo "main.version" ;;
-  esac
-}
-
 function build {
   local binary=$1 os=$2 arch=$3 out=$4
   (cd cli && CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-    -ldflags "-X $(versionVariable "$binary")=$version" -o "../$out" "./cmd/$binary")
+    -ldflags "-X quack/internal/command.Version=$version" -o "../$out" "./cmd/$binary")
 }
 
 function package {
