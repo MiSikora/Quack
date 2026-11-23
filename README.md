@@ -35,6 +35,8 @@ class GreetAction : QuackAction {
 }
 ```
 
+An id holds letters, `_`, `.` and `-`. Dots group actions by namespace, such as `app.` here, when you browse them in `quack`.
+
 While it runs, an action can report progress with `terminal.send("Syncing")`, and hand over data as JSON with `terminal.send("Pairing code", json = """{"code": "$code"}""")`. `Outcome.Ok` takes `json` the same way.
 
 Start Quack when your app starts:
@@ -59,7 +61,14 @@ Install the `quack` command with Homebrew:
 brew install MiSikora/tap/quack
 ```
 
-Connect your phone or start an emulator, then run `quack`. It lets you pick a device and an app, search the actions, and run them. Your app doesn't need to be open.
+Connect your phone or start an emulator, then run `quack`. It lets you pick a device and an app, search the actions, and run them. Your app doesn't need to be open. When there is only one app to pick, `quack` connects to it by itself. Type `/` for commands, such as `/pick-device` to switch to another device, and press ↑ on an empty prompt to browse the actions.
+
+`quack` reads its settings from `~/.config/quack/config.toml`:
+
+```toml
+show-data = true         # show the JSON data of notifications and results, which /toggle-data flips
+group-namespaces = true  # group the actions that share a namespace when you browse them
+```
 
 You can also run an action directly, which is handy in scripts:
 
