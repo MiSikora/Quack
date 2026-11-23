@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -391,9 +392,13 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	cookbook, _, err := s.source.Recipes(target.Package)
+	cookbook, problems, err := s.source.Recipes(target.Package)
 	if err != nil {
 		return nil, runRecipeOutput{}, err
+	}
+	// The problems may say why the recipe is missing, such as a mapped file that does not exist.
+	if !slices.ContainsFunc(cookbook.Recipes, func(r recipe.Recipe) bool { return r.Name == in.Recipe }) {
+		return nil, runRecipeOutput{}, errors.New(strings.Join(append([]string{"no recipe named " + in.Recipe + " for " + target.Package}, problems...), "\n"))
 	}
 	_, actions, err := app.Describe(ctx)
 	if err != nil {

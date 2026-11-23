@@ -593,6 +593,20 @@ func TestRunRecipeNamesTheAppWithoutTheRecipe(t *testing.T) {
 	assertError(t, result, "no recipe named fresh for io.mehow.quack.sample")
 }
 
+func TestRunRecipeSaysWhyRecipesWereLeftOut(t *testing.T) {
+	writeRecipes(t, `export {}`)
+	mapping := "[recipes]\n'io\\.mehow\\.quack\\.sample' = [\"io.mehow.quack.sample.ts\", \"gone.ts\"]\n"
+	if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "quack", "config.toml"), []byte(mapping), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	session := connect(t, newFakeSource())
+
+	result := callTool(t, session, "run_recipe", map[string]any{"recipe": "fresh"})
+
+	assertError(t, result, "no recipe named fresh for io.mehow.quack.sample\n"+
+		filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "quack", "config.toml")+": [recipes] maps io.mehow.quack.sample to gone.ts, which does not exist")
+}
+
 // writeRecipes keeps file as the recipes of the sample app in a config dir of the test's own, with up-to-date types.
 func writeRecipes(t *testing.T, file string) string {
 	t.Helper()
