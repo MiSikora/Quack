@@ -122,6 +122,52 @@ export const hello = quack.recipe({ run() { greet() } })`)
 	}
 }
 
+func TestARecipeFromAFileNoPatternMapsHasThatFileAndRunsFromTheMappedOne(t *testing.T) {
+	helpers := writeFile(t, "helpers.ts", `import quack from "quack"
+export const reset = quack.recipe({ run() { quack.runAction("app.greet", { name: "Bob" }) } })`)
+	main := write(t, `export { reset } from "./helpers"
+import quack from "quack"
+export const login = quack.recipe({ run() {} })`)
+
+	c, err := loadApp(t)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{"login": main, "reset": helpers}; !reflect.DeepEqual(files(c), want) {
+		t.Fatalf("got %v, want %v", files(c), want)
+	}
+	app := &fakeApp{}
+	if _, err := c.Run(context.Background(), app, "reset", nil, Observer{}); err != nil || !reflect.DeepEqual(app.calls, []string{"app.greet name=Bob"}) {
+		t.Errorf("run: got %v and calls %v", err, app.calls)
+	}
+}
+
+func TestAMappedFileThatIsALinkHasItsRecipesOnlyItself(t *testing.T) {
+	writeFile(t, "a.ts", `import quack from "quack"
+import { login } from "./common"
+export const reset = quack.recipe({ run() { quack.runRecipe(login) } })`)
+	shared := filepath.Join(filepath.Dir(Dir()), "shared")
+	if err := os.Mkdir(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shared, "common.ts"), []byte(`import quack from "quack"
+export const login = quack.recipe({ name: "login", run() {} })`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	common := filepath.Join(Dir(), "common.ts")
+	if err := os.Symlink(filepath.Join(shared, "common.ts"), common); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, "[recipes]\n'.*' = [\"a.ts\", \"common.ts\"]\n")
+
+	c, err := loadApp(t)
+
+	if want := map[string]string{"login": common, "reset": filepath.Join(Dir(), "a.ts")}; err != nil || !reflect.DeepEqual(files(c), want) {
+		t.Errorf("got %v, %v, want %v", files(c), err, want)
+	}
+}
+
 func TestAMappedFileThatAnotherImportsHasItsRecipesOnlyItself(t *testing.T) {
 	common := writeFile(t, "common.ts", `import quack from "quack"
 export const login = quack.recipe({ name: "login", run() { quack.runAction("app.login", { name: "Ann" }) } })
@@ -160,6 +206,26 @@ func TestAMappedFileThatDoesNotExistIsAWarning(t *testing.T) {
 	want := []string{configFile() + ": [recipes] maps io.mehow.quack.sample to gone.ts, which does not exist"}
 	if err != nil || !reflect.DeepEqual(warnings, want) || !reflect.DeepEqual(names(c), []string{"a"}) {
 		t.Errorf("got %v, %q, %v, want a and %q", names(c), warnings, err, want)
+	}
+}
+
+func TestAMappedDirectoryOrUnreadableFileIsAWarning(t *testing.T) {
+	writeFile(t, "a.ts", recipeNamed("a"))
+	if err := os.Mkdir(filepath.Join(Dir(), "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	locked := writeFile(t, "locked.ts", recipeNamed("b"))
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, "[recipes]\n'.*' = [\"dir\", \"locked.ts\", \"a.ts\"]\n")
+
+	c, warnings, err := Load(t.TempDir(), pkg)
+
+	prefix := configFile() + ": [recipes] maps io.mehow.quack.sample to "
+	if err != nil || len(warnings) != 2 || !reflect.DeepEqual(names(c), []string{"a"}) ||
+		warnings[0] != prefix+"dir, which is a directory" || !strings.HasPrefix(warnings[1], prefix+"locked.ts, which quack cannot read: ") {
+		t.Errorf("got %v, %q, %v", names(c), warnings, err)
 	}
 }
 

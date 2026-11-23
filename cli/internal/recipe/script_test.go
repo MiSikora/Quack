@@ -47,8 +47,8 @@ const unexported = quack.recipe({ run() {} })
 		t.Fatal(err)
 	}
 	want := []Recipe{
-		{Name: "clean", File: path},
-		{Name: "login", Description: "Log in", File: path, Params: []wire.Param{
+		{Name: "clean", File: path, script: path},
+		{Name: "login", Description: "Log in", File: path, script: path, Params: []wire.Param{
 			{Name: "user", Description: "Who", Type: wire.ParamTypeString, Hints: []string{"alice", "bob"}, Presence: wire.Default{Values: []string{"foo"}}},
 			{Name: "count", Type: wire.ParamTypeInt, Presence: wire.Required{}},
 			{Name: "theme", Type: wire.ParamTypeEnum, Choices: []string{"light", "dark"}, Presence: wire.Optional{}},

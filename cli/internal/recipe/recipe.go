@@ -24,8 +24,11 @@ type Recipe struct {
 	Name        string
 	Description string
 	Params      []wire.Param
-	// The absolute path of the file that declares it.
+	// The absolute path of the file whose code declares it: a mapped file, or one that a mapped file imports. It is
+	// the mapped file when the source map does not tell.
 	File string
+	// The absolute path of the mapped file it loads from, whose script runs it.
+	script string
 	// The environment variable of each param that takes one, while it is set.
 	env map[string]string
 }

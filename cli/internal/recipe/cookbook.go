@@ -35,7 +35,7 @@ func (c *Cookbook) Run(ctx context.Context, app App, name string, args map[strin
 	if at < 0 {
 		return nil, fmt.Errorf("no recipe named %s for %s", name, app.Target().Package)
 	}
-	return c.scripts[c.Recipes[at].File].run(ctx, app, name, args, observer)
+	return c.scripts[c.Recipes[at].script].run(ctx, app, name, args, observer)
 }
 
 // Load reads the recipes of pkg from the project that dir is in, and from the user's config. It never writes files.
@@ -49,17 +49,23 @@ func Load(dir, pkg string) (*Cookbook, []string, error) {
 	var paths, dirs []string
 	for _, t := range tables {
 		for _, path := range t.files(pkg) {
-			switch {
-			case slices.Contains(paths, path):
-			case !exists(path):
-				warnings = append(warnings, fmt.Sprintf("%s: [recipes] maps %s to %s, which does not exist", t.file, pkg, filepath.Base(path)))
-			default:
-				paths = append(paths, path)
-				if !slices.Contains(dirs, t.dir) {
-					dirs = append(dirs, t.dir)
-				}
+			if slices.Contains(paths, path) {
+				continue
+			}
+			if problem := unreadable(path); problem != "" {
+				warnings = append(warnings, fmt.Sprintf("%s: [recipes] maps %s to %s, %s", t.file, pkg, filepath.Base(path), problem))
+				continue
+			}
+			paths = append(paths, path)
+			if !slices.Contains(dirs, t.dir) {
+				dirs = append(dirs, t.dir)
 			}
 		}
+	}
+	// A mapped file can be a link, which esbuild follows, so files compare by their real paths.
+	mapped := map[string]string{}
+	for _, path := range paths {
+		mapped[realPath(path)] = path
 	}
 	cookbook := &Cookbook{Recipes: []Recipe{}, scripts: map[string]*script{}}
 	for _, path := range paths {
@@ -68,12 +74,15 @@ func Load(dir, pkg string) (*Cookbook, []string, error) {
 			return nil, nil, err
 		}
 		for _, r := range s.recipes {
-			// A mapped file that another one imports has its recipes itself.
-			if source := s.sources[r.Name]; source != path && slices.Contains(paths, source) {
-				continue
+			if file, ok := mapped[realPath(r.File)]; ok {
+				// A mapped file that another one imports has its recipes itself.
+				if file != path {
+					continue
+				}
+				r.File = file
 			}
 			if at := slices.IndexFunc(cookbook.Recipes, func(other Recipe) bool { return other.Name == r.Name }); at >= 0 {
-				return nil, nil, fmt.Errorf("recipe '%s' is in both %s and %s", r.Name, cookbook.Recipes[at].File, path)
+				return nil, nil, fmt.Errorf("recipe '%s' is in both %s and %s", r.Name, cookbook.Recipes[at].script, path)
 			}
 			cookbook.Recipes = append(cookbook.Recipes, r)
 		}
@@ -365,4 +374,29 @@ func typesIn(dir string) typesState {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return !errors.Is(err, fs.ErrNotExist)
+}
+
+// Why the file at path cannot be loaded, or "" when it can.
+func unreadable(path string) string {
+	info, err := os.Stat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "which does not exist"
+	case err == nil && info.IsDir():
+		return "which is a directory"
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "which quack cannot read: " + err.Error()
+	}
+	file.Close()
+	return ""
+}
+
+// path itself when it cannot be resolved.
+func realPath(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return path
 }

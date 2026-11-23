@@ -196,7 +196,7 @@ type recipeOutput struct {
 	Name        string        `json:"name"`
 	Description string        `json:"description"`
 	Params      []paramOutput `json:"params"`
-	// The file that declares it.
+	// The file whose code declares it, which may be one that a mapped file imports.
 	File string `json:"file"`
 }
 

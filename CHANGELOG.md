@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `run_recipe` gives what the recipe returned as `data`.
 
 #### Changed
-- Recipes load from `.quack/` and `config.toml`, as in the CLI. `list_recipes` gives each recipe's file and the problems that left files out, instead of one `file` for the app.
+- Recipes load from `.quack/` and `config.toml`, as in the CLI. `list_recipes` gives the file each recipe is written in, which may be one that a mapped file imports, and the problems that left files out, instead of one `file` for the app.
 
 #### Fixed
 - A recipes file that exports a string with letters outside ASCII loads instead of crashing `quack-mcp`.
