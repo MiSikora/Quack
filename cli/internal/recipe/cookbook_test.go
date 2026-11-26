@@ -31,7 +31,7 @@ func TestLoadMergesTheFilesOfEveryPatternThatMatchesTheApp(t *testing.T) {
 '.*' = "a.ts"
 `)
 
-	c, warnings, err := Load(dir, pkg)
+	c, warnings, err := (Location{Dir: dir}).Load(pkg)
 
 	if err != nil || warnings != nil {
 		t.Fatalf("got %v and %q", err, warnings)
@@ -75,12 +75,17 @@ export const second = quack.recipe({ name: "second", run() { console.log("b") } 
 
 func TestAPatternMatchesTheWholePackage(t *testing.T) {
 	for pattern, matches := range map[string]bool{
-		`io\.mehow`:                 false,
-		`quack\.sample`:             false,
-		`io\.mehow.*`:               true,
-		`io\.mehow\.quack\.sample`:  true,
-		`com\.other|io\.mehow\..*`:  true,
-		`io\.mehow\.quack\.sample2`: false,
+		`io\.mehow`:                    false,
+		`quack\.sample`:                false,
+		`io\.mehow.*`:                  true,
+		`io\.mehow\.quack\.sample`:     true,
+		`com\.other|io\.mehow\..*`:     true,
+		`io\.mehow|quack\.sample`:      false,
+		`(?i)IO\.MEHOW\.QUACK\.SAMPLE`: true,
+		`\Qio.mehow.quack.sample`:      true,
+		`\Qio.mehow`:                   false,
+		`\Qio.mehow.quack.sample2`:     false,
+		`io\.mehow\.quack\.sample2`:    false,
 	} {
 		writeFile(t, "a.ts", recipeNamed("a"))
 		writeConfig(t, "[recipes]\n'"+pattern+"' = \"a.ts\"\n")
@@ -96,7 +101,7 @@ func TestAPatternMatchesTheWholePackage(t *testing.T) {
 func TestAProjectThatMapsAnotherAppGivesNothing(t *testing.T) {
 	dir := writeProject(t, "[recipes]\n'com\\.other' = \"recipes.ts\"\n", map[string]string{"recipes.ts": recipeNamed("open")})
 
-	c, warnings, err := Load(dir, pkg)
+	c, warnings, err := (Location{Dir: dir}).Load(pkg)
 
 	if err != nil || warnings != nil || len(c.Recipes) != 0 {
 		t.Errorf("got %v, %q, %v, want no recipes", names(c), warnings, err)
@@ -166,7 +171,7 @@ func TestAGlobThatMatchesNoFilesIsAWarning(t *testing.T) {
 	writeFile(t, "a.ts", recipeNamed("a"))
 	writeConfig(t, "[recipes]\n'.*' = [\"features/*.ts\", \"a.ts\"]\n")
 
-	c, warnings, err := Load(t.TempDir(), pkg)
+	c, warnings, err := (Location{Dir: t.TempDir()}).Load(pkg)
 
 	want := []string{configFile() + ": [recipes] maps io.mehow.quack.sample to features/*.ts, which matches no files"}
 	if err != nil || !reflect.DeepEqual(warnings, want) || !reflect.DeepEqual(names(c), []string{"a"}) {
@@ -232,7 +237,7 @@ func TestAMappedFileThatDoesNotExistIsAWarning(t *testing.T) {
 	writeFile(t, "a.ts", recipeNamed("a"))
 	writeConfig(t, "[recipes]\n'.*' = [\"gone.ts\", \"a.ts\"]\n")
 
-	c, warnings, err := Load(t.TempDir(), pkg)
+	c, warnings, err := (Location{Dir: t.TempDir()}).Load(pkg)
 
 	want := []string{configFile() + ": [recipes] maps io.mehow.quack.sample to gone.ts, which does not exist"}
 	if err != nil || !reflect.DeepEqual(warnings, want) || !reflect.DeepEqual(names(c), []string{"a"}) {
@@ -251,7 +256,7 @@ func TestAMappedDirectoryOrUnreadableFileIsAWarning(t *testing.T) {
 	}
 	writeConfig(t, "[recipes]\n'.*' = [\"dir\", \"locked.ts\", \"a.ts\"]\n")
 
-	c, warnings, err := Load(t.TempDir(), pkg)
+	c, warnings, err := (Location{Dir: t.TempDir()}).Load(pkg)
 
 	prefix := configFile() + ": [recipes] maps io.mehow.quack.sample to "
 	if err != nil || len(warnings) != 2 || !reflect.DeepEqual(names(c), []string{"a"}) ||
@@ -278,7 +283,7 @@ x = 1
 `, map[string]string{"a.ts": recipeNamed("a")})
 	file := filepath.Join(dir, ".quack", "quack.toml")
 
-	c, warnings, err := Load(dir, pkg)
+	c, warnings, err := (Location{Dir: dir}).Load(pkg)
 
 	want := []string{
 		file + ":1: unknown key 'colors'",
@@ -316,7 +321,7 @@ func TestATOMLFileThatDoesNotParseFailsTheLoad(t *testing.T) {
 		project:     filepath.Join(project, ".quack", "quack.toml") + ":1:",
 		t.TempDir(): configFile() + ":2:7: ",
 	} {
-		if _, _, err := Load(dir, pkg); err == nil || !strings.HasPrefix(err.Error(), want) {
+		if _, _, err := (Location{Dir: dir}).Load(pkg); err == nil || !strings.HasPrefix(err.Error(), want) {
 			t.Errorf("got %v, want %s…", err, want)
 		}
 	}
@@ -327,7 +332,7 @@ func TestARecipeNameInTwoFilesFailsTheLoadNamingBoth(t *testing.T) {
 	writeFile(t, "mine.ts", recipeNamed("open"))
 	writeConfig(t, "[recipes]\n'.*' = \"mine.ts\"\n")
 
-	_, _, err := Load(dir, pkg)
+	_, _, err := (Location{Dir: dir}).Load(pkg)
 
 	want := "recipe 'open' is in both " + filepath.Join(dir, ".quack", "recipes", "recipes.ts") + " and " + filepath.Join(Dir(), "mine.ts")
 	if err == nil || err.Error() != want {
@@ -372,7 +377,7 @@ func TestLoadWritesNothingAndWarnsOfOutOfDateTypesInEachDirItLoadedFrom(t *testi
 	os.Remove(filepath.Join(dir, ".quack", "recipes", "tsconfig.json"))
 	before := tree(t, filepath.Dir(dir))
 
-	_, warnings, err := Load(dir, pkg)
+	_, warnings, err := (Location{Dir: dir}).Load(pkg)
 
 	want := []string{
 		"the recipe types in " + filepath.Join(dir, ".quack", "recipes") + " are out of date: init-recipes updates them",
@@ -384,7 +389,7 @@ func TestLoadWritesNothingAndWarnsOfOutOfDateTypesInEachDirItLoadedFrom(t *testi
 	if after := tree(t, filepath.Dir(dir)); !reflect.DeepEqual(after, before) {
 		t.Errorf("the files changed from %v to %v", before, after)
 	}
-	if _, warnings, _ := Load(t.TempDir(), "com.other"); warnings != nil {
+	if _, warnings, _ := (Location{Dir: t.TempDir()}).Load("com.other"); warnings != nil {
 		t.Errorf("for an app without files: got %q, want no warnings", warnings)
 	}
 }
@@ -413,13 +418,13 @@ func TestLoadSaysToUpgradeQuackForTypesANewerQuackWrote(t *testing.T) {
 	newer := strings.Replace(string(quackTypes), "recipe types 2.", "recipe types 99.", 1)
 	os.WriteFile(filepath.Join(recipes, "quack.d.ts"), []byte(newer), 0o644)
 
-	_, warnings, err := Load(dir, pkg)
+	_, warnings, err := (Location{Dir: dir}).Load(pkg)
 
 	want := []string{"the recipe types in " + recipes + " are from a newer quack: upgrade quack"}
 	if err != nil || !reflect.DeepEqual(warnings, want) {
 		t.Errorf("got %q, %v, want %q", warnings, err, want)
 	}
-	if _, err := Init(dir, ""); err == nil || err.Error() != want[0] {
+	if _, err := (Location{Dir: dir}).Init(""); err == nil || err.Error() != want[0] {
 		t.Errorf("Init: got %v, want %s", err, want[0])
 	}
 	if got, _ := os.ReadFile(filepath.Join(recipes, "quack.d.ts")); string(got) != newer {
@@ -430,7 +435,7 @@ func TestLoadSaysToUpgradeQuackForTypesANewerQuackWrote(t *testing.T) {
 func TestInitWithAnAppStartsAProjectWhoseRecipeRuns(t *testing.T) {
 	dir := emptyDir(t)
 
-	written, err := Init(dir, pkg)
+	written, err := (Location{Dir: dir}).Init(pkg)
 
 	project := filepath.Join(dir, ".quack")
 	want := []string{
@@ -447,7 +452,7 @@ func TestInitWithAnAppStartsAProjectWhoseRecipeRuns(t *testing.T) {
 	if got, _ := os.ReadFile(filepath.Join(project, "quack.toml")); string(got) != "[recipes]\n'io\\.mehow\\.quack\\.sample' = \"recipes.ts\"\n" {
 		t.Errorf("quack.toml: got %q", got)
 	}
-	c, warnings, err := Load(dir, pkg)
+	c, warnings, err := (Location{Dir: dir}).Load(pkg)
 	if err != nil || warnings != nil || !reflect.DeepEqual(names(c), []string{"open"}) {
 		t.Fatalf("load: got %v, %q, %v", names(c), warnings, err)
 	}
@@ -455,7 +460,7 @@ func TestInitWithAnAppStartsAProjectWhoseRecipeRuns(t *testing.T) {
 	if _, err := c.Run(context.Background(), app, nil, "open", nil, ignore); err != nil || !reflect.DeepEqual(app.Starts(), []client.StartMode{client.OpenApp}) {
 		t.Errorf("open: got %v and starts %v", err, app.Starts())
 	}
-	if written, err := Init(dir, pkg); err != nil || len(written) != 0 {
+	if written, err := (Location{Dir: dir}).Init(pkg); err != nil || len(written) != 0 {
 		t.Errorf("again: got %v, %v, want nothing written", written, err)
 	}
 }
@@ -466,7 +471,7 @@ func TestInitLeavesAProjectsQuackTomlAndRecipesAloneAndUpdatesItsTypes(t *testin
 	sub := filepath.Join(dir, "src", "main")
 	os.MkdirAll(sub, 0o755)
 
-	written, err := Init(sub, pkg)
+	written, err := (Location{Dir: sub}).Init(pkg)
 
 	recipes := filepath.Join(dir, ".quack", "recipes")
 	want := []string{filepath.Join(Dir(), "quack.d.ts"), filepath.Join(Dir(), "tsconfig.json"), filepath.Join(recipes, "quack.d.ts")}
@@ -485,7 +490,7 @@ func TestInitLeavesAProjectsQuackTomlAndRecipesAloneAndUpdatesItsTypes(t *testin
 
 func TestInitWithoutAnAppWritesTheTypesOfTheUserAndOfAProjectIfThereIsOne(t *testing.T) {
 	outside := emptyDir(t)
-	if written, err := Init(outside, ""); err != nil || !reflect.DeepEqual(written, []string{filepath.Join(Dir(), "quack.d.ts"), filepath.Join(Dir(), "tsconfig.json")}) {
+	if written, err := (Location{Dir: outside}).Init(""); err != nil || !reflect.DeepEqual(written, []string{filepath.Join(Dir(), "quack.d.ts"), filepath.Join(Dir(), "tsconfig.json")}) {
 		t.Errorf("outside a project: got %v, %v", written, err)
 	}
 	if _, err := os.Stat(filepath.Join(outside, ".quack")); err == nil {
@@ -502,7 +507,7 @@ func TestInitWithoutAnAppWritesTheTypesOfTheUserAndOfAProjectIfThereIsOne(t *tes
 	for name := range types {
 		os.Remove(filepath.Join(recipes, name))
 	}
-	if written, err := Init(dir, ""); err != nil || !reflect.DeepEqual(written, []string{filepath.Join(recipes, "quack.d.ts"), filepath.Join(recipes, "tsconfig.json")}) {
+	if written, err := (Location{Dir: dir}).Init(""); err != nil || !reflect.DeepEqual(written, []string{filepath.Join(recipes, "quack.d.ts"), filepath.Join(recipes, "tsconfig.json")}) {
 		t.Errorf("in a project: got %v, %v", written, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".quack", "quack.toml")); err == nil {

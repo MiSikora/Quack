@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -382,7 +383,7 @@ func TestPanelKeepsItsHeightInEveryState(t *testing.T) {
 
 func TestViewTakesTheAlternateScreenAndTheMouse(t *testing.T) {
 	app := newFakeApp()
-	m := newModel(newFakeSource(app), newActivity(t.Context()), device.Target{}, false, "dev", t.TempDir(), config.Default(), nil)
+	m := newModel(newFakeSource(app), newActivity(t.Context()), device.Target{}, false, "dev", recipe.Location{Dir: t.TempDir()}, config.Default(), nil)
 
 	view := m.View()
 
@@ -1316,7 +1317,7 @@ func TestDollarWithoutRecipesSaysWhereToWriteThem(t *testing.T) {
 
 	h.typing("$")
 
-	h.waitFor("  No recipes. /init-recipes starts .quack/ here, or map the app in config.toml", "0/0")
+	h.waitFor("  No recipes. /init-recipes sets up a project, or map the app in config.toml", "0/0")
 }
 
 func TestBrokenRecipeFileSaysWhyAndLeavesTheActions(t *testing.T) {
@@ -1329,7 +1330,7 @@ func TestBrokenRecipeFileSaysWhyAndLeavesTheActions(t *testing.T) {
 	h.waitFor("▸ account.", "2/6")
 	h.press("esc")
 	h.typing("$")
-	h.waitFor("No recipes. /init-recipes starts .quack/ here", "0/0")
+	h.waitFor("No recipes. /init-recipes sets up a project", "0/0")
 }
 
 func TestRecipeWarningsGoIntoTheLogAndTheOtherRecipesLoad(t *testing.T) {
@@ -1623,9 +1624,33 @@ export const clean = quack.recipe({ name: "clean", run() {} })`)
 	h.waitFor("No recipes", "0/0")
 }
 
+func TestReloadSelectsTheNewlyConfiguredProject(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	configFor := func(root string) string { return fmt.Sprintf("[projects]\n'.*' = %q\n", root) }
+	h := startWithConfig(t, newFakeApp(), configFor(first), func(*model) {
+		for root, name := range map[string]string{first: "first", second: "second"} {
+			if _, err := (recipe.Location{Dir: root, ProjectDir: root}).Init("io.mehow.quack.sample"); err != nil {
+				t.Fatal(err)
+			}
+			script := fmt.Sprintf(`import quack from "quack"
+export const r = quack.recipe({ name: %q, run() {} })`, name)
+			if err := os.WriteFile(filepath.Join(root, ".quack", "recipes", "recipes.ts"), []byte(script), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	h.typing("$")
+	h.waitFor("▸ first ƒ", "1/1")
+	if err := os.WriteFile(config.Path(), []byte(configFor(second)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.press("ctrl+r")
+	h.waitFor("▸ second ƒ", "1/1")
+}
+
 // The app left while it was asked, and nothing of its answer may come back with no app to run it on.
 func TestReloadThatEndsAfterTheAppLeftChangesNothing(t *testing.T) {
-	m := newModel(newFakeSource(newFakeApp()), newActivity(t.Context()), device.Target{}, false, "dev", t.TempDir(), config.Default(), nil)
+	m := newModel(newFakeSource(newFakeApp()), newActivity(t.Context()), device.Target{}, false, "dev", recipe.Location{Dir: t.TempDir()}, config.Default(), nil)
 	asked := m.connection.generation
 	m.drop("io.mehow.quack.sample left emulator-5554")
 	cookbook := &recipe.Cookbook{Recipes: []recipe.Recipe{{Name: "clean"}}}
@@ -1696,14 +1721,15 @@ func TestStatusLinesGoIntoTheLog(t *testing.T) {
 	h.waitForLog("starting io.mehow.quack.sample…\nshowed the app's main screen")
 }
 
-func TestInitRecipesStartsTheRecipesOfTheAppAndListsThem(t *testing.T) {
-	h := start(t, newFakeApp())
+func TestInitRecipesStartsTheRecipesInTheExplicitProjectAndListsThem(t *testing.T) {
+	root := t.TempDir()
+	h := start(t, newFakeApp(), func(m *model) { m.location.ProjectDir = root })
 	h.resize(300, 30)
 
 	h.typing("/init-recipes")
 	h.press("enter")
 
-	project := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), ".quack")
+	project := filepath.Join(root, ".quack")
 	h.waitForLog(
 		"wrote "+filepath.Join(recipe.Dir(), "quack.d.ts"),
 		"wrote "+filepath.Join(recipe.Dir(), "tsconfig.json"),
@@ -1840,7 +1866,7 @@ func startIn(t *testing.T, configDir string, source *backend.Backend, want devic
 	source.Status = activity
 	h := &harness{t: t, exited: make(chan struct{}), height: 30, seen: map[int]bool{}, clock: &fakeClock{now: time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)}}
 	settings, problems := config.Load()
-	m := newModel(source, activity, want, openApp, "dev", configDir, settings, problems)
+	m := newModel(source, activity, want, openApp, "dev", recipe.Location{Dir: configDir}, settings, problems)
 	m.clock = h.clock
 	m.clipboard = func(text string) error {
 		h.mu.Lock()
@@ -1883,7 +1909,7 @@ func writeRecipes(t *testing.T, file string) string {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := recipe.Init(dir, ""); err != nil {
+	if _, err := (recipe.Location{Dir: dir}).Init(""); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(project, "quack.toml"), []byte("[recipes]\n'io\\.mehow\\.quack\\.sample' = \"io.mehow.quack.sample.ts\"\n"), 0o644); err != nil {

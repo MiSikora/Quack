@@ -264,7 +264,7 @@ func (p *prompt) list(rows int) []string {
 	if len(choices) == 0 {
 		empty := "  no match"
 		if total == 0 && strings.HasPrefix(p.input.Value(), "$") {
-			empty = "  No recipes. /init-recipes starts .quack/ here, or map the app in config.toml"
+			empty = "  No recipes. /init-recipes sets up a project, or map the app in config.toml"
 		}
 		return []string{statusStyle.Render(empty)}
 	}

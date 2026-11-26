@@ -4,6 +4,6 @@ $ quack --init-recipes
 wrote $XDG_CONFIG_HOME/quack/recipes/quack.d.ts
 wrote $XDG_CONFIG_HOME/quack/recipes/tsconfig.json
 Map apps to recipe files under [recipes] in .quack/quack.toml, or in $XDG_CONFIG_HOME/quack/config.toml.
-quack --init-recipes --app <package> starts .quack/ here.
+quack --init-recipes --app <package> sets up a project.
 --- stderr
 --- device

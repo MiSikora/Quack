@@ -2,5 +2,5 @@ $ quack --init-recipes -d emulator-5554
 --- exit 2
 --- stdout
 --- stderr
-quack: --init-recipes takes only --app, since it sets up files and no device
+quack: --init-recipes takes only --app and --project-dir, since it sets up files and no device
 --- device

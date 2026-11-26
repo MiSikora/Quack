@@ -8,10 +8,13 @@ import (
 
 	"quack/internal/command"
 	"quack/internal/mcpserver"
+	"quack/internal/recipe"
 )
 
 func main() {
 	fs := command.NewFlagSet("quack-mcp")
+	var projectDir string
+	command.ProjectDirFlag(fs, &projectDir)
 	startTimeout := fs.Duration("start-timeout", 15*time.Second, "how long to wait for an app to answer")
 	var showVersion, help bool
 	command.BoolFlag(fs, &showVersion, "version", "", "show quack-mcp's version")
@@ -33,8 +36,11 @@ func main() {
 	case showVersion:
 		fmt.Println("quack-mcp", command.Version)
 	default:
+		// A deleted working directory prevents recipe lookup, but must not prevent unrelated action tools.
+		dir, _ := os.Getwd()
+		location := recipe.Location{Dir: dir, ProjectDir: projectDir}
 		// stdout carries the protocol. MCP clients log stderr.
-		if err := mcpserver.Serve(context.Background(), command.Version, *startTimeout, os.Stderr); err != nil {
+		if err := mcpserver.Serve(context.Background(), command.Version, location, *startTimeout, os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, "quack-mcp:", err)
 			os.Exit(1)
 		}

@@ -25,8 +25,8 @@ func TestParse(t *testing.T) {
 			want: Config{ShowData: true, GroupNamespaces: false},
 		},
 		{
-			name: "a recipes table, which package recipe reads",
-			doc:  "show-data = true\n[recipes]\n'io\\.example' = \"recipes.ts\"\n",
+			name: "recipe and project tables, which package recipe reads",
+			doc:  "show-data = true\n[recipes]\n'io\\.example' = \"recipes.ts\"\n[projects]\n'io\\.example' = \"~/android\"\n",
 			want: Config{ShowData: true, GroupNamespaces: true},
 		},
 		{

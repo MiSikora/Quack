@@ -21,7 +21,7 @@ func usage(flags string) string {
 		"       quack [options] --recipe <name> [key=value]... run a recipe\n" +
 		"       quack [options] --list-actions [regex]         list the app's actions and their params\n" +
 		"       quack [options] --list-recipes [regex]         list the app's recipes and their params\n" +
-		"       quack [--app <package>] --init-recipes         set up recipes and editors to check them\n" +
+		"       quack [options] --init-recipes                 set up recipes and editors to check them\n" +
 		"       quack [options] --list-devices                 list the devices and their quack-enabled apps\n\n" +
 		"arguments:\n" +
 		"  key=value   a param of the action or the recipe. Repeat the key for a list: tag=a tag=b. The value takes the\n" +
@@ -30,9 +30,11 @@ func usage(flags string) string {
 		"options:\n" + flags + "\n" +
 		"recipes:\n" +
 		"  A recipe is a TypeScript or JavaScript function that runs actions and commands, and decides what to do with\n" +
-		"  what they return. A project keeps them in .quack/recipes/, which quack finds in the current dir or above it,\n" +
-		"  up to the home dir. [recipes] in .quack/quack.toml maps the apps whose packages a regex fully matches to\n" +
-		"  files there, and [recipes] in config.toml maps apps to your own files in $XDG_CONFIG_HOME/quack/recipes/:\n\n" +
+		"  what they return. Use --project-dir to select the directory containing .quack/. Otherwise quack looks for\n" +
+		"  the nearest .quack/ at or above the current directory, up to home. If it finds none, [projects] in the user\n" +
+		"  config can map a full package regex to a project root. Multiple matches fail the lookup.\n" +
+		"  [recipes] in .quack/quack.toml maps the apps whose packages a regex fully matches to files in .quack/recipes/.\n" +
+		"  [recipes] in config.toml maps apps to your own files in $XDG_CONFIG_HOME/quack/recipes/:\n\n" +
 		"    [recipes]\n" +
 		"    'io\\.example\\.app' = \"recipes.ts\"\n" +
 		"    'io\\.example\\..*' = [\"common.ts\", \"features/*.ts\"]\n\n" +
@@ -40,7 +42,7 @@ func usage(flags string) string {
 		"  every file it matches in both declares itself, and two recipes of one name fail them all. Files may import\n" +
 		"  other local files, whose recipes run through quack.runRecipe() without being listed, but no packages.\n" +
 		"  quack --init-recipes writes quack.d.ts and tsconfig.json next to the recipes, so that editors check them,\n" +
-		"  and with --app starts .quack/ in the current dir when there is none. The terminal UI lists the recipes with\n" +
+		"  and with --app starts .quack/ in the selected project or the current dir. The terminal UI lists the recipes with\n" +
 		"  the actions, marked ƒ, and $ lists only the recipes:\n\n" +
 		"    import quack from \"quack\"\n\n" +
 		"    export const login = quack.recipe({\n" +

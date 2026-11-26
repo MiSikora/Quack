@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"quack/internal/cli"
 )
 
@@ -471,4 +473,56 @@ func ensureNewline(text string) string {
 
 func withActionEnv(d *fakeDevice) {
 	d.apps[0].describe = strings.Replace(sampleDescribe, `"name":"name","type":"string","required":true`, `"name":"name","type":"string","required":true,"env":"QUACK_TOKEN"`, 1)
+}
+
+func TestRecipeProjectDirKeepsCommandsInTheCallerDirectory(t *testing.T) {
+	config := t.TempDir()
+	project := t.TempDir()
+	s := scenario{inProject: true, recipes: `import quack from "quack"
+export const capture = quack.recipe({
+  name: "capture",
+  run() { quack.run("cat input.txt > output.txt") },
+})`}
+	writeRecipes(t, s, filepath.Join(config, "quack"), filepath.Join(project, ".quack"))
+	adb := startFakeAdb(t, []*fakeDevice{defaultDevice()})
+	env := append(cleanEnv(), "ANDROID_ADB_SERVER_PORT="+adb.port(), "XDG_CONFIG_HOME="+config)
+	for _, tool := range []string{"quack", "quack-mcp"} {
+		t.Run(tool, func(t *testing.T) {
+			caller := t.TempDir()
+			if err := os.WriteFile(filepath.Join(caller, "input.txt"), []byte("from caller"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			relative, err := filepath.Rel(caller, project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tool == "quack" {
+				cmd := exec.Command(os.Args[0], "--project-dir", relative, "--recipe", "capture")
+				cmd.Dir, cmd.Env = caller, append(env, runAsQuack+"=1")
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("quack: %v\n%s", err, out)
+				}
+			} else {
+				executable := filepath.Join(t.TempDir(), "quack-mcp")
+				if out, err := exec.Command("go", "build", "-o", executable, "../cmd/quack-mcp").CombinedOutput(); err != nil {
+					t.Fatalf("build quack-mcp: %v\n%s", err, out)
+				}
+				cmd := exec.Command(executable, "--project-dir", relative)
+				cmd.Dir, cmd.Env = caller, env
+				client := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil)
+				session, err := client.Connect(t.Context(), &mcp.CommandTransport{Command: cmd}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer session.Close()
+				result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "run_recipe", Arguments: map[string]any{"recipe": "capture"}})
+				if err != nil || result.IsError {
+					t.Fatalf("run_recipe: %v, %v", result, err)
+				}
+			}
+			if got, err := os.ReadFile(filepath.Join(caller, "output.txt")); err != nil || string(got) != "from caller" {
+				t.Errorf("output in caller directory: %q, %v", got, err)
+			}
+		})
+	}
 }

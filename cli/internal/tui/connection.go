@@ -39,14 +39,14 @@ type recipes struct {
 	err      error
 }
 
-func (c *connection) connect(target device.Target, activity activity, dir string) tea.Cmd {
+func (c *connection) connect(target device.Target, activity activity, location recipe.Location) tea.Cmd {
 	backend, openApp := c.backend, c.opensApp
 	return func() tea.Msg {
 		app, err := backend.Connect(target, openApp)
 		msg := connected{target: target, app: app, described: described{err: err}}
 		if err == nil {
 			msg.hello, msg.actions, msg.err = app.Describe(activity.ctx)
-			msg.recipes = loadRecipes(dir, target.Package)
+			msg.recipes = loadRecipes(location, target.Package)
 		}
 		activity.send(msg)
 		return nil
@@ -63,17 +63,17 @@ func (c *connection) drop() {
 	c.generation++
 }
 
-func (c *connection) reload(activity activity, dir string) tea.Cmd {
+func (c *connection) reload(activity activity, location recipe.Location) tea.Cmd {
 	app, pkg, generation := c.app, c.target.Package, c.generation
 	return func() tea.Msg {
 		hello, actions, err := app.Describe(activity.ctx)
-		activity.send(described{hello, actions, err, loadRecipes(dir, pkg), generation})
+		activity.send(described{hello, actions, err, loadRecipes(location, pkg), generation})
 		return nil
 	}
 }
 
-func loadRecipes(dir, pkg string) recipes {
-	cookbook, warnings, err := recipe.Load(dir, pkg)
+func loadRecipes(location recipe.Location, pkg string) recipes {
+	cookbook, warnings, err := location.Load(pkg)
 	return recipes{cookbook, warnings, err}
 }
 

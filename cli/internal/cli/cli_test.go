@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"quack/internal/recipe"
 	"quack/internal/wire"
 )
 
@@ -76,7 +77,6 @@ func TestTUIOpensOnlyForAPersonAtATerminal(t *testing.T) {
 func TestInitRecipesSaysWhenNothingMapsTheApp(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dir := t.TempDir()
-	t.Chdir(dir)
 	if err := os.MkdirAll(filepath.Join(dir, ".quack"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestInitRecipesSaysWhenNothingMapsTheApp(t *testing.T) {
 	} {
 		var out strings.Builder
 
-		err := initRecipes(&out, pkg)
+		err := initRecipes(&out, recipe.Location{Dir: dir}, pkg)
 
 		if err != nil || !strings.HasSuffix(out.String(), want) {
 			t.Errorf("%s: got %q, %v, want it to end with %q", pkg, out.String(), err, want)

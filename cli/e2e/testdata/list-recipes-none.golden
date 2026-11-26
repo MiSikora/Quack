@@ -1,7 +1,7 @@
 $ quack --list-recipes
 --- exit 0
 --- stdout
-No recipes for io.mehow.quack.sample. quack --init-recipes --app io.mehow.quack.sample starts .quack/ here, or map the app under [recipes] in $XDG_CONFIG_HOME/quack/config.toml.
+No recipes for io.mehow.quack.sample. quack --init-recipes --app io.mehow.quack.sample sets up a project, or map the app under [recipes] in $XDG_CONFIG_HOME/quack/config.toml.
 --- stderr
 --- device
 shell emulator-5554: query-receivers

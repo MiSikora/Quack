@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"slices"
 	"time"
@@ -23,14 +22,13 @@ import (
 )
 
 // The app's status lines go into the log, since anything printed around the TUI would break the screen.
-func Run(want device.Target, openApp bool, startTimeout time.Duration, version string) error {
+func Run(want device.Target, openApp bool, startTimeout time.Duration, version string, location recipe.Location) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	settings, problems := config.Load()
-	dir, _ := os.Getwd()
 	activity := newActivity(ctx)
 	backend := session.ADB{StartTimeout: startTimeout, Status: activity}
-	_, err := tea.NewProgram(newModel(backend, activity, want, openApp, version, dir, settings, problems)).Run()
+	_, err := tea.NewProgram(newModel(backend, activity, want, openApp, version, location, settings, problems)).Run()
 	return err
 }
 
@@ -43,7 +41,7 @@ type model struct {
 	box        *paramBox
 	runs       runs
 	hideData   bool
-	dir        string
+	location   recipe.Location
 	quit       notice
 	copied     notice
 	refused    notice
@@ -75,12 +73,12 @@ type command struct {
 	run         func(*model) tea.Cmd
 }
 
-func newModel(backend session.Backend, activity activity, want device.Target, openApp bool, version, dir string, settings config.Config, problems []string) *model {
+func newModel(backend session.Backend, activity activity, want device.Target, openApp bool, version string, location recipe.Location, settings config.Config, problems []string) *model {
 	m := &model{
 		activity:   activity,
 		tracker:    newTracker(backend),
 		connection: connection{backend: backend, opensApp: openApp},
-		dir:        dir,
+		location:   location,
 		picker:     newPicker(want, 0),
 		clock:      wallClock{},
 		prompt:     prompt{input: newInput(""), grouped: settings.GroupNamespaces},
@@ -369,7 +367,7 @@ func (m *model) openApp() tea.Cmd {
 
 func (m *model) initRecipes() tea.Cmd {
 	pkg := m.connection.target.Package
-	written, err := recipe.Init(m.dir, pkg)
+	written, err := m.location.Init(pkg)
 	if err != nil {
 		m.log.add(problemStyle.Render("init-recipes: " + err.Error()))
 		return nil
@@ -380,14 +378,14 @@ func (m *model) initRecipes() tea.Cmd {
 	if len(written) == 0 {
 		m.log.add(statusStyle.Render("the recipe files are up to date"))
 	}
-	switch mapped, err := recipe.Maps(m.dir, pkg); {
+	switch mapped, err := m.location.Maps(pkg); {
 	case err != nil:
 		m.log.add(problemStyle.Render("init-recipes: " + err.Error()))
 	case !mapped:
 		m.log.add(statusStyle.Render("nothing maps " + pkg + " to a recipes file yet: add a line under [recipes] in .quack/quack.toml, such as '" +
 			regexp.QuoteMeta(pkg) + "' = \"recipes.ts\""))
 	}
-	m.setRecipes(loadRecipes(m.dir, pkg))
+	m.setRecipes(loadRecipes(m.location, pkg))
 	return nil
 }
 
@@ -506,7 +504,7 @@ func (m *model) advance() tea.Cmd {
 
 func (m *model) connect(target device.Target) tea.Cmd {
 	m.picker.connecting = &target
-	return m.connection.connect(target, m.activity, m.dir)
+	return m.connection.connect(target, m.activity, m.location)
 }
 
 func (m *model) connected(msg connected) tea.Cmd {
@@ -619,7 +617,7 @@ func commands() []command {
 		{"/open-app", "ctrl+o", "Show the app's main screen", true, (*model).openApp},
 		{"/pick-app", "", "Pick another app on this device", true, (*model).pickApp},
 		{"/pick-device", "", "Pick another device", false, (*model).pickDevice},
-		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", true, func(m *model) tea.Cmd { return m.connection.reload(m.activity, m.dir) }},
+		{"/reload", "ctrl+r", "Ask the app for its actions and read its recipes again", true, func(m *model) tea.Cmd { return m.connection.reload(m.activity, m.location) }},
 		{"/toggle-data", "", "Show or hide the JSON data of notifications and results", false, (*model).toggleData},
 	}
 }

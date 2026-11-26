@@ -22,8 +22,9 @@ import (
 )
 
 type tools struct {
-	backend session.Backend
-	runs    *runs
+	backend  session.Backend
+	runs     *runs
+	location recipe.Location
 }
 
 func (s tools) listDevices(context.Context, *mcp.CallToolRequest, listDevicesInput) (*mcp.CallToolResult, listDevicesOutput, error) {
@@ -119,7 +120,7 @@ func (s tools) listRecipes(_ context.Context, _ *mcp.CallToolRequest, in listRec
 	if err != nil {
 		return nil, listRecipesOutput{}, err
 	}
-	cookbook, problems, err := loadRecipes(target.Package)
+	cookbook, problems, err := s.location.Load(target.Package)
 	if err != nil {
 		return nil, listRecipesOutput{}, err
 	}
@@ -142,7 +143,7 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	cookbook, problems, err := loadRecipes(target.Package)
+	cookbook, problems, err := s.location.Load(target.Package)
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
@@ -265,15 +266,6 @@ func (s tools) find(serial, pkg string) (device.Target, error) {
 		return device.Target{}, errors.New(pkg + " is not a package name")
 	}
 	return s.backend.Find(adb.Device(serial), pkg)
-}
-
-// Recipes come from the project of the dir quack-mcp runs in, as the MCP client started it, and from the user's config.
-func loadRecipes(pkg string) (*recipe.Cookbook, []string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return nil, nil, err
-	}
-	return recipe.Load(dir, pkg)
 }
 
 func progress(ctx context.Context, req *mcp.CallToolRequest) func(message string) {

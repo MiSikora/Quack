@@ -181,7 +181,8 @@ func collect(events *[]step.Event) func(step.Event) {
 func load(t *testing.T, file string) *recipe.Cookbook {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	if _, err := recipe.Init(t.TempDir(), ""); err != nil {
+	location := recipe.Location{Dir: t.TempDir()}
+	if _, err := location.Init(""); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(recipe.Dir(), "io.mehow.quack.sample.ts"), []byte(strings.TrimPrefix(file, "\n")), 0o644); err != nil {
@@ -191,7 +192,7 @@ func load(t *testing.T, file string) *recipe.Cookbook {
 	if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "quack", "config.toml"), []byte(mapping), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cookbook, warnings, err := recipe.Load(os.Getenv("XDG_CONFIG_HOME"), "io.mehow.quack.sample")
+	cookbook, warnings, err := location.Load("io.mehow.quack.sample")
 	if err != nil || warnings != nil {
 		t.Fatal(err, warnings)
 	}

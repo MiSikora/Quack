@@ -743,7 +743,7 @@ func writeConfig(t *testing.T, content string) {
 // loadApp loads the recipes of pkg from a dir outside any project, and fails on warnings.
 func loadApp(t *testing.T) (*Cookbook, error) {
 	t.Helper()
-	c, warnings, err := Load(t.TempDir(), pkg)
+	c, warnings, err := (Location{Dir: t.TempDir()}).Load(pkg)
 	if warnings != nil {
 		t.Fatalf("warnings: %q", warnings)
 	}

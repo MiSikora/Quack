@@ -53,6 +53,7 @@ type options struct {
 	initRecipes  bool
 	openApp      bool
 	recipe       string
+	projectDir   string
 	startTimeout time.Duration
 	help         bool
 	version      bool
@@ -71,7 +72,8 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	command.BoolFlag(fs, &opts.listActions, "list-actions", "l", "list the app's actions, or only those whose id matches regex")
 	command.BoolFlag(fs, &opts.listDevices, "list-devices", "", "list the devices and the quack-enabled apps on each")
 	command.BoolFlag(fs, &opts.listRecipes, "list-recipes", "", "list the app's recipes, or only those whose name matches regex")
-	command.BoolFlag(fs, &opts.initRecipes, "init-recipes", "", "write the files that let editors check recipes, and with --app start .quack/ here with a recipe of the app")
+	command.ProjectDirFlag(fs, &opts.projectDir)
+	command.BoolFlag(fs, &opts.initRecipes, "init-recipes", "", "write the files that let editors check recipes, and with --app start a project with a recipe of the app")
 	command.BoolFlag(fs, &opts.openApp, "open-app", "", "show the app's main screen first, instead of starting it in the background")
 	fs.StringVar(&opts.recipe, "recipe", "", "run the app's recipe `name`")
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
@@ -101,7 +103,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 		return opts, err
 	case opts.initRecipes:
 		if len(rest) > 0 || opts.listActions || opts.listDevices || opts.listRecipes || opts.json || fs.Changed("device") {
-			return opts, usageErrorf("--init-recipes takes only --app, since it sets up files and no device")
+			return opts, usageErrorf("--init-recipes takes only --app and --project-dir, since it sets up files and no device")
 		}
 	case opts.listDevices:
 		if len(rest) > 0 || opts.listActions || opts.listRecipes {
@@ -138,26 +140,34 @@ func run(opts options, terminal Terminal) error {
 		fmt.Fprintln(terminal.Out, "quack", command.Version)
 		return nil
 	}
+	var location recipe.Location
+	if opts.initRecipes || opts.interactive || opts.listRecipes || opts.recipe != "" {
+		dir, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		location = recipe.Location{Dir: dir, ProjectDir: opts.projectDir}
+	}
 	if opts.initRecipes {
-		return initRecipes(terminal.Out, opts.pkg)
+		return initRecipes(terminal.Out, location, opts.pkg)
 	}
 	backend := session.ADB{StartTimeout: opts.startTimeout, Status: terminal.Err}
 	if opts.listDevices {
 		return printDevices(terminal.Out, backend, adb.Device(opts.device), opts.pkg, opts.json)
 	}
 	if opts.interactive {
-		return tui.Run(device.Target{Device: adb.Device(opts.device), Package: opts.pkg}, opts.openApp, opts.startTimeout, command.Version)
+		return tui.Run(device.Target{Device: adb.Device(opts.device), Package: opts.pkg}, opts.openApp, opts.startTimeout, command.Version, location)
 	}
 	target, err := backend.Find(adb.Device(opts.device), opts.pkg)
 	if err != nil {
 		return err
 	}
 	if opts.listRecipes {
-		return printRecipes(terminal, target.Package, opts.filter, opts.json)
+		return printRecipes(terminal, location, target.Package, opts.filter, opts.json)
 	}
 	var cookbook *recipe.Cookbook
 	if opts.recipe != "" {
-		if cookbook, err = findRecipe(target.Package, opts.recipe, terminal); err != nil {
+		if cookbook, err = findRecipe(location, target.Package, opts.recipe, terminal); err != nil {
 			return err
 		}
 	}

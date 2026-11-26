@@ -620,11 +620,50 @@ func TestRunRecipeSaysWhyRecipesWereLeftOut(t *testing.T) {
 		filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "quack", "config.toml")+": [recipes] maps io.mehow.quack.sample to gone.ts, which does not exist")
 }
 
+func TestRecipeToolsResolveTheProjectOnEveryCall(t *testing.T) {
+	inConfigDir(t)
+	first, second := t.TempDir(), t.TempDir()
+	for root, name := range map[string]string{first: "first", second: "second"} {
+		if _, err := (recipe.Location{Dir: root, ProjectDir: root}).Init("io.mehow.quack.sample"); err != nil {
+			t.Fatal(err)
+		}
+		script := fmt.Sprintf(`import quack from "quack"
+export const r = quack.recipe({ name: %q, run() { return %q } })`, name, name)
+		if err := os.WriteFile(filepath.Join(root, ".quack", "recipes", "recipes.ts"), []byte(script), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mapping := func(root string) {
+		t.Helper()
+		doc := fmt.Sprintf("[projects]\n'.*' = %q\n", root)
+		if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "quack", "config.toml"), []byte(doc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	location := recipe.Location{Dir: t.TempDir()}
+	configured := connectFull(t, t.Context(), newFakeSource(), nil, "", location)
+	location.ProjectDir = second
+	explicit := connectFull(t, t.Context(), newFakeSource(), nil, "", location)
+	mapping(first)
+	checkList := func(session *mcp.ClientSession, root, name string) {
+		t.Helper()
+		result := call(t, session, "list_recipes", map[string]any{})
+		file := filepath.Join(root, ".quack", "recipes", "recipes.ts")
+		assertStructured(t, result, fmt.Sprintf(`{"device":"emulator-5554","app":"io.mehow.quack.sample","recipes":[{"name":%q,"description":"","params":[],"file":%s}]}`, name, quoted(file)))
+	}
+	checkList(configured, first, "first")
+	checkList(explicit, second, "second")
+	assertStructured(t, call(t, explicit, "run_recipe", map[string]any{"recipe": "second"}), `{"steps":[],"log":[],"data":"second"}`)
+	mapping(second)
+	checkList(configured, second, "second")
+	assertStructured(t, call(t, configured, "run_recipe", map[string]any{"recipe": "second"}), `{"steps":[],"log":[],"data":"second"}`)
+}
+
 // writeRecipes keeps file as the recipes of the sample app in a config dir of the test's own, with up-to-date types.
 func writeRecipes(t *testing.T, file string) string {
 	t.Helper()
 	inConfigDir(t)
-	if _, err := recipe.Init(t.TempDir(), ""); err != nil {
+	if _, err := (recipe.Location{Dir: t.TempDir()}).Init(""); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(recipe.Dir(), "io.mehow.quack.sample.ts")
@@ -691,20 +730,20 @@ func connectWith(t *testing.T, source session.Backend, options *mcp.ClientOption
 
 func connectAt(t *testing.T, source session.Backend, options *mcp.ClientOptions, version string) *mcp.ClientSession {
 	t.Helper()
-	return connectFull(t, t.Context(), source, options, version)
+	return connectFull(t, t.Context(), source, options, version, recipe.Location{Dir: "."})
 }
 
 // The server's runs end with ctx, while the session lasts as long as the test.
 func connectUntil(t *testing.T, ctx context.Context, source session.Backend) *mcp.ClientSession {
 	t.Helper()
-	return connectFull(t, ctx, source, nil, "")
+	return connectFull(t, ctx, source, nil, "", recipe.Location{Dir: "."})
 }
 
 // "" asks for the latest protocol version.
-func connectFull(t *testing.T, ctx context.Context, source session.Backend, options *mcp.ClientOptions, version string) *mcp.ClientSession {
+func connectFull(t *testing.T, ctx context.Context, source session.Backend, options *mcp.ClientOptions, version string, location recipe.Location) *mcp.ClientSession {
 	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	serverSession, err := New(ctx, source, "test").Connect(t.Context(), serverTransport, nil)
+	serverSession, err := New(ctx, source, "test", location).Connect(t.Context(), serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

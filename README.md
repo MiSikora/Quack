@@ -106,6 +106,27 @@ or `/init-recipes` in `quack`. This creates `.quack/`, which you commit. `.quack
 
 Keys are regexes matching the whole package, in single quotes. Values are paths or globs in `recipes/`. Personal recipes go in the same kind of table in `~/.config/quack/config.toml`, with files in `~/.config/quack/recipes/`.
 
+To use a project's recipes from another directory, map the app to its project root in your personal config.
+
+```toml
+# ~/.config/quack/config.toml (or $XDG_CONFIG_HOME/quack/config.toml)
+[projects]
+'com\.example(\.debug)?' = "~/src/android"
+```
+
+To choose a project explicitly, pass `--project-dir` to either executable.
+
+```sh
+quack --project-dir ../android --list-recipes
+quack-mcp --project-dir ~/src/android
+```
+
+The flag selects the exact directory containing `.quack/`. Without the flag, Quack uses the nearest `.quack/` in the current directory or its ancestors, stopping at home or the filesystem root. If it finds none and has an app package, Quack looks for a matching `[projects]` entry. The regex must match the whole package. Multiple matches are an error. With no project, Quack uses only personal recipes. Personal recipes also load alongside the selected project's recipes.
+
+Relative flag paths start in your working directory. Relative `[projects]` paths start in the directory containing the personal config file. Both accept `~` and `~/` for your home directory. The root must exist, and loading requires a `.quack/` directory at that exact root. Recipe commands still run in the directory where you started Quack, so relative output paths use that directory.
+
+`--init-recipes` can create a missing `.quack/` in the selected root. With `--project-dir` and no `--app`, it writes the personal and project editor types. With an app, it can also create the project's mapping and starter recipe. The terminal UI uses the same project selection for `/init-recipes` and `/reload`.
+
 ```ts
 // .quack/recipes/features/greet.ts
 import quack from "quack"

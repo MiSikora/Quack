@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"regexp/syntax"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,11 +47,11 @@ func (c *Cookbook) Find(name string) (Recipe, bool) {
 	return c.Recipes[at], true
 }
 
-// Load reads the recipes of pkg from the project that dir is in, and from the user's config. It never writes files.
+// Load reads the recipes of pkg from the selected project and the user's config. It never writes files.
 // A problem that leaves out only an entry or a file comes back as a warning, and one that leaves the recipes unknown
 // fails the load.
-func Load(dir, pkg string) (*Cookbook, []string, error) {
-	tables, warnings, err := readTables(dir)
+func (l Location) Load(pkg string) (*Cookbook, []string, error) {
+	tables, warnings, err := l.readTables(pkg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -112,24 +113,16 @@ func Load(dir, pkg string) (*Cookbook, []string, error) {
 	return cookbook, warnings, nil
 }
 
-// Init writes the files that let editors check recipes into the user's recipes dir, and into the project's when dir
-// is in one or pkg is given. With pkg and no quack.toml in the project, it starts one that maps pkg to a starter
-// recipes file, and creates the project in dir when there is none. It returns the paths it wrote.
-func Init(dir, pkg string) ([]string, error) {
+// Init writes editor types in the user's recipes directory and the selected project. With a package and
+// no existing project, it starts a project in the caller's directory. It returns the paths it wrote.
+func (l Location) Init(pkg string) ([]string, error) {
+	project, _, err := l.sources(pkg, true)
+	if err != nil {
+		return nil, err
+	}
 	written, err := writeTypes(Dir())
-	if err != nil {
-		return nil, err
-	}
-	start, err := filepath.Abs(dir)
-	if err != nil {
-		return nil, err
-	}
-	project := findProject(start, home())
-	switch {
-	case project == "" && pkg == "":
-		return written, nil
-	case project == "":
-		project = filepath.Join(start, projectDir)
+	if err != nil || project == "" {
+		return written, err
 	}
 	projectTypes, err := writeTypes(filepath.Join(project, "recipes"))
 	written = append(written, projectTypes...)
@@ -152,18 +145,18 @@ func Init(dir, pkg string) ([]string, error) {
 	return append(written, recipes), nil
 }
 
-// Maps reports whether a [recipes] table of the project that dir is in, or of the user's config, maps pkg to a file.
-func Maps(dir, pkg string) (bool, error) {
-	tables, _, err := readTables(dir)
+// Maps reports whether a [recipes] table of the selected project, or of the user's config, maps pkg to a file.
+func (l Location) Maps(pkg string) (bool, error) {
+	tables, _, err := l.readTables(pkg)
 	if err != nil {
 		return false, err
 	}
 	return slices.ContainsFunc(tables, func(t table) bool { return len(t.files(pkg)) > 0 }), nil
 }
 
-// MapsAny reports whether a [recipes] table of the project that dir is in, or of the user's config, maps any app.
-func MapsAny(dir string) (bool, error) {
-	tables, _, err := readTables(dir)
+// MapsAny reports whether a [recipes] table of the selected project, or of the user's config, maps any app.
+func (l Location) MapsAny() (bool, error) {
+	tables, _, err := l.readTables("")
 	if err != nil {
 		return false, err
 	}
@@ -205,48 +198,50 @@ func (t table) files(pkg string) []string {
 	return names
 }
 
-func readTables(dir string) ([]table, []string, error) {
-	start, err := filepath.Abs(dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	userFile, err := filepath.Abs(config.Path())
+func (l Location) readTables(pkg string) ([]table, []string, error) {
+	project, user, err := l.sources(pkg, false)
 	if err != nil {
 		return nil, nil, err
 	}
 	var tables []table
 	var warnings []string
-	if project := findProject(start, home()); project != "" {
-		t, problems, err := readTable(filepath.Join(project, "quack.toml"), filepath.Join(project, "recipes"), true)
+	if project != "" {
+		file, err := readTOML(filepath.Join(project, "quack.toml"))
+		if err != nil {
+			return nil, nil, err
+		}
+		t, problems, err := file.recipeTable(true)
 		if err != nil {
 			return nil, nil, err
 		}
 		tables, warnings = append(tables, t), append(warnings, problems...)
 	}
-	t, problems, err := readTable(userFile, filepath.Join(filepath.Dir(userFile), "recipes"), false)
+	t, problems, err := user.recipeTable(false)
 	if err != nil {
 		return nil, nil, err
 	}
 	return append(tables, t), append(warnings, problems...), nil
 }
 
-func readTable(file, dir string, onlyRecipes bool) (table, []string, error) {
-	doc, err := os.ReadFile(file)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return table{file: file, dir: dir}, nil, nil
-	case err != nil:
-		return table{}, nil, err
-	}
-	return parseTable(doc, file, dir, onlyRecipes)
+type tomlFile struct {
+	path string
+	doc  []byte
 }
 
-func parseTable(doc []byte, file, dir string, onlyRecipes bool) (table, []string, error) {
-	t := table{file: file, dir: dir}
+func readTOML(path string) (tomlFile, error) {
+	doc, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return tomlFile{}, err
+	}
+	return tomlFile{path, doc}, nil
+}
+
+func (f tomlFile) recipeTable(onlyRecipes bool) (table, []string, error) {
+	t := table{file: f.path, dir: filepath.Join(filepath.Dir(f.path), "recipes")}
 	var decoded struct {
 		Recipes any `toml:"recipes"`
 	}
-	warnings, err := config.Decode(doc, file, onlyRecipes, &decoded)
+	warnings, err := config.Decode(f.doc, f.path, onlyRecipes, &decoded)
 	if err != nil {
 		return table{}, nil, err
 	}
@@ -255,12 +250,12 @@ func parseTable(doc []byte, file, dir string, onlyRecipes bool) (table, []string
 	}
 	recipes, ok := decoded.Recipes.(map[string]any)
 	if !ok {
-		return t, append(warnings, file+": recipes must be a table of patterns"), nil
+		return t, append(warnings, f.path+": recipes must be a table of patterns"), nil
 	}
 	for _, pattern := range slices.Sorted(maps.Keys(recipes)) {
 		e, problem := parseEntry(pattern, recipes[pattern])
 		if problem != "" {
-			warnings = append(warnings, fmt.Sprintf("%s: [recipes] '%s' %s", file, pattern, problem))
+			warnings = append(warnings, fmt.Sprintf("%s: [recipes] '%s' %s", f.path, pattern, problem))
 			continue
 		}
 		t.entries = append(t.entries, e)
@@ -268,11 +263,21 @@ func parseTable(doc []byte, file, dir string, onlyRecipes bool) (table, []string
 	return t, warnings, nil
 }
 
+// packagePattern matches an entire package, including when the regex contains alternatives.
+func packagePattern(pattern string) (*regexp.Regexp, error) {
+	parsed, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return nil, err
+	}
+	return regexp.Compile("^(?:" + parsed.String() + ")$")
+}
+
 func parseEntry(pattern string, value any) (entry, string) {
-	if _, err := regexp.Compile(pattern); err != nil {
+	re, err := packagePattern(pattern)
+	if err != nil {
 		return entry{}, "is not a valid regex: " + strings.TrimPrefix(err.Error(), "error parsing regexp: ")
 	}
-	e := entry{pattern: regexp.MustCompile("^(?:" + pattern + ")$")}
+	e := entry{pattern: re}
 	switch value := value.(type) {
 	case string:
 		e.files = []string{value}

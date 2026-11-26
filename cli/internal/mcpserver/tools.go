@@ -11,20 +11,21 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"quack/internal/recipe"
 	"quack/internal/session"
 )
 
 // The session ends with stdin, which cancels the runs that start_action started.
-func Serve(ctx context.Context, version string, startTimeout time.Duration, status io.Writer) error {
+func Serve(ctx context.Context, version string, location recipe.Location, startTimeout time.Duration, status io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	return New(ctx, session.ADB{StartTimeout: startTimeout, Status: status}, version).Run(ctx, &mcp.StdioTransport{})
+	return New(ctx, session.ADB{StartTimeout: startTimeout, Status: status}, version, location).Run(ctx, &mcp.StdioTransport{})
 }
 
 // The runs that start_action starts end with ctx.
-func New(ctx context.Context, backend session.Backend, version string) *mcp.Server {
+func New(ctx context.Context, backend session.Backend, version string, location recipe.Location) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "quack", Version: version}, &mcp.ServerOptions{Instructions: instructions})
-	s := tools{backend, newRuns(ctx)}
+	s := tools{backend: backend, runs: newRuns(ctx), location: location}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_devices",
 		Description: "List the devices adb knows, each with its state and the quack-enabled apps on it.",

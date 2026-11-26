@@ -93,12 +93,8 @@ func hasMessage(s step.Step) bool {
 	return true
 }
 
-func loadRecipes(pkg string, terminal Terminal) (*recipe.Cookbook, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	c, warnings, err := recipe.Load(dir, pkg)
+func loadRecipes(location recipe.Location, pkg string, terminal Terminal) (*recipe.Cookbook, error) {
+	c, warnings, err := location.Load(pkg)
 	if err != nil {
 		return nil, usageErrorf("%v", err)
 	}
@@ -108,8 +104,8 @@ func loadRecipes(pkg string, terminal Terminal) (*recipe.Cookbook, error) {
 	return c, nil
 }
 
-func findRecipe(pkg, name string, terminal Terminal) (*recipe.Cookbook, error) {
-	c, err := loadRecipes(pkg, terminal)
+func findRecipe(location recipe.Location, pkg, name string, terminal Terminal) (*recipe.Cookbook, error) {
+	c, err := loadRecipes(location, pkg, terminal)
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +115,8 @@ func findRecipe(pkg, name string, terminal Terminal) (*recipe.Cookbook, error) {
 	return c, nil
 }
 
-func printRecipes(terminal Terminal, pkg string, filter *regexp.Regexp, asJSON bool) error {
-	c, err := loadRecipes(pkg, terminal)
+func printRecipes(terminal Terminal, location recipe.Location, pkg string, filter *regexp.Regexp, asJSON bool) error {
+	c, err := loadRecipes(location, pkg, terminal)
 	if err != nil {
 		return err
 	}
@@ -141,7 +137,7 @@ func printRecipes(terminal Terminal, pkg string, filter *regexp.Regexp, asJSON b
 		}
 		printJSON(w, out)
 	case len(kept) == 0:
-		fmt.Fprintln(w, "No recipes for "+pkg+". quack --init-recipes --app "+pkg+" starts .quack/ here, or map the app under [recipes] in "+config.Path()+".")
+		fmt.Fprintln(w, "No recipes for "+pkg+". quack --init-recipes --app "+pkg+" sets up a project, or map the app under [recipes] in "+config.Path()+".")
 	default:
 		var out strings.Builder
 		for _, r := range kept {
@@ -152,14 +148,14 @@ func printRecipes(terminal Terminal, pkg string, filter *regexp.Regexp, asJSON b
 	return nil
 }
 
-func initRecipes(w io.Writer, pkg string) error {
-	dir, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	written, err := recipe.Init(dir, pkg)
+func initRecipes(w io.Writer, location recipe.Location, pkg string) error {
+	written, err := location.Init(pkg)
 	for _, path := range written {
 		fmt.Fprintln(w, "wrote "+path)
+	}
+	var selection *recipe.SelectionError
+	if errors.As(err, &selection) {
+		return usageErrorf("%v", err)
 	}
 	if err != nil {
 		return err
@@ -168,15 +164,15 @@ func initRecipes(w io.Writer, pkg string) error {
 		fmt.Fprintln(w, "The files that let editors check recipes are up to date.")
 	}
 	if pkg == "" {
-		mapped, err := recipe.MapsAny(dir)
+		mapped, err := location.MapsAny()
 		if err != nil || mapped {
 			return err
 		}
 		fmt.Fprintln(w, "Map apps to recipe files under [recipes] in .quack/quack.toml, or in "+config.Path()+".\n"+
-			"quack --init-recipes --app <package> starts .quack/ here.")
+			"quack --init-recipes --app <package> sets up a project.")
 		return nil
 	}
-	mapped, err := recipe.Maps(dir, pkg)
+	mapped, err := location.Maps(pkg)
 	switch {
 	case err != nil:
 		return err
