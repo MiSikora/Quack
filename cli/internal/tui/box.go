@@ -333,8 +333,13 @@ func (f *textField) pick() {
 }
 
 func (f *textField) forward(msg tea.Msg) tea.Cmd {
+	text := f.input.Value()
 	var cmd tea.Cmd
 	f.input, cmd = f.input.Update(msg)
+	if f.input.Value() != text {
+		f.empty = false
+		f.selected = -1
+	}
 	return cmd
 }
 

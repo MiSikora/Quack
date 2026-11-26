@@ -164,7 +164,7 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 		}
 	}
 	t := newTranscript(progress(ctx, req))
-	data, err := session.Run(ctx, app, actions, cookbook, session.Runnable{Name: in.Recipe, Recipe: true}, args, t.record)
+	data, err := session.Run(ctx, app, actions, cookbook, session.Runnable{Name: in.Recipe, Recipe: true}, step.Arguments{Values: args}, t.record)
 	out := runRecipeOutput{Steps: t.steps, Log: t.log, Data: data, Problems: problems}
 	if err != nil {
 		out.Error = stepError(err)

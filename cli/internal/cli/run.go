@@ -195,9 +195,9 @@ func run(opts options, terminal Terminal) error {
 		return usageErrorf("%v", err)
 	}
 	if opts.recipe != "" {
-		return runPrinted(app, cookbook, session.Runnable{Name: opts.recipe, Recipe: true}, args, opts.args, terminal, opts.json)
+		return runPrinted(app, cookbook, session.Runnable{Name: opts.recipe, Recipe: true}, args, terminal, opts.json)
 	}
-	return runPrinted(app, nil, session.Runnable{Name: opts.action}, args, opts.args, terminal, opts.json)
+	return runPrinted(app, nil, session.Runnable{Name: opts.action}, args, terminal, opts.json)
 }
 
 func printResult(terminal Terminal, json bool, result wire.MessageResult, step int) {

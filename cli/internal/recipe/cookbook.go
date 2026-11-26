@@ -31,7 +31,7 @@ type Cookbook struct {
 
 // Run returns what the recipe's run returned as JSON, or nil when it returned undefined. Ending ctx interrupts the
 // recipe wherever it is. The events' lines show the args of a Call in the order of its action's params in actions.
-func (c *Cookbook) Run(ctx context.Context, app step.App, actions []wire.Action, name string, args map[string]wire.RawArg, emit func(step.Event)) (json.RawMessage, error) {
+func (c *Cookbook) Run(ctx context.Context, app step.App, actions []wire.Action, name string, args step.Arguments, emit func(step.Event)) (json.RawMessage, error) {
 	r, ok := c.Find(name)
 	if !ok {
 		return nil, fmt.Errorf("no recipe named %s for %s", name, app.Target().Package)

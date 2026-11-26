@@ -176,27 +176,37 @@ func CommandLine(action wire.Action, args map[string]wire.RawArg) string {
 	return strings.Join(words, " ")
 }
 
-// Only args typed on the command line or in the TUI take variables. A recipe reads the environment through env.
-func ExpandArgs(args map[string]wire.RawArg, target device.Target) (map[string]wire.RawArg, error) {
+// Arguments carries execution values alongside their display and masking provenance.
+type Arguments struct {
+	Values      map[string]wire.RawArg
+	Display     map[string]wire.RawArg
+	Environment map[string]string
+}
+
+// ExpandArgs expands user input once, without shell evaluation. $${NAME} stays literal.
+// Recipe code reads the environment through env instead of expanding action arguments.
+func ExpandArgs(args map[string]wire.RawArg, target device.Target) (Arguments, error) {
+	expanded := Arguments{Display: args}
 	if args == nil {
-		return nil, nil
+		return expanded, nil
 	}
-	expanded := make(map[string]wire.RawArg, len(args))
+	expanded.Values = make(map[string]wire.RawArg, len(args))
+	expanded.Environment = map[string]string{}
 	for _, key := range slices.Sorted(maps.Keys(args)) {
 		values := make(wire.RawArg, len(args[key]))
 		for i, value := range args[key] {
-			v, err := expand(value, target)
+			v, err := expand(value, target, expanded.Environment)
 			if err != nil {
-				return nil, fmt.Errorf("arg '%s': %w", key, err)
+				return Arguments{}, fmt.Errorf("arg '%s': %w", key, err)
 			}
 			values[i] = v
 		}
-		expanded[key] = values
+		expanded.Values[key] = values
 	}
 	return expanded, nil
 }
 
-func expand(text string, target device.Target) (string, error) {
+func expand(text string, target device.Target, consumed map[string]string) (string, error) {
 	var out strings.Builder
 	rest := text
 	for {
@@ -228,6 +238,7 @@ func expand(text string, target device.Target) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("environment variable '%s' is not set", name)
 			}
+			consumed[name] = value
 			out.WriteString(value)
 			rest = rest[at+end+1:]
 		default:

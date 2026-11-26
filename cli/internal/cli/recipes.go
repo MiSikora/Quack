@@ -2,11 +2,9 @@ package cli
 
 import (
 	"context"
-	encodingjson "encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"regexp"
 	"strings"
 
@@ -17,7 +15,7 @@ import (
 	"quack/internal/wire"
 )
 
-func runPrinted(app session.App, cookbook *recipe.Cookbook, r session.Runnable, args, shownArgs map[string]wire.RawArg, terminal Terminal, json bool) error {
+func runPrinted(app session.App, cookbook *recipe.Cookbook, r session.Runnable, args step.Arguments, terminal Terminal, json bool) error {
 	ctx := context.Background()
 	_, actions, err := app.Describe(ctx)
 	if err != nil {
@@ -54,12 +52,7 @@ func runPrinted(app session.App, cookbook *recipe.Cookbook, r session.Runnable, 
 			}
 		}
 	}
-	var data encodingjson.RawMessage
-	if !r.Recipe {
-		err = session.RunPrepared(ctx, app, actions, step.PrepareCall(actions, wire.Call{Action: r.Name, Args: args}, shownArgs, os.Getenv), record)
-	} else {
-		data, err = session.Run(ctx, app, actions, cookbook, r, args, record)
-	}
+	data, err := session.Run(ctx, app, actions, cookbook, r, args, record)
 	var failed *session.StepError
 	if errors.As(err, &failed) {
 		return err

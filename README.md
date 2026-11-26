@@ -68,7 +68,9 @@ An explicit argument wins, including an empty string or an empty list. Otherwise
 
 In a TUI string or list field, press **Ctrl+E** to send an explicit empty value. The field shows `<empty string>` or `<empty list>`. Press **Ctrl+U** to reset the field and use its default again. An ordinary blank field keeps its default.
 
-Bindings apply to direct commands, interactive forms, recipe `quack.runAction()` calls, and synchronous and asynchronous MCP actions. Discovery keeps the declared required status and literal default and includes only the variable name. Forms and help show `${NAME}` when the variable is available. Recipes and MCP keep explicit `${NAME}` arguments literally; direct CLI arguments retain their existing variable expansion.
+Bindings apply to direct commands, interactive forms, recipe `quack.runAction()` calls, and synchronous and asynchronous MCP actions. Discovery keeps the declared required status and literal default and includes only the variable name. Forms and help show `${NAME}` when the variable is available.
+
+CLI and TUI arguments expand `${NAME}` using the host environment. Use `$${NAME}` to send literal `${NAME}`. In a shell, quote the argument with single quotes so Quack receives the expression, such as `'name=${USER}'`. Missing variables fail the run before an action executes. Expansion runs once and does not evaluate shell expressions. `${QUACK_PACKAGE}` and `${ANDROID_SERIAL}` refer to the selected app and device. MCP arguments and action arguments written inside recipe code remain literal.
 
 Displayed bound arguments, commands, and history use `${NAME}`. Recipe commands and arguments derived from a consumed environment value keep the existing masking. Returned messages, JSON results, notifications, and errors are unchanged. Typed parsing errors can include the supplied value.
 
@@ -180,12 +182,12 @@ quack.recipe({
 
 `quack-mcp` lets AI agents like Claude Code find and run your actions:
 
-MCP honors `ANDROID_SERIAL` when a tool call omits `device`. An explicit `device` takes precedence. Action arguments and result JSON preserve large integers. Forms ask for `long` values as decimal text. `run_recipe` accepts `open_app` to foreground the app before running and includes recipe-loading warnings in `problems`. Failed actions and recipes set `isError` and keep structured notifications, completed steps, and an `error` with a code and message.
-
 ```
 brew install MiSikora/tap/quack-mcp
 claude mcp add quack -- quack-mcp
 ```
+
+MCP honors `ANDROID_SERIAL` when a tool call omits `device`. An explicit `device` takes precedence. Action arguments and result JSON preserve large integers. Forms ask for `long` values as decimal text. `run_recipe` accepts `open_app` to foreground the app before running and includes recipe-loading warnings in `problems`. Failed actions and recipes set `isError` and keep structured notifications, completed steps, and an `error` with a code and message.
 
 ## License
 

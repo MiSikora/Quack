@@ -22,13 +22,21 @@ func TestActionNumbersSurviveRequestsAndResultsExactly(t *testing.T) {
 		notify(wire.Notification{Message: "number", Data: data})
 		return wire.MessageResult{Data: data}, nil
 	}
-	result := call(t, connect(t, source), "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "alice", "age": json.Number("9007199254740993")}})
-	// The Go client decodes StructuredContent through float64; text retains the server's JSON bytes.
-	for _, want := range []string{`"id":9007199254740993`, `9223372036854775807`, `-9223372036854775808`, `0.1234567890123456789`} {
-		if !strings.Contains(text(result), want) {
-			t.Errorf("result lost %s: %s", want, text(result))
+
+	rpc := connect(t, source)
+	for _, mode := range []string{"run_action", "start_action"} {
+		result := call(t, rpc, mode, map[string]any{"action": "account.create", "args": map[string]any{"username": "alice", "age": json.Number("9007199254740993")}})
+		if mode == "start_action" {
+			result = readToEnd(t, rpc, result.StructuredContent.(map[string]any)["run"].(string))
+		}
+		// The Go client decodes StructuredContent through float64; text retains the server's JSON bytes.
+		for _, want := range []string{`"id":9007199254740993`, `9223372036854775807`, `-9223372036854775808`, `0.1234567890123456789`} {
+			if !strings.Contains(text(result), want) {
+				t.Errorf("%s result lost %s: %s", mode, want, text(result))
+			}
 		}
 	}
+
 }
 
 func TestLongAndEmptyListFormsSendExactValues(t *testing.T) {
@@ -69,5 +77,23 @@ func TestToolBoundaryStillRejectsInvalidInputs(t *testing.T) {
 	}
 	if len(source.App.Calls()) != 0 {
 		t.Fatal("ran invalid call")
+	}
+}
+
+func TestLongFormRejectsNumericResponsesRatherThanRounding(t *testing.T) {
+	source := newFakeSource()
+	actions := source.App.Actions()
+	actions[1].Params[1].Type = wire.ParamTypeLong
+	actions[1].Params[1].Presence = wire.Required{}
+	source.App.SetActions(actions)
+	rpc := connectWith(t, source, &mcp.ClientOptions{ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"age": float64(9007199254740992)}}, nil
+	}})
+	result, err := rpc.CallTool(t.Context(), &mcp.CallToolParams{Name: "run_action", Arguments: map[string]any{"action": "account.create", "args": map[string]any{"username": "alice"}}})
+	if err == nil && !result.IsError {
+		t.Fatal("numeric long form was accepted")
+	}
+	if len(source.App.Calls()) != 0 {
+		t.Fatal("unsafe long form ran")
 	}
 }

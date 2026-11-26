@@ -24,7 +24,7 @@ import (
 func TestRunRunsAPlainActionAsOneUnnumberedStep(t *testing.T) {
 	var events []step.Event
 
-	data, err := session.Run(context.Background(), newApp(), actions, nil, session.Runnable{Name: "account.create"}, map[string]wire.RawArg{"username": {"ann"}, "age": {"7"}}, collect(&events))
+	data, err := session.Run(context.Background(), newApp(), actions, nil, session.Runnable{Name: "account.create"}, step.Arguments{Values: map[string]wire.RawArg{"username": {"ann"}, "age": {"7"}}}, collect(&events))
 
 	want := []step.Event{
 		step.Started{Line: "account.create username=ann age=7"},
@@ -42,7 +42,7 @@ func TestRunRunsAPlainActionAsOneUnnumberedStep(t *testing.T) {
 func TestAPlainActionsFailureIsTheRunsErrorWithoutAFailedStep(t *testing.T) {
 	var events []step.Event
 
-	_, err := session.Run(context.Background(), newApp(), actions, nil, session.Runnable{Name: "fail"}, nil, collect(&events))
+	_, err := session.Run(context.Background(), newApp(), actions, nil, session.Runnable{Name: "fail"}, step.Arguments{}, collect(&events))
 
 	var failed *session.StepError
 	if err != refused || errors.As(err, &failed) {
@@ -67,7 +67,7 @@ export const r = quack.recipe({
 })`)
 	var events []step.Event
 
-	data, err := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "r", Recipe: true}, nil, collect(&events))
+	data, err := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "r", Recipe: true}, step.Arguments{}, collect(&events))
 
 	want := []step.Event{
 		step.Logged{Text: "first"},
@@ -96,7 +96,7 @@ export const r = quack.recipe({
   },
 })`)
 
-	_, err := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "r", Recipe: true}, nil, func(step.Event) {})
+	_, err := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "r", Recipe: true}, step.Arguments{}, func(step.Event) {})
 
 	var failed *session.StepError
 	var thrown *recipe.ScriptError
@@ -132,8 +132,8 @@ export const goesOn = quack.recipe({
   },
 })`)
 
-	_, rethrown := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "rethrows", Recipe: true}, nil, func(step.Event) {})
-	_, wentOn := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "goesOn", Recipe: true}, nil, func(step.Event) {})
+	_, rethrown := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "rethrows", Recipe: true}, step.Arguments{}, func(step.Event) {})
+	_, wentOn := session.Run(context.Background(), newApp(), actions, cookbook, session.Runnable{Name: "goesOn", Recipe: true}, step.Arguments{}, func(step.Event) {})
 
 	var failed *session.StepError
 	if !errors.Is(rethrown, refused) || errors.As(rethrown, &failed) {
@@ -218,7 +218,7 @@ func TestPlainActionEnvironmentStaysOutOfEventsButResultsAreUnchanged(t *testing
 	app := newApp()
 	catalog := []wire.Action{{ID: "account.create", Params: []wire.Param{{Name: "username", Env: "QUACK_TOKEN", Presence: wire.Required{}}}}}
 	var events []step.Event
-	_, err := session.Run(t.Context(), app, catalog, nil, session.Runnable{Name: "account.create"}, nil, collect(&events))
+	_, err := session.Run(t.Context(), app, catalog, nil, session.Runnable{Name: "account.create"}, step.Arguments{}, collect(&events))
 	if err != nil {
 		t.Fatal(err)
 	}

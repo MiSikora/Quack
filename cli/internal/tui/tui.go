@@ -341,7 +341,11 @@ func (m *model) choose() tea.Cmd {
 func (m *model) start(r runnable, args map[string]wire.RawArg) tea.Cmd {
 	app, actions, cookbook := m.connection.app, m.prompt.actions, m.connection.cookbook
 	header, cmd := m.runs.start(m.activity, &run{runnable: r}, func(ctx context.Context, emit func(step.Event)) (json.RawMessage, error) {
-		return session.Run(ctx, app, actions, cookbook, session.Runnable{Name: r.ID, Recipe: r.recipe}, args, emit)
+		expanded, err := step.ExpandArgs(args, app.Target())
+		if err != nil {
+			return nil, err
+		}
+		return session.Run(ctx, app, actions, cookbook, session.Runnable{Name: r.ID, Recipe: r.recipe}, expanded, emit)
 	})
 	m.log.add(header)
 	return cmd

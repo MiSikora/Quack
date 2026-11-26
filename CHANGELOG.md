@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### CLI and MCP
+
+#### Added
+- TUI string and list fields accept explicit empty values with Ctrl+E and reset with Ctrl+U.
+- TUI arguments expand host environment variables with `${NAME}` and escape them with `$${NAME}`.
+- MCP recipes accept `open_app` and return recipe-loading warnings in `problems`.
+
+#### Fixed
+- MCP preserves exact JSON numbers in action arguments, notifications, and results. Long form fields accept decimal text.
+- MCP empty list form values send `[]` instead of `null`.
+- MCP uses `ANDROID_SERIAL` when a tool call omits `device`.
+- Failed MCP actions and recipes retain structured notifications, completed steps, and errors.
+- Recipe commands and action arguments derived from expanded user input retain environment placeholders in their displayed values.
+
 ## [0.1.5] - 2026-11-24
 
 ### SDK

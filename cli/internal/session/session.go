@@ -30,9 +30,9 @@ func (e *StepError) Unwrap() error { return e.Err }
 // Run runs a plain action as one step, or a recipe of cookbook, and returns the data the recipe returned. A plain
 // action's failure is Run's error with no step.Failed before it; a recipe's comes back as *StepError when the failed
 // step ended the run. The steps' lines show a Call's args in the order of its action's params in actions.
-func Run(ctx context.Context, app step.App, actions []wire.Action, cookbook *recipe.Cookbook, r Runnable, args map[string]wire.RawArg, emit func(step.Event)) (json.RawMessage, error) {
+func Run(ctx context.Context, app step.App, actions []wire.Action, cookbook *recipe.Cookbook, r Runnable, args step.Arguments, emit func(step.Event)) (json.RawMessage, error) {
 	if !r.Recipe {
-		return nil, RunPrepared(ctx, app, actions, step.PrepareCall(actions, wire.Call{Action: r.Name, Args: args}, nil, os.Getenv), emit)
+		return nil, RunPrepared(ctx, app, actions, step.PrepareCall(actions, wire.Call{Action: r.Name, Args: args.Values}, args.Display, os.Getenv), emit)
 	}
 	var failed *step.Failed
 	data, err := cookbook.Run(ctx, app, actions, r.Name, args, func(e step.Event) {

@@ -67,6 +67,9 @@ func askForParams(req *mcp.CallToolRequest, what string, params []wire.Param, ar
 				args[name] = wire.RawArg{v}
 			}
 		case float64:
+			if p.Type == wire.ParamTypeLong {
+				return nil, fmt.Errorf("param '%s': enter a long as decimal text to preserve its value", name)
+			}
 			args[name] = wire.RawArg{strconv.FormatFloat(v, 'f', -1, 64)}
 		case bool:
 			args[name] = wire.RawArg{strconv.FormatBool(v)}

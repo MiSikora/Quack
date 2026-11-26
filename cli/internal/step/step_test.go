@@ -146,7 +146,7 @@ func TestExpandArgsReplacesVariables(t *testing.T) {
 	os.Unsetenv("QUACK_MISSING")
 
 	args, err := ExpandArgs(map[string]wire.RawArg{"name": {"${QUACK_NAME} $$5 $$${QUACK_NAME} $HOME ${QUACK_PACKAGE}"}}, target)
-	if want := "Bob $$5 $${QUACK_NAME} $HOME io.mehow.quack.sample"; err != nil || args["name"][0] != want {
+	if want := "Bob $$5 $${QUACK_NAME} $HOME io.mehow.quack.sample"; err != nil || args.Values["name"][0] != want {
 		t.Errorf("got %v, %v, want %s", args, err, want)
 	}
 	if _, err := ExpandArgs(map[string]wire.RawArg{"name": {"${QUACK_MISSING}"}}, target); err == nil || err.Error() != "arg 'name': environment variable 'QUACK_MISSING' is not set" {
@@ -185,4 +185,22 @@ func newApp(output adb.Output) *fakes.App {
 	}
 	app.CommandReply = func(string) adb.Output { return output }
 	return app
+}
+
+func TestExpandedArgumentsKeepProvenanceAndOnlyExpandOnce(t *testing.T) {
+	t.Setenv("QUACK_SECRET", "secret ${QUACK_MISSING} $(echo unsafe)")
+	original := map[string]wire.RawArg{"name": {"prefix-${QUACK_SECRET}", "$${QUACK_SECRET}", "$(echo literal)"}, "tags": {}}
+	args, err := ExpandArgs(original, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args.Values["name"][0] != "prefix-secret ${QUACK_MISSING} $(echo unsafe)" || args.Values["name"][1] != "${QUACK_SECRET}" || args.Values["name"][2] != "$(echo literal)" {
+		t.Errorf("expanded %v", args.Values)
+	}
+	if !reflect.DeepEqual(args.Display, original) || args.Environment["QUACK_SECRET"] != "secret ${QUACK_MISSING} $(echo unsafe)" {
+		t.Errorf("provenance %v", args)
+	}
+	if args.Values["tags"] == nil || len(args.Values["tags"]) != 0 {
+		t.Errorf("lost empty list %v", args.Values)
+	}
 }

@@ -69,8 +69,9 @@ func loadScript(path string) (*script, error) {
 	return s, nil
 }
 
-func (s *script) run(ctx context.Context, app step.App, actions []wire.Action, name string, args map[string]wire.RawArg, emit func(step.Event)) (json.RawMessage, error) {
+func (s *script) run(ctx context.Context, app step.App, actions []wire.Action, name string, args step.Arguments, emit func(step.Event)) (json.RawMessage, error) {
 	r := newRuntime(s, ctx, app, actions, emit)
+	maps.Copy(r.env.read, args.Environment)
 	if err := r.load(); err != nil {
 		return nil, err
 	}
@@ -81,7 +82,7 @@ func (s *script) run(ctx context.Context, app step.App, actions []wire.Action, n
 	declared := named[slices.IndexFunc(named, func(d declaredRecipe) bool { return d.Name == name })]
 	stop := context.AfterFunc(ctx, func() { r.vm.Interrupt(client.ErrCanceled) })
 	defer stop()
-	data, threw, err := r.call(declared, args, false)
+	data, threw, err := r.call(declared, args.Values, false)
 	if threw != nil {
 		return nil, r.thrown(threw)
 	}
