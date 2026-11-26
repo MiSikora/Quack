@@ -119,6 +119,7 @@ func TestLineWritesAStepAsTheUserTypesIt(t *testing.T) {
 	}{
 		{call("app.params", "tag", "b c", "text", "hi", "tag", "a"), "app.params text=hi tag='b c' tag=a"},
 		{call("other", "z", "1", "a", "2"), "other a=2 z=1"},
+		{call("app.params", "tag"), "app.params tag=[]"},
 		{OpenApp{}, "/open-app"},
 		{Wait{1500 * time.Millisecond}, "wait 1.5s"},
 		{call("app.greet", "name", "${QUACK_NAME}"), "app.greet name='${QUACK_NAME}'"},

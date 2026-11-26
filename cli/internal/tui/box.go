@@ -40,6 +40,8 @@ type field interface {
 type textField struct {
 	input    textinput.Model
 	list     bool
+	canEmpty bool
+	empty    bool
 	hints    []string
 	selected int
 }
@@ -79,7 +81,7 @@ func newField(p wire.Param) field {
 	if p.Type.IsList() {
 		input.Placeholder = "comma-separated"
 	}
-	f := &textField{input: input, list: p.Type.IsList(), selected: -1}
+	f := &textField{input: input, list: p.Type.IsList(), canEmpty: p.Type == wire.ParamTypeString || p.Type.IsList(), selected: -1}
 	if p.Type == wire.ParamTypeString {
 		f.hints = p.Hints
 	}
@@ -89,7 +91,7 @@ func newField(p wire.Param) field {
 func (b *paramBox) args() map[string]wire.RawArg {
 	args := map[string]wire.RawArg{}
 	for _, f := range b.fields {
-		if value := f.field.value(); len(value) > 0 {
+		if value := f.field.value(); value != nil {
 			args[f.param.Name] = value
 		}
 	}
@@ -109,7 +111,7 @@ func (b *paramBox) press(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		for i := range b.fields {
 			f := &b.fields[i]
-			if _, required := f.param.DisplayPresence(os.Getenv).(wire.Required); required && len(f.field.value()) == 0 {
+			if _, required := f.param.DisplayPresence(os.Getenv).(wire.Required); required && f.field.value() == nil {
 				f.missing = true
 				return false, b.focus(i)
 			}
@@ -122,7 +124,7 @@ func (b *paramBox) press(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 	f := &b.fields[b.focused]
 	cmd := f.field.press(msg)
-	if len(f.field.value()) > 0 {
+	if f.field.value() != nil {
 		f.missing = false
 	}
 	return false, cmd
@@ -141,7 +143,7 @@ func (b *paramBox) deselect() bool {
 
 func (b *paramBox) hinted() (*textField, bool) {
 	text, ok := b.fields[b.focused].field.(*textField)
-	return text, ok && len(text.hints) > 0
+	return text, ok && !text.empty && len(text.hints) > 0
 }
 
 func (b *paramBox) focus(i int) tea.Cmd {
@@ -160,6 +162,17 @@ func (b *paramBox) resize(width int) {
 }
 
 func (b *paramBox) keys() string {
+	keys := b.fieldKeys()
+	if text, ok := b.fields[b.focused].field.(*textField); ok && text.canEmpty {
+		if !text.empty {
+			keys += " · ctrl+e send empty"
+		}
+		keys += " · ctrl+u reset"
+	}
+	return keys
+}
+
+func (b *paramBox) fieldKeys() string {
 	if text, ok := b.hinted(); ok {
 		if text.selected >= 0 {
 			return "enter pick · ↑↓ select · esc deselect"
@@ -247,6 +260,12 @@ func (f boxField) row(names, column int) string {
 func (b *paramBox) fieldWidth() int { return min(max(b.width/3, 10), 40) }
 
 func (f *textField) value() wire.RawArg {
+	if f.empty {
+		if f.list {
+			return wire.RawArg{}
+		}
+		return wire.RawArg{""}
+	}
 	text := f.input.Value()
 	if f.selected >= 0 {
 		text = f.matches()[f.selected].Str
@@ -261,7 +280,16 @@ func (f *textField) value() wire.RawArg {
 }
 
 func (f *textField) press(msg tea.KeyPressMsg) tea.Cmd {
-	if len(f.hints) > 0 {
+	if f.canEmpty {
+		switch msg.String() {
+		case "ctrl+e", "ctrl+u":
+			f.empty = msg.String() == "ctrl+e"
+			f.input.SetValue("")
+			f.selected = -1
+			return nil
+		}
+	}
+	if !f.empty && len(f.hints) > 0 {
 		switch msg.String() {
 		case "up", "ctrl+p":
 			f.selected = min(len(f.matches())-1, f.selected+1)
@@ -274,6 +302,7 @@ func (f *textField) press(msg tea.KeyPressMsg) tea.Cmd {
 	text := f.input.Value()
 	cmd := f.forward(msg)
 	if f.input.Value() != text {
+		f.empty = false
 		f.selected = -1
 		if strings.TrimSpace(f.input.Value()) != "" && len(f.matches()) > 0 {
 			f.selected = 0
@@ -309,7 +338,15 @@ func (f *textField) forward(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-func (f *textField) view() string { return f.input.View() }
+func (f *textField) view() string {
+	if f.empty {
+		if f.list {
+			return selectedStyle.Render("<empty list>")
+		}
+		return selectedStyle.Render("<empty string>")
+	}
+	return f.input.View()
+}
 
 func (f *textField) focus() tea.Cmd { return f.input.Focus() }
 

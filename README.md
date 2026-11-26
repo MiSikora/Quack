@@ -66,6 +66,8 @@ An explicit argument wins, including an empty string or an empty list. Otherwise
 
 `.env()` preserves nullability and works before or after `.required()`, `.withDefault()`, and string `.hints()`. Names must match `[A-Za-z_][A-Za-z0-9_]*`. Android does not read the host environment, so direct Kotlin `Args` calls keep their existing behavior.
 
+In a TUI string or list field, press **Ctrl+E** to send an explicit empty value. The field shows `<empty string>` or `<empty list>`. Press **Ctrl+U** to reset the field and use its default again. An ordinary blank field keeps its default.
+
 Bindings apply to direct commands, interactive forms, recipe `quack.runAction()` calls, and synchronous and asynchronous MCP actions. Discovery keeps the declared required status and literal default and includes only the variable name. Forms and help show `${NAME}` when the variable is available. Recipes and MCP keep explicit `${NAME}` arguments literally; direct CLI arguments retain their existing variable expansion.
 
 Displayed bound arguments, commands, and history use `${NAME}`. Recipe commands and arguments derived from a consumed environment value keep the existing masking. Returned messages, JSON results, notifications, and errors are unchanged. Typed parsing errors can include the supplied value.

@@ -166,6 +166,9 @@ func Line(step Step, actions []wire.Action) string {
 func CommandLine(action wire.Action, args map[string]wire.RawArg) string {
 	words := []string{action.ID}
 	for _, p := range action.Params {
+		if values, given := args[p.Name]; given && len(values) == 0 {
+			words = append(words, p.Name+"=[]")
+		}
 		for _, value := range args[p.Name] {
 			words = append(words, p.Name+"="+quote(value))
 		}
