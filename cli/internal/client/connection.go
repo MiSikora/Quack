@@ -23,28 +23,24 @@ type connection struct {
 var errNotReady = errors.New("app not ready")
 
 func (a App) connectRetrying(ctx context.Context) (*connection, error) {
-	deadline := time.Now().Add(a.startTimeout)
 	for {
-		c, err := connect(a.device, a.socketName)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		c, err := connect(ctx, a.device, a.socketName)
 		if !errors.Is(err, errNotReady) {
 			return c, err
 		}
-		if ctx.Err() != nil {
-			return nil, ErrCanceled
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
 		}
-		if time.Now().After(deadline) {
-			// adbd refuses a socket of a device that went away the same way as one nobody listens on.
-			if state, err := a.device.State(); err != nil || state != adb.Ready {
-				return nil, a.device.Unreachable(errors.New("no answer"))
-			}
-			return nil, &device.AppError{Message: fmt.Sprintf("%s did not answer within %v. Is it a quack-enabled app?", a.pkg, a.startTimeout)}
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-func connect(serial adb.Device, socketName string) (*connection, error) {
-	conn, err := serial.Open("localabstract:" + socketName)
+func connect(ctx context.Context, serial adb.Device, socketName string) (*connection, error) {
+	conn, err := serial.OpenContext(ctx, "localabstract:"+socketName)
 	var refused *adb.ServiceFailure
 	if errors.As(err, &refused) {
 		// The device answers "closed" when nothing listens on the socket.
@@ -53,6 +49,7 @@ func connect(serial adb.Device, socketName string) (*connection, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 	reader := bufio.NewReader(conn)
 	conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 	first, err := reader.ReadBytes('\n')

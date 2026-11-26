@@ -103,22 +103,46 @@ func (a App) Command(ctx context.Context, cmd string) (adb.Output, error) {
 }
 
 // One round trip. "starting" prints as soon as pidof answers, before the slow part.
-func (a App) Start(mode StartMode) error {
+func (a App) Start(ctx context.Context, mode StartMode) error {
+	startup, cancel := context.WithTimeout(ctx, a.startTimeout)
+	defer cancel()
+	err := a.start(startup, mode)
+	return a.startError(ctx, startup, err)
+}
+
+func (a App) startError(ctx, startup context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ErrCanceled
+	}
+	if startup.Err() != nil {
+		return &device.AppError{Message: fmt.Sprintf("%s did not answer within %v. Is it a quack-enabled app?", a.pkg, a.startTimeout)}
+	}
+	return err
+}
+
+func (a App) start(ctx context.Context, mode StartMode) error {
 	// A stopped app may be missing, which would otherwise surface only as a timeout. Check first, so that "starting"
 	// is not said for an app that is not there.
 	notInstalled := fmt.Sprintf(`pm path %[1]s >/dev/null 2>&1 || echo "Error: %[1]s is not installed"`, a.pkg)
-	out, err := a.device.ShellStream("pidof " + a.pkg + " >/dev/null || { " + notInstalled + "; echo stopped; }; " + fmt.Sprintf(startCommands[mode], a.pkg))
+	out, err := a.device.ShellStreamContext(ctx, "pidof "+a.pkg+" >/dev/null || { "+notInstalled+"; echo stopped; }; "+fmt.Sprintf(startCommands[mode], a.pkg))
 	if err != nil {
 		return err
 	}
 	defer out.Close()
+	defer context.AfterFunc(ctx, func() { out.Close() })()
 	reader := bufio.NewReader(out)
-	first, _ := reader.ReadString('\n')
+	first, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return err
+	}
 	if strings.TrimSpace(first) == "stopped" {
 		fmt.Fprintf(a.status, "starting %s…\n", a.pkg)
 		first = ""
 	}
-	rest, _ := io.ReadAll(reader)
+	rest, err := io.ReadAll(reader)
+	if err != nil {
+		return err
+	}
 	for _, line := range strings.Split(first+string(rest), "\n") {
 		if strings.HasPrefix(line, "Error") {
 			return &device.AppError{Message: strings.TrimSpace(strings.TrimPrefix(line, "Error:"))}
@@ -128,11 +152,19 @@ func (a App) Start(mode StartMode) error {
 }
 
 func (a App) send(ctx context.Context, request []byte, notify NotificationFunc) (wire.Hello, wire.Frame, error) {
-	if err := a.Start(a.mode); err != nil {
-		return wire.Hello{}, nil, err
+	startup, cancel := context.WithTimeout(ctx, a.startTimeout)
+	defer cancel()
+	err := a.start(startup, a.mode)
+	var c *connection
+	if err == nil {
+		c, err = a.connectRetrying(startup)
 	}
-	c, err := a.connectRetrying(ctx)
+	err = a.startError(ctx, startup, err)
+	cancel()
 	if err != nil {
+		if c != nil {
+			c.close()
+		}
 		return wire.Hello{}, nil, err
 	}
 	defer c.close()

@@ -32,6 +32,10 @@ type fakeDevice struct {
 	apps  []*fakeApp
 	// adbHangs makes the adb server accept connections and never answer them.
 	adbHangs bool
+	// startupHangs accepts the app's startup shell but never finishes it.
+	startupHangs bool
+	// commandHandshake can stall shell-v2 negotiation until the client disconnects.
+	commandHandshake func(net.Conn)
 }
 
 type fakeApp struct {
@@ -149,10 +153,19 @@ func (a *fakeAdb) device(serial string) *fakeDevice {
 func (a *fakeAdb) handleService(conn net.Conn, d *fakeDevice, service string) {
 	if cmd, ok := strings.CutPrefix(service, "shell:"); ok {
 		okay(conn)
+		if d.startupHangs && strings.HasPrefix(cmd, "pidof ") {
+			a.record("shell %s: startup stalled", d.serial)
+			io.Copy(io.Discard, conn)
+			return
+		}
 		io.WriteString(conn, a.shell(d, cmd))
 		return
 	}
 	if cmd, ok := strings.CutPrefix(service, "shell,v2,raw:"); ok {
+		if d.commandHandshake != nil {
+			d.commandHandshake(conn)
+			return
+		}
 		okay(conn)
 		a.record("command %s: %s", d.serial, cmd)
 		// A command that starts with fail fails, and any other prints its text.

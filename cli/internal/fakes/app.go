@@ -62,7 +62,10 @@ func (a *App) Call(ctx context.Context, call wire.Call, notify client.Notificati
 	return reply(ctx, call, notify)
 }
 
-func (a *App) Start(mode client.StartMode) error {
+func (a *App) Start(ctx context.Context, mode client.StartMode) error {
+	if ctx.Err() != nil {
+		return client.ErrCanceled
+	}
 	a.mu.Lock()
 	a.starts = append(a.starts, mode)
 	a.mu.Unlock()

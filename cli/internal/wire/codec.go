@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"regexp"
 )
 
 // Without the trailing newline.
@@ -58,7 +57,7 @@ func actionsResult(bodies []actionBody) Frame {
 	for i, a := range bodies {
 		params := make([]Param, len(a.Params))
 		for j, p := range a.Params {
-			if p.Env != nil && !environmentName.MatchString(*p.Env) {
+			if p.Env != nil && !IsVariable(*p.Env) {
 				return Malformed{fmt.Sprintf("param '%s' of '%s': env must name an environment variable", p.Name, a.ID)}
 			}
 			presence, err := paramPresence(p)
@@ -146,5 +145,3 @@ type errorBody struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
-
-var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)

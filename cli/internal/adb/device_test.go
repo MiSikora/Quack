@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -197,4 +200,316 @@ func packet(conn net.Conn, id byte, data string) {
 
 func writeLengthPrefixed(conn net.Conn, text string) {
 	fmt.Fprintf(conn, "%04x%s", len(text), text)
+}
+
+func TestOpenContextCancelsTransportServiceAndFailureDiagnostics(t *testing.T) {
+	for _, phase := range []string{"transport", "service", "diagnostic"} {
+		t.Run(phase, func(t *testing.T) {
+			entered := make(chan struct{})
+			serve(t, func(conn net.Conn, request string) {
+				if phase == "diagnostic" {
+					if strings.HasPrefix(request, "host:transport:") {
+						fail(conn, "device disappeared")
+						return
+					}
+				} else if phase == "service" {
+					io.WriteString(conn, "OKAY")
+					if _, err := readLengthPrefixed(conn); err != nil {
+						return
+					}
+				}
+				close(entered)
+				io.Copy(io.Discard, conn)
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				conn, err := Device("test").OpenContext(ctx, "shell:wait")
+				if conn != nil {
+					conn.Close()
+				}
+				done <- err
+			}()
+			<-entered
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("got %v, want context.Canceled", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("OpenContext did not end with its context")
+			}
+		})
+	}
+}
+
+func TestOpenContextEndsWhenAdbLauncherLeavesOutputPipesOpen(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.Close()
+	t.Setenv("ANDROID_ADB_SERVER_PORT", strconv.Itoa(listener.Addr().(*net.TCPAddr).Port))
+	dir := t.TempDir()
+	// The launcher exits, but its child retains stdout and stderr. Signal after
+	// spawning the child so cancellation cannot race ahead of process startup.
+	script := "#!/bin/sh\n/bin/sleep 2 &\n: > \"$0.ready\"\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "adb"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		conn, err := Device("test").OpenContext(ctx, "shell:wait")
+		if conn != nil {
+			conn.Close()
+		}
+		done <- err
+	}()
+	readyTimeout := time.NewTimer(time.Second)
+	defer readyTimeout.Stop()
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "adb.ready")); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("launcher ended before cancellation: %v", err)
+		case <-readyTimeout.C:
+			t.Fatal("launcher did not spawn its child")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v, want context.Canceled", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("adb launcher output kept OpenContext blocked after cancellation")
+	}
+}
+
+func TestOpenContextConnectsWhenSuccessfulAdbLauncherLeavesOutputPipesOpen(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	listener.Close()
+	t.Setenv("ANDROID_ADB_SERVER_PORT", strconv.Itoa(listener.Addr().(*net.TCPAddr).Port))
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "adb")
+	// Start listening only after the first dial has failed and launched adb.
+	// The launcher waits for the server, then exits while its child holds the pipes.
+	script := "#!/bin/sh\n/bin/sleep 2 &\n: > \"$0.ready\"\nwhile [ ! -f \"$0.listening\" ]; do /bin/sleep 0.01; done\nexit 0\n"
+	if err := os.WriteFile(launcher, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		conn, err := Device("test").OpenContext(ctx, "shell:ready")
+		if conn != nil {
+			conn.Close()
+		}
+		done <- err
+	}()
+	for {
+		if _, err := os.Stat(launcher + ".ready"); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("OpenContext ended before the launcher started: %v", err)
+		case <-ctx.Done():
+			t.Fatal("adb launcher did not start")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	listener, err = net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(time.Second))
+		for _, want := range []string{"host:transport:test", "shell:ready"} {
+			request, err := readLengthPrefixed(conn)
+			if err != nil || request != want {
+				return
+			}
+			io.WriteString(conn, "OKAY")
+		}
+	}()
+	if err := os.WriteFile(launcher+".listening", nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("successful adb launcher did not connect: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("OpenContext did not connect to the launched server")
+	}
+}
+
+func TestCommandCancelsSetupAndFailureDiagnostics(t *testing.T) {
+	for _, phase := range []string{"transport", "service", "transport diagnostics", "service diagnostics", "read diagnostics"} {
+		t.Run(phase, func(t *testing.T) {
+			entered := make(chan net.Conn, 1)
+			serve(t, func(conn net.Conn, request string) {
+				if strings.HasSuffix(request, ":get-state") {
+					entered <- conn
+					io.Copy(io.Discard, conn)
+					return
+				}
+				if phase == "transport diagnostics" {
+					fail(conn, "device disappeared")
+					return
+				}
+				if phase != "transport" {
+					io.WriteString(conn, "OKAY")
+					if _, err := readLengthPrefixed(conn); err != nil {
+						return
+					}
+				}
+				switch phase {
+				case "service diagnostics":
+					fail(conn, "shell refused")
+					return
+				case "read diagnostics":
+					io.WriteString(conn, "OKAY")
+					return
+				}
+				entered <- conn
+				io.Copy(io.Discard, conn)
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { _, err := Device("test").Command(ctx, "wait"); done <- err }()
+			var conn net.Conn
+			select {
+			case conn = <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("Command did not reach " + phase)
+			}
+			defer conn.Close()
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("got %v, want context.Canceled", err)
+				}
+			case <-time.After(time.Second):
+				conn.Close()
+				t.Fatal("Command did not cancel " + phase)
+			}
+		})
+	}
+}
+
+func TestTrackCancelsNegotiation(t *testing.T) {
+	entered := make(chan net.Conn, 1)
+	serve(t, func(conn net.Conn, request string) {
+		entered <- conn
+		io.Copy(io.Discard, conn)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- Track(ctx, func([]Listing) { t.Error("sent a change before negotiation") }) }()
+	conn := <-entered
+	defer conn.Close()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("got %v, want nil on cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Track did not cancel negotiation")
+	}
+}
+
+func TestCanceledCommandAndTrackDoNotStartAdb(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.Close()
+	t.Setenv("ANDROID_ADB_SERVER_PORT", strconv.Itoa(listener.Addr().(*net.TCPAddr).Port))
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "adb")
+	if err := os.WriteFile(launcher, []byte("#!/bin/sh\n: > \"$0.started\"\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Device("test").Command(ctx, "wait"); !errors.Is(err, context.Canceled) {
+		t.Errorf("Command got %v, want context.Canceled", err)
+	}
+	if err := Track(ctx, func([]Listing) { t.Error("sent a change after cancellation") }); err != nil {
+		t.Errorf("Track got %v, want nil", err)
+	}
+	if _, err := os.Stat(launcher + ".started"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("canceled operations started adb: %v", err)
+	}
+}
+
+func TestTrackCancelsAdbStartup(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.Close()
+	t.Setenv("ANDROID_ADB_SERVER_PORT", strconv.Itoa(listener.Addr().(*net.TCPAddr).Port))
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "adb")
+	if err := os.WriteFile(launcher, []byte("#!/bin/sh\n: > \"$0.ready\"\nexec /bin/sleep 2\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- Track(ctx, func([]Listing) { t.Error("sent a change before startup") }) }()
+	ready := time.NewTimer(time.Second)
+	defer ready.Stop()
+	for {
+		if _, err := os.Stat(launcher + ".ready"); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("Track ended before startup: %v", err)
+		case <-ready.C:
+			t.Fatal("adb launcher did not start")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("got %v, want nil on cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Track did not cancel adb startup")
+	}
 }

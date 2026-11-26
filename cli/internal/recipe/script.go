@@ -79,7 +79,11 @@ func (s *script) run(ctx context.Context, app step.App, actions []wire.Action, n
 	if err != nil {
 		return nil, err
 	}
-	declared := named[slices.IndexFunc(named, func(d declaredRecipe) bool { return d.Name == name })]
+	at := slices.IndexFunc(named, func(d declaredRecipe) bool { return d.Name == name })
+	if at < 0 {
+		return nil, fmt.Errorf("recipe '%s' is not declared in %s at runtime", name, s.path)
+	}
+	declared := named[at]
 	stop := context.AfterFunc(ctx, func() { r.vm.Interrupt(client.ErrCanceled) })
 	defer stop()
 	data, threw, err := r.call(declared, args.Values, false)
@@ -296,7 +300,7 @@ func param(name string, declaration any) (wire.Param, string, error) {
 		return p, "", nil
 	}
 	variable, ok := fields["env"].(string)
-	if !ok || !step.IsVariable(variable) {
+	if !ok || !wire.IsVariable(variable) {
 		return wire.Param{}, "", fmt.Errorf("param '%s': env must name an environment variable", name)
 	}
 	if os.Getenv(variable) == "" {

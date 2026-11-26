@@ -41,8 +41,6 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 			"data, and its message and its data. Get the action ids and their params from list_actions. " +
 			"For an action that waits for something outside the call before " +
 			"it ends, such as another device, use start_action instead. " + askHelp + targetHelp,
-		InputSchema:  schemaFor[runActionInput](),
-		OutputSchema: schemaFor[runActionOutput](),
 	}, s.runAction)
 	addTool(server, &mcp.Tool{
 		Name: "start_action",
@@ -50,8 +48,6 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 			"Use it for an action that waits for something outside the call before it ends, such as another device, " +
 			"and read its notifications with read_run while it runs. An unknown action, an unknown arg or a missing " +
 			"required one fails this call. Any other refusal of the app ends the run with an error. " + askHelp + targetHelp,
-		InputSchema:  schemaFor[runActionInput](),
-		OutputSchema: schemaFor[startActionOutput](),
 	}, s.startAction)
 	addTool(server, &mcp.Tool{
 		Name: "read_run",
@@ -61,7 +57,6 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 			"yet, and returns without notifications when the wait runs out. A run keeps its latest " +
 			strconv.Itoa(maxRunNotifications) + " notifications, and dropped counts the ones between after and the " +
 			"oldest one kept.",
-		OutputSchema: schemaFor[readRunOutput](),
 	}, s.readRun)
 	addTool(server, &mcp.Tool{
 		Name: "cancel_run",
@@ -74,7 +69,6 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 			"device and app, whether they are done, and next, their count of notifications so far. Use it to find a " +
 			"run whose id you no longer have. Finished runs past the latest " + strconv.Itoa(maxFinishedRuns) +
 			" are gone.",
-		OutputSchema: schemaFor[listRunsOutput](),
 	}, s.listRuns)
 	addTool(server, &mcp.Tool{
 		Name: "list_recipes",
@@ -90,8 +84,6 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 			"its data or the error it failed with, and the lines the recipe logged. The message of a command is what it " +
 			"printed. A step that fails ends the recipe unless the recipe catches it. Failures retain completed steps and their data. problems lists recipe-loading warnings even when this recipe succeeds. Use open_app to foreground the app before running. Get the recipe names and params from list_recipes. " +
 			askHelp + targetHelp,
-		InputSchema:  schemaFor[runRecipeInput](),
-		OutputSchema: schemaFor[runRecipeOutput](),
 	}, s.runRecipe)
 	return server
 }

@@ -144,6 +144,27 @@ quack.recipe({ name: "app:reset", run() {} })`, "recipe 'app:reset': its name ma
 	}
 }
 
+func TestRunFailsWhenTheRecipeIsNotDeclaredAtRuntime(t *testing.T) {
+	for _, declaration := range []string{
+		`quack.recipe({name: quack.app.package || "setup", run() { console.log("ran") }})`,
+		`if (!quack.app.package) quack.recipe({name: "setup", run() { console.log("ran") }})`,
+	} {
+		t.Run(declaration, func(t *testing.T) {
+			book := load(t, `import quack from "quack"; `+declaration)
+			var events []step.Event
+
+			data, err := book.Run(t.Context(), newApp(), nil, "setup", step.Arguments{}, collect(&events))
+
+			if err == nil || !strings.Contains(err.Error(), "recipe 'setup' is not declared") || !strings.Contains(err.Error(), book.Recipes[0].File) {
+				t.Fatalf("got %v, want an error naming the missing recipe and its file", err)
+			}
+			if data != nil || len(events) != 0 {
+				t.Fatalf("missing recipe ran: data %s, events %v", data, events)
+			}
+		})
+	}
+}
+
 func TestRunRunsTheStepsInOrderAndEmitsTheirEventsNumbered(t *testing.T) {
 	app := newApp()
 	app.CommandReply = func(string) adb.Output { return adb.Output{Stdout: "Success\n"} }

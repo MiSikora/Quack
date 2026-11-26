@@ -33,20 +33,29 @@ type ServiceFailure struct {
 
 func (e *ServiceFailure) Error() string { return e.Reason }
 
-func (d Device) Open(service string) (net.Conn, error) {
-	conn, err := dialServer()
+// OpenContext bounds transport selection and service negotiation. The caller owns
+// cancellation of the returned stream.
+func (d Device) OpenContext(ctx context.Context, service string) (net.Conn, error) {
+	conn, err := dialServerContext(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 	if err := request(conn, "host:transport:"+string(d)); err != nil {
 		conn.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if stuck, ok := asStuck(err); ok {
 			return nil, stuck
 		}
-		return nil, d.Unreachable(err)
+		return nil, d.unreachable(ctx, err)
 	}
 	if err := request(conn, service); err != nil {
 		conn.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if stuck, ok := asStuck(err); ok {
 			return nil, stuck
 		}
@@ -59,11 +68,15 @@ func (d Device) Open(service string) (net.Conn, error) {
 
 // Output comes as it is produced, stdout and stderr together.
 func (d Device) ShellStream(cmd string) (io.ReadCloser, error) {
-	conn, err := d.Open("shell:" + cmd)
+	return d.ShellStreamContext(context.Background(), cmd)
+}
+
+func (d Device) ShellStreamContext(ctx context.Context, cmd string) (io.ReadCloser, error) {
+	conn, err := d.OpenContext(ctx, "shell:"+cmd)
 	var refused *ServiceFailure
 	if errors.As(err, &refused) {
 		// A device always runs a shell for adb, so a refusal means it went away.
-		return nil, d.Unreachable(err)
+		return nil, d.unreachable(ctx, err)
 	}
 	return conn, err
 }
@@ -97,10 +110,10 @@ const (
 // adb's shell protocol keeps stdout apart from stderr and reports the exit status. Ending ctx closes the stream,
 // which ends cmd, and Command returns ctx's error.
 func (d Device) Command(ctx context.Context, cmd string) (Output, error) {
-	conn, err := d.Open("shell,v2,raw:" + cmd)
+	conn, err := d.OpenContext(ctx, "shell,v2,raw:"+cmd)
 	var refused *ServiceFailure
 	if errors.As(err, &refused) {
-		return Output{}, d.Unreachable(err)
+		return Output{}, d.unreachable(ctx, err)
 	}
 	if err != nil {
 		return Output{}, err
@@ -115,7 +128,7 @@ func (d Device) Command(ctx context.Context, cmd string) (Output, error) {
 		case ctx.Err() != nil:
 			return Output{}, ctx.Err()
 		case err != nil:
-			return Output{}, d.Unreachable(err)
+			return Output{}, d.unreachable(ctx, err)
 		}
 		switch header[0] {
 		case shellStdout:
@@ -144,7 +157,14 @@ func readPacket(conn net.Conn, header []byte) ([]byte, error) {
 }
 
 func (d Device) Unreachable(cause error) error {
-	state, err := d.State()
+	return d.unreachable(context.Background(), cause)
+}
+
+func (d Device) unreachable(ctx context.Context, cause error) error {
+	state, err := queryContext(ctx, "host-serial:"+string(d)+":get-state")
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	var stuck *Error
 	if errors.As(err, &stuck) {
 		return stuck
@@ -181,12 +201,19 @@ func Devices() ([]Listing, error) {
 // send gets the devices as they are, then again on each change. Returns when ctx ends, or with an Error when the
 // adb server goes away.
 func Track(ctx context.Context, send func([]Listing)) error {
-	conn, err := dialServer()
+	conn, err := dialServerContext(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return err
 	}
 	defer conn.Close()
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 	if err := request(conn, "host:track-devices"); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		if stuck, ok := asStuck(err); ok {
 			return stuck
 		}
@@ -194,8 +221,6 @@ func Track(ctx context.Context, send func([]Listing)) error {
 	}
 	// The server answers only when a device changes, which may not happen for hours.
 	conn.SetDeadline(time.Time{})
-	stop := context.AfterFunc(ctx, func() { conn.Close() })
-	defer stop()
 	for {
 		text, err := readLengthPrefixed(conn)
 		if ctx.Err() != nil {
@@ -209,11 +234,16 @@ func Track(ctx context.Context, send func([]Listing)) error {
 }
 
 func query(text string) (string, error) {
-	conn, err := dialServer()
+	return queryContext(context.Background(), text)
+}
+
+func queryContext(ctx context.Context, text string) (string, error) {
+	conn, err := dialServerContext(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer conn.Close()
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 	err = request(conn, text)
 	answer := ""
 	if err == nil {
@@ -235,20 +265,34 @@ func parseListings(text string) []Listing {
 	return listings
 }
 
-func dialServer() (net.Conn, error) {
+func dialServerContext(ctx context.Context) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	port := os.Getenv("ANDROID_ADB_SERVER_PORT")
 	if port == "" {
 		port = "5037"
 	}
-	conn, err := net.Dial("tcp", "127.0.0.1:"+port)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", "127.0.0.1:"+port)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if _, err := exec.LookPath("adb"); err != nil {
 			return nil, &Error{"the adb server is not running and adb is not on PATH. Install it with brew install --cask android-platform-tools, or add the Android SDK's platform-tools to PATH."}
 		}
-		if out, err := exec.Command("adb", "start-server").CombinedOutput(); err != nil {
-			return nil, &Error{fmt.Sprintf("the adb server is not running and adb start-server failed: %s", strings.TrimSpace(string(out)))}
+		command := exec.CommandContext(ctx, "adb", "start-server")
+		// A daemonized child can retain the launcher's output pipes after it exits.
+		command.WaitDelay = 100 * time.Millisecond
+		if out, err := command.CombinedOutput(); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if !errors.Is(err, exec.ErrWaitDelay) {
+				return nil, &Error{fmt.Sprintf("the adb server is not running and adb start-server failed: %s", strings.TrimSpace(string(out)))}
+			}
 		}
-		if conn, err = net.Dial("tcp", "127.0.0.1:"+port); err != nil {
+		if conn, err = (&net.Dialer{}).DialContext(ctx, "tcp", "127.0.0.1:"+port); err != nil {
 			return nil, &Error{fmt.Sprintf("connect to the adb server: %v", err)}
 		}
 	}

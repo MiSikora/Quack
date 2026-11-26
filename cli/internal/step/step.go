@@ -67,7 +67,7 @@ func (RunRecipe) step() {}
 
 type App interface {
 	Call(ctx context.Context, call wire.Call, notify client.NotificationFunc) (wire.MessageResult, error)
-	Start(mode client.StartMode) error
+	Start(ctx context.Context, mode client.StartMode) error
 	Command(ctx context.Context, cmd string) (adb.Output, error)
 	Target() device.Target
 }
@@ -82,7 +82,7 @@ func Do(ctx context.Context, app App, step Step, notify client.NotificationFunc)
 		if ctx.Err() != nil {
 			return wire.MessageResult{}, client.ErrCanceled
 		}
-		return wire.MessageResult{}, app.Start(client.OpenApp)
+		return wire.MessageResult{}, app.Start(ctx, client.OpenApp)
 	case Wait:
 		timer := time.NewTimer(step.Duration)
 		defer timer.Stop()
@@ -231,7 +231,7 @@ func expand(text string, target device.Target, consumed map[string]string) (stri
 				return "", fmt.Errorf("'%s' has a ${ without a closing }", text)
 			}
 			name := rest[at+2 : at+end]
-			if !IsVariable(name) {
+			if !wire.IsVariable(name) {
 				return "", fmt.Errorf("'${%s}' does not name an environment variable", name)
 			}
 			value, ok := lookup(target, name)
@@ -256,15 +256,6 @@ func lookup(target device.Target, name string) (string, bool) {
 		return string(target.Device), true
 	}
 	return os.LookupEnv(name)
-}
-
-func IsVariable(name string) bool {
-	for i, r := range name {
-		if r != '_' && !(r < unicode.MaxASCII && (unicode.IsLetter(r) || i > 0 && unicode.IsDigit(r))) {
-			return false
-		}
-	}
-	return name != ""
 }
 
 // Double quotes would leave $ and ` to the shell.
