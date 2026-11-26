@@ -592,7 +592,7 @@ export const fresh = quack.recipe({
 		`"rate":{"type":"number","title":"rate"},` +
 		`"admin":{"type":"boolean","title":"admin"},` +
 		`"mode":{"type":"string","title":"mode","enum":["fast","slow"]},` +
-		`"tags":{"type":"string","title":"tags","description":"Separate the values with commas."}}}`
+		`"tags":{"type":"string","title":"tags","description":"Separate values with commas, or enter a JSON string array such as [\"\", \" spaced \"] to keep exact values."}}}`
 	assertJSON(t, string(schema), wantSchema)
 	assertStructured(t, result, `{"steps":[],"log":["[3,0.5,true,\"slow\",[\"a\",\"b,c\"]]"]}`)
 }

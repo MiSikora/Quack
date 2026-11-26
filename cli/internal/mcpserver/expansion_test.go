@@ -3,10 +3,13 @@ package mcpserver
 import (
 	"context"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"quack/internal/wire"
 )
 
 func TestMCPExpandsActionAndRecipeArgumentsIncludingForms(t *testing.T) {
@@ -82,5 +85,40 @@ quack.recipe({name:"input",params:{username:{type:"string",required:true}},run({
 	}
 	if len(source.App.Calls()) != 0 {
 		t.Fatal("missing variable dispatched")
+	}
+}
+
+func TestMCPListFormsPreserveExactJSONAndExpandAfterParsing(t *testing.T) {
+	t.Setenv("QUACK_INPUT", "private-token")
+	for _, tc := range []struct {
+		text  string
+		valid bool
+	}{
+		{`["", " spaced ", "a,b", "${QUACK_INPUT}", "$${QUACK_INPUT}"]`, true},
+		{`[null]`, false}, {`[1]`, false}, {`["a"] trailing`, false},
+	} {
+		t.Run(tc.text, func(t *testing.T) {
+			source := newFakeSource()
+			actions := source.App.Actions()
+			actions[1].Params[2].Presence = wire.Required{}
+			source.App.SetActions(actions)
+			rpc := connectWith(t, source, &mcp.ClientOptions{ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+				return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"tags": tc.text}}, nil
+			}})
+			result := callTool(t, rpc, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": "alice"}})
+			if result.IsError == tc.valid {
+				t.Fatalf("unexpected result: %s", text(result))
+			}
+			calls := source.App.Calls()
+			if !tc.valid {
+				if len(calls) != 0 {
+					t.Fatal("invalid list ran")
+				}
+				return
+			}
+			if got, want := calls[0].Args["tags"], (wire.RawArg{"", " spaced ", "a,b", "private-token", "${QUACK_INPUT}"}); !reflect.DeepEqual(got, want) {
+				t.Errorf("sent %#v, want %#v", got, want)
+			}
+		})
 	}
 }

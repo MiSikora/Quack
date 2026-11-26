@@ -30,6 +30,7 @@ type boxField struct {
 
 type field interface {
 	value() wire.RawArg
+	validate() error
 	press(msg tea.KeyPressMsg) tea.Cmd
 	forward(msg tea.Msg) tea.Cmd
 	view() string
@@ -79,7 +80,7 @@ func newField(p wire.Param) field {
 	input.Prompt = ""
 	input.Placeholder = string(p.Type)
 	if p.Type.IsList() {
-		input.Placeholder = "comma-separated"
+		input.Placeholder = "comma-separated or JSON"
 	}
 	f := &textField{input: input, list: p.Type.IsList(), canEmpty: p.Type == wire.ParamTypeString || p.Type.IsList(), selected: -1}
 	if p.Type == wire.ParamTypeString {
@@ -111,6 +112,9 @@ func (b *paramBox) press(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		for i := range b.fields {
 			f := &b.fields[i]
+			if err := f.field.validate(); err != nil {
+				return false, b.focus(i)
+			}
 			if _, required := f.param.DisplayPresence(os.Getenv).(wire.Required); required && f.field.value() == nil {
 				f.missing = true
 				return false, b.focus(i)
@@ -251,7 +255,9 @@ func (f boxField) row(names, column int) string {
 	value := f.field.view()
 	value += strings.Repeat(" ", column-ansi.StringWidth(value))
 	note := statusStyle.Render(describe(f.param))
-	if f.missing {
+	if err := f.field.validate(); err != nil {
+		note = problemStyle.Render(err.Error())
+	} else if f.missing {
 		note = problemStyle.Render(describe(f.param))
 	}
 	return name + "  " + value + "  " + note
@@ -272,11 +278,20 @@ func (f *textField) value() wire.RawArg {
 	}
 	switch {
 	case f.list:
-		return wire.SplitList(text)
+		values, _ := wire.ParseList(text)
+		return values
 	case text == "":
 		return nil
 	}
 	return wire.RawArg{text}
+}
+
+func (f *textField) validate() error {
+	if !f.list || f.empty {
+		return nil
+	}
+	_, err := wire.ParseList(f.input.Value())
+	return err
 }
 
 func (f *textField) press(msg tea.KeyPressMsg) tea.Cmd {
@@ -366,6 +381,8 @@ func (f *choiceField) value() wire.RawArg {
 	}
 	return wire.RawArg{f.options[f.chosen]}
 }
+
+func (f *choiceField) validate() error { return nil }
 
 func (f *choiceField) press(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {

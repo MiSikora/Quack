@@ -7,13 +7,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"quack/internal/step"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"quack/internal/client"
+	"quack/internal/step"
 )
 
 func TestLoadMergesTheFilesOfEveryPatternThatMatchesTheApp(t *testing.T) {

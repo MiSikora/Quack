@@ -62,7 +62,11 @@ func askForParams(req *mcp.CallToolRequest, what string, params []wire.Param, ar
 		switch v := value.(type) {
 		case string:
 			if p.Type.IsList() {
-				args[name] = append(wire.RawArg{}, wire.SplitList(v)...)
+				values, err := wire.ParseList(v)
+				if err != nil {
+					return nil, fmt.Errorf("param '%s': %w", name, err)
+				}
+				args[name] = append(wire.RawArg{}, values...)
 			} else {
 				args[name] = wire.RawArg{v}
 			}
@@ -79,7 +83,7 @@ func askForParams(req *mcp.CallToolRequest, what string, params []wire.Param, ar
 }
 
 // Longs use decimal text because the form transport decodes JSON numbers through float64.
-// A string_list takes comma-separated values, since a form's arrays only pick from choices.
+// Lists use text for comma-separated values or JSON, since a form's arrays only pick from choices.
 func fieldSchema(p wire.Param) *jsonschema.Schema {
 	field := &jsonschema.Schema{Title: p.Name, Description: p.Description, Type: "string"}
 	switch p.Type {
@@ -96,7 +100,7 @@ func fieldSchema(p wire.Param) *jsonschema.Schema {
 			field.Enum = append(field.Enum, c)
 		}
 	case wire.ParamTypeStringList:
-		field.Description = strings.TrimSpace(p.Description + " Separate the values with commas.")
+		field.Description = strings.TrimSpace(p.Description + ` Separate values with commas, or enter a JSON string array such as ["", " spaced "] to keep exact values.`)
 	}
 	return field
 }

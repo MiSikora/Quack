@@ -103,3 +103,36 @@ func TestTUIMissingEnvironmentPreventsExecution(t *testing.T) {
 		t.Fatal("missing variable ran action")
 	}
 }
+
+func TestTUIJSONListPreservesExactEntries(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+	h.typing("app.params")
+	h.press("tab", "tab", "tab", "tab", "tab", "tab", "tab")
+	h.waitFor("▸ tag")
+	h.typing(`["", " spaced ", "a,b"]`)
+	h.press("enter")
+	h.waitForLog("done · ")
+	if got, want := app.Calls()[0].Args["tag"], (wire.RawArg{"", " spaced ", "a,b"}); !reflect.DeepEqual(got, want) {
+		t.Errorf("sent %#v, want %#v", got, want)
+	}
+}
+
+func TestTUIInvalidJSONListBlocksUntilCorrected(t *testing.T) {
+	app := newFakeApp()
+	h := start(t, app)
+	h.typing("app.params")
+	h.press("tab", "tab", "tab", "tab", "tab", "tab", "tab")
+	h.waitFor("▸ tag")
+	h.typing(`[null]`)
+	h.press("enter")
+	h.waitFor("invalid list:")
+	h.press("ctrl+u")
+	h.typing(`["good"]`)
+	h.press("enter")
+	h.waitForLog("done · ")
+	calls := app.Calls()
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0].Args["tag"], wire.RawArg{"good"}) {
+		t.Errorf("invalid list was dispatched: %v", calls)
+	}
+}

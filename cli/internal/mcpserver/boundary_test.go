@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"quack/internal/client"
 	"quack/internal/wire"
 )
@@ -36,7 +37,6 @@ func TestActionNumbersSurviveRequestsAndResultsExactly(t *testing.T) {
 			}
 		}
 	}
-
 }
 
 func TestLongAndEmptyListFormsSendExactValues(t *testing.T) {

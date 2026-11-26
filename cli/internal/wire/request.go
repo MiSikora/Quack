@@ -2,6 +2,7 @@ package wire
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 )
 
@@ -20,8 +21,30 @@ func (a RawArg) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]string(a))
 }
 
+// ParseList preserves JSON string arrays exactly and otherwise accepts comma-separated values.
+// A blank comma-separated field is omitted; an explicit [] is a nonnil empty list.
+func ParseList(text string) (RawArg, error) {
+	if !strings.HasPrefix(strings.TrimSpace(text), "[") {
+		return splitList(text), nil
+	}
+	invalid := errors.New(`invalid list: expected a JSON array of strings`)
+	var items []any
+	if err := json.Unmarshal([]byte(text), &items); err != nil {
+		return nil, invalid
+	}
+	values := make(RawArg, 0, len(items))
+	for _, item := range items {
+		value, ok := item.(string)
+		if !ok {
+			return nil, invalid
+		}
+		values = append(values, value)
+	}
+	return values, nil
+}
+
 // Spaces around values are trimmed and empty ones dropped. \, is a comma inside a value.
-func SplitList(text string) RawArg {
+func splitList(text string) RawArg {
 	var values RawArg
 	var value strings.Builder
 	add := func() {

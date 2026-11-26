@@ -68,6 +68,8 @@ An explicit argument wins, including an empty string or an empty list. Otherwise
 
 In a TUI string or list field, press **Ctrl+E** to send an explicit empty value. The field shows `<empty string>` or `<empty list>`. Press **Ctrl+U** to reset the field and use its default again. An ordinary blank field keeps its default.
 
+TUI list fields and MCP list forms accept comma-separated values or JSON array text. Use `["", " spaced ", "a,b"]` to preserve empty entries, whitespace, and commas exactly. `[]` sends an empty list. Text beginning with `[` must be a valid JSON array of strings; use `["[tag"]` for an entry that starts with `[`. Other input keeps the existing comma splitting and whitespace trimming.
+
 Bindings apply to direct commands, interactive forms, recipe `quack.runAction()` calls, and synchronous and asynchronous MCP actions. Discovery keeps the declared required status and literal default and includes only the variable name. Forms and help show `${NAME}` when the variable is available.
 
 CLI, TUI, and MCP arguments expand `${NAME}` using the host environment. Use `$${NAME}` to send literal `${NAME}`. In a shell, quote the argument with single quotes so Quack receives the expression, such as `'name=${USER}'`. Missing variables fail the run before an action executes. Expansion runs once and does not evaluate shell expressions. `${QUACK_PACKAGE}` and `${ANDROID_SERIAL}` refer to the selected app and device. Action arguments written inside recipe code remain literal.

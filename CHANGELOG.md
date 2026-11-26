@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 - TUI string and list fields accept explicit empty values with Ctrl+E and reset with Ctrl+U.
+- TUI and MCP list forms accept JSON string arrays to preserve empty entries, whitespace, and commas.
 - TUI and MCP arguments expand host environment variables with `${NAME}` and escape them with `$${NAME}`.
 - MCP recipes accept `open_app` and return recipe-loading warnings in `problems`.
 
