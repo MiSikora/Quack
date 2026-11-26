@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonElement
 
 internal class Endpoint(
   actions: List<QuackAction>,
@@ -107,7 +106,7 @@ internal class Endpoint(
     return Frame.Result.Message(ok.message, data)
   }
 
-  private fun parseData(action: QuackAction, text: String, verb: String): JsonElement? {
+  private fun parseData(action: QuackAction, text: String, verb: String): JsonData? {
     val data = codec.parseJson(text)
     if (data == null) logger.log(QuackLogger.Level.Error, "Action '${action.id}' $verb json that does not parse: $text", throwable = null)
     return data

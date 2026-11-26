@@ -22,14 +22,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObjectBuilder
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], manifest = Config.NONE)
 class EndpointTest {
   @Test
   fun `say hello with the app's package and version`() {
@@ -681,22 +682,26 @@ private suspend fun Endpoint.describe() =
 
 private suspend fun Endpoint.call(action: String, vararg args: Pair<String, Any>) =
   send(
-    buildJsonObject {
-      put("method", "call")
-      put("action", action)
-      if (args.isNotEmpty()) {
-        putJsonObject("args") {
-          for ((key, value) in args) {
-            val element =
-              when (value) {
-                is List<*> -> JsonArray(value.map { JsonPrimitive(it as String) })
-                else -> JsonPrimitive(value as String)
+    JSONObject()
+      .apply {
+        put("method", "call")
+        put("action", action)
+        if (args.isNotEmpty()) {
+          put(
+            "args",
+            JSONObject().apply {
+              for ((key, value) in args) {
+                val element =
+                  when (value) {
+                    is List<*> -> JSONArray(value)
+                    else -> value as String
+                  }
+                put(key, element)
               }
-            put(key, element)
-          }
+            },
+          )
         }
       }
-    }
       .toString(),
   )
 
@@ -727,4 +732,4 @@ private fun errorReply(code: String, message: String) =
     put("message", message)
   }
 
-private fun reply(key: String, body: JsonObjectBuilder.() -> Unit) = buildJsonObject { putJsonObject(key, body) }.toString()
+private fun reply(key: String, body: JSONObject.() -> Unit) = JSONObject().put(key, JSONObject().apply(body)).toString()

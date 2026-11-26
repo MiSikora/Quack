@@ -2,7 +2,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
 
 plugins {
   alias(libs.plugins.android.library)
-  alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.maven.publish)
   alias(libs.plugins.sort.dependencies)
   alias(libs.plugins.spotless)
@@ -54,11 +53,11 @@ kotlin {
 dependencies {
   api(libs.kotlinx.coroutines.android)
 
-  implementation(libs.kotlinx.serialization.json)
   implementation(libs.okio)
 
   testImplementation(libs.junit)
   testImplementation(libs.kotest.assertions)
   testImplementation(libs.kotest.assertions.json)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.robolectric)
 }

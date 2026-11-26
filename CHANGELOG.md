@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### SDK
+
+#### Changed
+- Use platform JSON APIs instead of kotlinx.serialization. The SDK no longer needs its runtime dependency or compiler plugin.
+- Keep action JSON number literals intact and compact multiline data into a single protocol frame.
+- Run codec and endpoint tests with Robolectric while keeping pure Kotlin tests on the JVM runner.
+
 ### CLI and MCP
 
 #### Added
+- `-r` is an alias for `--recipe`.
+- TUI device and app pickers mark the current connection and initially select it.
 - TUI string and list fields accept explicit empty values with Ctrl+E and reset with Ctrl+U.
 - TUI and MCP list forms accept JSON string arrays to preserve empty entries, whitespace, and commas.
 - TUI and MCP arguments expand host environment variables with `${NAME}` and escape them with `$${NAME}`.

@@ -76,7 +76,11 @@ CLI, TUI, and MCP arguments expand `${NAME}` using the host environment. Use `$$
 
 Displayed bound arguments, commands, and history use `${NAME}`. Recipe commands and arguments derived from a consumed environment value keep the existing masking. Returned messages, JSON results, notifications, and errors are unchanged. Typed parsing errors can include the supplied value.
 
+The Android SDK uses platform JSON APIs and has no kotlinx.serialization runtime dependency.
+
 ## Run them from your computer
+
+The TUI device and app pickers open on the connected target and mark its row with `(current)`. The marker stays on that row when you move the cursor.
 
 Install the `quack` command with Homebrew:
 

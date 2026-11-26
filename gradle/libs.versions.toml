@@ -8,7 +8,7 @@ kotlin = "2.2.10"
 ktfmt = "0.65"
 maven-publish = "0.37.0"
 okio = "3.18.2"
-serialization = "1.9.0"
+robolectric = "4.18"
 sort-dependencies = "0.21.0"
 spotless = "8.12.0"
 tapmoc = "0.5.0"
@@ -19,15 +19,15 @@ kotest-assertions = { group = "io.kotest", name = "kotest-assertions-core", vers
 kotest-assertions-json = { group = "io.kotest", name = "kotest-assertions-json", version.ref = "kotest" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
-kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 # Included to be picked up by dependency update automation. Spotless runs ktfmt.
 ktfmt = { group = "org.jetbrains.kotlinx", name = "ktfmt", version.ref = "ktfmt" }
 okio = { group = "com.squareup.okio", name = "okio", version.ref = "okio" }
 
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "maven-publish" }
-kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 sort-dependencies = { id = "com.squareup.sort-dependencies", version.ref = "sort-dependencies" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 tapmoc = { id = "com.gradleup.tapmoc", version.ref = "tapmoc" }
