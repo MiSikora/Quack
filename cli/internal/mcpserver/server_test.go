@@ -893,7 +893,7 @@ func TestActionEnvironmentBindingsAcrossMCPModes(t *testing.T) {
 					}}
 				}
 				session := connectWith(t, source, options)
-				for _, explicit := range []map[string]any{{}, {"username": "", "tags": []string{}}, {"username": "${QUACK_TOKEN}"}} {
+				for _, explicit := range []map[string]any{{}, {"username": "", "tags": []string{}}, {"username": "${QUACK_TOKEN}"}, {"username": "$${QUACK_TOKEN}"}} {
 					input := map[string]any{"action": "account.create", "args": explicit}
 					if async {
 						readToEnd(t, session, startRun(t, session, input))
@@ -904,6 +904,11 @@ func TestActionEnvironmentBindingsAcrossMCPModes(t *testing.T) {
 					want := "host-value"
 					if value, given := explicit["username"]; given {
 						want = value.(string)
+						if want == "${QUACK_TOKEN}" {
+							want = "host-value"
+						} else if want == "$${QUACK_TOKEN}" {
+							want = "${QUACK_TOKEN}"
+						}
 					}
 					if !reflect.DeepEqual(got["username"], wire.RawArg{want}) {
 						t.Fatalf("username %v, want %q", got, want)

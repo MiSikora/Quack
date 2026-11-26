@@ -38,8 +38,8 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 	addTool(server, &mcp.Tool{
 		Name: "run_action",
 		Description: "Run an action of a quack-enabled app and return its notifications, each a message with optional " +
-			"data, and its message and its data. Get the action ids and their params from list_actions. The args reach " +
-			"the app as given: ${NAME} stays as it is. For an action that waits for something outside the call before " +
+			"data, and its message and its data. Get the action ids and their params from list_actions. " +
+			"For an action that waits for something outside the call before " +
 			"it ends, such as another device, use start_action instead. " + askHelp + targetHelp,
 		InputSchema:  schemaFor[runActionInput](),
 		OutputSchema: schemaFor[runActionOutput](),
@@ -117,8 +117,11 @@ const instructions = "quack runs debug actions in Android apps on devices that a
 	"again. Runs belong to this MCP session: reconnecting the server cancels the ones still running, so finish or " +
 	"cancel them first."
 
-const askHelp = "When the client can show the user a form, the user is asked for the required params that args leave " +
-	"out, so leave out the ones that only the user knows. A user who declines or cancels fails the call. "
+const askHelp = "User arguments, including form responses, expand ${NAME} from the server environment once without " +
+	"shell evaluation. Use $${NAME} for literal ${NAME}. Missing variables fail the call. When the client can show " +
+	"the user a form, the user is asked for the required params that args leave out, so leave out the ones that " +
+	"only the user knows. A user who declines or cancels fails the call. "
 
-const targetHelp = "When device is omitted, ANDROID_SERIAL from the server environment selects the device if set. Otherwise leave out device and app when only one quack-enabled app is reachable. When several are, the error " +
+const targetHelp = "When device is omitted, ANDROID_SERIAL from the server environment selects the device if set. " +
+	"Otherwise leave out device and app when only one quack-enabled app is reachable. When several are, the error " +
 	"lists them as --device and --app pairs: pass those values as device and app."

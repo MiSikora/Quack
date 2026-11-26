@@ -163,8 +163,12 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 			return form, runRecipeOutput{}, err
 		}
 	}
+	expanded, err := step.ExpandArgs(args, target)
+	if err != nil {
+		return nil, runRecipeOutput{}, err
+	}
 	t := newTranscript(progress(ctx, req))
-	data, err := session.Run(ctx, app, actions, cookbook, session.Runnable{Name: in.Recipe, Recipe: true}, step.Arguments{Values: args}, t.record)
+	data, err := session.Run(ctx, app, actions, cookbook, session.Runnable{Name: in.Recipe, Recipe: true}, expanded, t.record)
 	out := runRecipeOutput{Steps: t.steps, Log: t.log, Data: data, Problems: problems}
 	if err != nil {
 		out.Error = stepError(err)
@@ -257,7 +261,11 @@ func (s tools) prepareCall(ctx context.Context, req *mcp.CallToolRequest, in run
 			return preparedCall{}, form, err
 		}
 	}
-	prepared.call = step.PrepareCall(prepared.actions, wire.Call{Action: in.Action, Args: args}, nil, os.Getenv)
+	expanded, err := step.ExpandArgs(args, target)
+	if err != nil {
+		return preparedCall{}, nil, err
+	}
+	prepared.call = step.PrepareCall(prepared.actions, wire.Call{Action: in.Action, Args: expanded.Values}, expanded.Display, os.Getenv)
 	return prepared, nil, nil
 }
 
