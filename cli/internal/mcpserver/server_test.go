@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -834,4 +835,88 @@ func newFakeSource() fakeBackend {
 		return wire.MessageResult{}, wire.Error{Code: wire.ErrorCodeRejected, Message: "there is no account"}
 	}
 	return fakeBackend{backend.New(app), release}
+}
+
+func TestActionEnvironmentBindingsAcrossMCPModes(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		for _, elicit := range []bool{false, true} {
+			t.Run(fmt.Sprintf("async=%v/elicit=%v", async, elicit), func(t *testing.T) {
+				t.Setenv("QUACK_TOKEN", "host-value")
+				source := newFakeSource()
+				source.App.Actions()[1].Params[0].Env = "QUACK_TOKEN"
+				source.App.Actions()[1].Params[2].Env = "QUACK_TOKEN"
+				source.App.Actions()[1].Params[2].Presence = wire.Required{}
+				var options *mcp.ClientOptions
+				if elicit {
+					options = &mcp.ClientOptions{ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+						t.Error("bound required argument should not elicit")
+						return &mcp.ElicitResult{Action: "decline"}, nil
+					}}
+				}
+				session := connectWith(t, source, options)
+				for _, explicit := range []map[string]any{{}, {"username": "", "tags": []string{}}, {"username": "${QUACK_TOKEN}"}} {
+					input := map[string]any{"action": "account.create", "args": explicit}
+					if async {
+						readToEnd(t, session, startRun(t, session, input))
+					} else {
+						call(t, session, "run_action", input)
+					}
+					got := source.App.Calls()[len(source.App.Calls())-1].Args
+					want := "host-value"
+					if value, given := explicit["username"]; given {
+						want = value.(string)
+					}
+					if !reflect.DeepEqual(got["username"], wire.RawArg{want}) {
+						t.Fatalf("username %v, want %q", got, want)
+					}
+					if _, empty := explicit["tags"]; empty {
+						if got["tags"] == nil || len(got["tags"]) != 0 {
+							t.Fatalf("explicit [] lost: %#v", got)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestMCPNullStillOmitsAnArgumentAndEmptyEnvironmentFallsBack(t *testing.T) {
+	t.Setenv("QUACK_TOKEN", "host-value")
+	source := newFakeSource()
+	source.App.Actions()[1].Params[0].Env = "QUACK_TOKEN"
+	session := connect(t, source)
+	call(t, session, "run_action", map[string]any{"action": "account.create", "args": map[string]any{"username": nil}})
+	if got := source.App.Calls()[0].Args["username"]; !reflect.DeepEqual(got, wire.RawArg{"host-value"}) {
+		t.Fatal(got)
+	}
+	t.Setenv("QUACK_TOKEN", "")
+	result := callTool(t, session, "start_action", map[string]any{"action": "account.create"})
+	assertError(t, result, "[invalid_args] missing argument 'username'")
+	if len(source.App.Calls()) != 1 {
+		t.Fatal("missing required action dispatched")
+	}
+}
+
+func TestMCPListsEnvironmentNamesWithDeclaredPresenceAndLiteralFallback(t *testing.T) {
+	t.Setenv("QUACK_TOKEN", "secret")
+	source := newFakeSource()
+	source.App.Actions()[1].Params[0].Env = "QUACK_TOKEN"
+	source.App.Actions()[1].Params[1].Env = "QUACK_TOKEN"
+	session := connect(t, source)
+	result := call(t, session, "list_actions", map[string]any{"filter": "^account.create$"})
+	want := `{"device":"emulator-5554","app":"io.mehow.quack.sample","version":"1.0","actions":[{"id":"account.create","description":"Create an account","params":[{"name":"username","type":"string","description":"Who signs in","hints":["alice","bob"],"env":"QUACK_TOKEN","required":true},{"name":"age","type":"int","description":"","env":"QUACK_TOKEN","required":false,"default":"30"},{"name":"tags","type":"string_list","description":"","required":false,"default":["a","b"]}]}]}`
+	assertStructured(t, result, want)
+}
+
+func TestMCPDiscoveryFailurePreventsActionDispatch(t *testing.T) {
+	source := newFakeSource()
+	source.App.SetDescribeErr(fmt.Errorf("describe failed"))
+	session := connect(t, source)
+	for _, tool := range []string{"run_action", "start_action"} {
+		result := callTool(t, session, tool, map[string]any{"action": "account.create", "args": map[string]any{"username": "explicit"}})
+		assertError(t, result, "describe failed")
+	}
+	if len(source.App.Calls()) != 0 {
+		t.Fatal(source.App.Calls())
+	}
 }

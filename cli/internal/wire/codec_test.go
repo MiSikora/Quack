@@ -89,3 +89,18 @@ func TestDecodeFrame(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvironmentBindingNamesAreValidatedAtDecode(t *testing.T) {
+	for _, env := range []string{`""`, `"1TOKEN"`, `"A-B"`, `"A B"`, `42`} {
+		got := DecodeFrame([]byte(`{"result":{"actions":[{"id":"a","params":[{"name":"p","env":` + env + `}]}]}}`))
+		if _, ok := got.(Malformed); !ok {
+			t.Errorf("env %s accepted: %#v", env, got)
+		}
+	}
+	for _, env := range []string{`"TOKEN"`, `"_token2"`, `null`} {
+		got := DecodeFrame([]byte(`{"result":{"actions":[{"id":"a","params":[{"name":"p","env":` + env + `}]}]}}`))
+		if _, ok := got.(ActionsResult); !ok {
+			t.Errorf("env %s rejected: %#v", env, got)
+		}
+	}
+}

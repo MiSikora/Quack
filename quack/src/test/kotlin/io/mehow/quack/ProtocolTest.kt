@@ -57,8 +57,8 @@ class ProtocolTest {
         description = "Say hello",
         params =
           listOf(
-            Param.string("name", description = "Who to greet").hints(listOf("Alice", "Bob")).required(),
-            Param.int("times").withDefault(1),
+            Param.string("name", description = "Who to greet").hints(listOf("Alice", "Bob")).env("QUACK_NAME").required(),
+            Param.int("times").withDefault(1).env("QUACK_TIMES"),
           ),
       )
     val params =

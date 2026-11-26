@@ -35,9 +35,10 @@ type fakeDevice struct {
 }
 
 type fakeApp struct {
-	pkg     string
-	version string
-	running bool
+	describe string
+	pkg      string
+	version  string
+	running  bool
 	// deaf apps never bind their socket, so quack times out waiting for them.
 	deaf bool
 	// noDump apps close every connection without hello, as an app does for a caller without DUMP.
@@ -267,6 +268,10 @@ func (a *fakeAdb) converse(conn net.Conn, app *fakeApp) {
 	var request map[string]any
 	if err := json.Unmarshal([]byte(line), &request); err != nil {
 		fmt.Fprintln(conn, `{"error":{"code":"bad_frame","message":"malformed request"}}`)
+		return
+	}
+	if request["method"] == "describe" && app.describe != "" {
+		fmt.Fprintln(conn, app.describe)
 		return
 	}
 	sampleReply(request, func(frame string) { fmt.Fprintln(conn, frame) })

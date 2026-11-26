@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -27,7 +28,9 @@ func askForParams(req *mcp.CallToolRequest, what string, params []wire.Param, ar
 	schema := &jsonschema.Schema{Type: "object", Properties: map[string]*jsonschema.Schema{}}
 	missing := map[string]wire.Param{}
 	for _, p := range params {
-		if p.Required() && len(args[p.Name]) == 0 {
+		_, given := args[p.Name]
+		_, required := p.DisplayPresence(os.Getenv).(wire.Required)
+		if required && !given {
 			schema.Properties[p.Name] = fieldSchema(p)
 			schema.Required = append(schema.Required, p.Name)
 			missing[p.Name] = p

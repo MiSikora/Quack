@@ -9,6 +9,7 @@
             "name": "name",
             "type": "string",
             "hints": ["Alice", "Bob"],
+            "env": "QUACK_NAME",
             "required": true,
             "description": "Who to greet"
           },
@@ -17,6 +18,7 @@
             "type": "int",
             "required": false,
             "default": "1",
+            "env": "QUACK_TIMES",
             "description": ""
           }
         ]

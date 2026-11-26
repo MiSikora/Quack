@@ -96,3 +96,23 @@ func TestInitRecipesSaysWhenNothingMapsTheApp(t *testing.T) {
 		}
 	}
 }
+
+func TestActionHelpProjectsEnvironmentWithoutChangingJSONMetadata(t *testing.T) {
+	t.Setenv("QUACK_TOKEN", "secret")
+	params := []wire.Param{{Name: "token", Type: wire.ParamTypeString, Env: "QUACK_TOKEN", Presence: wire.Required{}}, {Name: "fallback", Type: wire.ParamTypeString, Env: "QUACK_TOKEN", Presence: wire.Default{Values: []string{"literal"}}}}
+	var out strings.Builder
+	writeAction(&out, wire.Action{ID: "a", Params: params})
+	if strings.Contains(out.String(), "secret") || !strings.Contains(out.String(), "Default: ${QUACK_TOKEN}.") {
+		t.Fatal(out.String())
+	}
+	meta := paramsJSON(params)
+	if !meta[0].Required || meta[0].Env != "QUACK_TOKEN" || meta[1].Default != "literal" {
+		t.Fatalf("metadata: %#v", meta)
+	}
+	t.Setenv("QUACK_TOKEN", "")
+	out.Reset()
+	writeAction(&out, wire.Action{ID: "a", Params: params})
+	if !strings.Contains(out.String(), "Required.") || !strings.Contains(out.String(), "Default: literal.") {
+		t.Fatal(out.String())
+	}
+}

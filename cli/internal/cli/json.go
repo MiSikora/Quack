@@ -40,6 +40,7 @@ type actionJSON struct {
 }
 
 type paramJSON struct {
+	Env         string   `json:"env,omitempty"`
 	Name        string   `json:"name"`
 	Type        string   `json:"type"`
 	Description string   `json:"description"`
@@ -77,6 +78,7 @@ func paramsJSON(params []wire.Param) []paramJSON {
 	for i, p := range params {
 		out[i] = paramJSON{
 			Name:        p.Name,
+			Env:         p.Env,
 			Type:        string(p.Type),
 			Description: p.Description,
 			Choices:     p.Choices,

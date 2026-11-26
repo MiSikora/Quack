@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 
 	"quack/internal/client"
 	"quack/internal/recipe"
@@ -31,7 +32,7 @@ func (e *StepError) Unwrap() error { return e.Err }
 // step ended the run. The steps' lines show a Call's args in the order of its action's params in actions.
 func Run(ctx context.Context, app step.App, actions []wire.Action, cookbook *recipe.Cookbook, r Runnable, args map[string]wire.RawArg, emit func(step.Event)) (json.RawMessage, error) {
 	if !r.Recipe {
-		return nil, runAction(ctx, app, actions, step.Call{Action: r.Name, Args: args}, emit)
+		return nil, RunPrepared(ctx, app, actions, step.PrepareCall(actions, wire.Call{Action: r.Name, Args: args}, nil, os.Getenv), emit)
 	}
 	var failed *step.Failed
 	data, err := cookbook.Run(ctx, app, actions, r.Name, args, func(e step.Event) {
@@ -69,9 +70,11 @@ func Classify(err error) (code, message string) {
 	return "error", err.Error()
 }
 
-func runAction(ctx context.Context, app step.App, actions []wire.Action, call step.Call, emit func(step.Event)) error {
+// RunPrepared executes one prepared action and emits only its display arguments in step events.
+func RunPrepared(ctx context.Context, app step.App, actions []wire.Action, prepared step.PreparedCall, emit func(step.Event)) error {
+	call := prepared.Display
 	emit(step.Started{Line: step.Line(call, actions)})
-	result, err := step.Do(ctx, app, call, func(notification wire.Notification) {
+	result, err := prepared.Do(ctx, app, func(notification wire.Notification) {
 		emit(step.Notified{Notification: notification})
 	})
 	if err != nil {

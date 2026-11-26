@@ -21,6 +21,7 @@ public interface QuackAction {
     internal val type: Type,
     internal val presence: Presence,
     internal val hints: List<String> = emptyList(),
+    internal val env: String? = null,
     internal val parse: (List<String>) -> T?,
   ) {
 
@@ -161,6 +162,7 @@ public fun <T : Any> QuackAction.Param<T?>.required(): QuackAction.Param<T> =
     description = description,
     parse = parse,
     hints = hints,
+    env = env,
   )
 
 public fun <T : Any> QuackAction.Param<T?>.withDefault(value: T): QuackAction.Param<T> =
@@ -171,6 +173,7 @@ public fun <T : Any> QuackAction.Param<T?>.withDefault(value: T): QuackAction.Pa
     description = description,
     parse = parse,
     hints = hints,
+    env = env,
   )
 
 /** Values the CLI offers while the user types, in this order and without duplicates. The user can still type any value. */
@@ -180,6 +183,28 @@ public fun QuackAction.Param<String?>.hints(values: List<String>): QuackAction.P
 @JvmName("hintsOfNonNull") public fun QuackAction.Param<String>.hints(values: List<String>): QuackAction.Param<String> = withHints(values)
 
 private fun <T> QuackAction.Param<T>.withHints(values: List<String>): QuackAction.Param<T> =
-  QuackAction.Param(name = name, type = type, presence = presence, description = description, parse = parse, hints = values.distinct())
+  QuackAction.Param(
+    name = name,
+    type = type,
+    presence = presence,
+    description = description,
+    parse = parse,
+    hints = values.distinct(),
+    env = env,
+  )
 
 public fun QuackAction.args(): QuackAction.Args = QuackAction.Args(this, emptyMap())
+
+/** Uses a nonempty host environment value when the caller omits this argument. Android does not read the environment. */
+public fun <T> QuackAction.Param<T>.env(name: String): QuackAction.Param<T> {
+  require(name.matches(Regex("[A-Za-z_][A-Za-z0-9_]*"))) { "env must name an environment variable" }
+  return QuackAction.Param(
+    name = this.name,
+    description = description,
+    type = type,
+    presence = presence,
+    hints = hints,
+    env = name,
+    parse = parse,
+  )
+}

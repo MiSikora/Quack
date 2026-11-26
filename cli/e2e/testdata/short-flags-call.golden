@@ -6,4 +6,6 @@ $ quack -j -a io.mehow.quack.sample app.greet name=Bob
 --- device
 shell emulator-5554: get-current-user
 shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: wake io.mehow.quack.sample
 request: {"method":"call","action":"app.greet","args":{"name":"Bob"}}

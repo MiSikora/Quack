@@ -211,3 +211,24 @@ func newApp() *fakes.App {
 	}
 	return app
 }
+
+func TestPlainActionEnvironmentStaysOutOfEventsButResultsAreUnchanged(t *testing.T) {
+	t.Setenv("QUACK_TOKEN", "secret")
+	app := newApp()
+	catalog := []wire.Action{{ID: "account.create", Params: []wire.Param{{Name: "username", Env: "QUACK_TOKEN", Presence: wire.Required{}}}}}
+	var events []step.Event
+	_, err := session.Run(t.Context(), app, catalog, nil, session.Runnable{Name: "account.create"}, nil, collect(&events))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := app.Calls()[0].Args["username"][0]; got != "secret" {
+		t.Fatal(got)
+	}
+	if got := events[0].(step.Started).Line; got != "account.create username='${QUACK_TOKEN}'" {
+		t.Fatal(got)
+	}
+	done := events[len(events)-1].(step.Ended)
+	if done.Step.(step.Call).Args["username"][0] != "${QUACK_TOKEN}" || done.Result.Message != "Created secret" {
+		t.Fatalf("ended: %#v", done)
+	}
+}

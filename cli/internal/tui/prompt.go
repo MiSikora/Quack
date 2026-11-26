@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -320,7 +321,8 @@ func (r runnable) suffix() string {
 }
 
 func (r runnable) commandLine(args map[string]wire.RawArg) string {
-	line := step.CommandLine(r.Action, args)
+	shown := step.PrepareCall([]wire.Action{r.Action}, wire.Call{Action: r.ID, Args: args}, nil, os.Getenv).Display
+	line := step.CommandLine(r.Action, shown.Args)
 	if r.recipe {
 		return "--recipe " + line
 	}

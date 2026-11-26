@@ -63,6 +63,9 @@ var scenarios = []scenario{
 	{name: "list-actions-two-regexes", args: []string{"--list-actions", "a", "b"}},
 	{name: "list-actions-invalid-regex", args: []string{"--list-actions", "acc("}},
 
+	{name: "call-env-required", args: []string{"app.greet"}, env: []string{"QUACK_TOKEN=host ${OTHER}"}, device: withActionEnv},
+	{name: "call-env-explicit-empty", args: []string{"app.greet", "name="}, env: []string{"QUACK_TOKEN=host"}, device: withActionEnv},
+	{name: "call-env-empty", args: []string{"app.greet"}, env: []string{"QUACK_TOKEN="}, device: withActionEnv},
 	{name: "call", args: []string{"app.greet", "name=Bob"}},
 	{name: "call-repeated-key", args: []string{"app.params", "tag=a", "tag=b c"}},
 	{name: "call-variable", args: []string{"app.greet", "name=${QUACK_NAME} on ${ANDROID_SERIAL}"}, env: []string{"QUACK_NAME=Bob"}},
@@ -464,4 +467,8 @@ func ensureNewline(text string) string {
 		return text
 	}
 	return text + "\n(no newline at end)\n"
+}
+
+func withActionEnv(d *fakeDevice) {
+	d.apps[0].describe = strings.Replace(sampleDescribe, `"name":"name","type":"string","required":true`, `"name":"name","type":"string","required":true,"env":"QUACK_TOKEN"`, 1)
 }

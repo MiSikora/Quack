@@ -823,3 +823,40 @@ func startedLines(started *[]string) func(step.Event) {
 		}
 	}
 }
+
+func TestNestedRecipeActionsBindHostValuesAndMaskLaterDerivedCommands(t *testing.T) {
+	t.Setenv("QUACK_TOKEN", "QUACK")
+	book := load(t, `
+import quack from "quack"
+const nested = quack.recipe({ name: "nested", run() {
+ const result = quack.runAction("app.greet")
+ quack.shell(result.message)
+ quack.runAction("app.greet", {name: "${OTHER}"})
+}})
+export const outer = quack.recipe({name: "outer",run(){quack.runRecipe(nested)}})
+`)
+	catalog := []wire.Action{{ID: "app.greet", Params: []wire.Param{{Name: "name", Env: "QUACK_TOKEN", Presence: wire.Required{}}}}}
+	app := newApp()
+	var events []step.Event
+	_, err := book.Run(t.Context(), app, catalog, "outer", nil, func(e step.Event) { events = append(events, e) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := app.Calls()
+	if len(got) != 2 || got[0].Args["name"][0] != "QUACK" || got[1].Args["name"][0] != "${OTHER}" {
+		t.Fatalf("calls: %v", got)
+	}
+	if !reflect.DeepEqual(app.Commands(), []string{"Hello, QUACK!"}) {
+		t.Fatal(app.Commands())
+	}
+	var lines []string
+	for _, e := range events {
+		if e, ok := e.(step.Started); ok {
+			lines = append(lines, e.Line)
+		}
+	}
+	want := []string{"recipe nested", "app.greet name='${QUACK_TOKEN}'", "shell Hello, ${QUACK_TOKEN}!", "app.greet name='${OTHER}'"}
+	if !reflect.DeepEqual(lines, want) {
+		t.Fatalf("display lines: %q", lines)
+	}
+}

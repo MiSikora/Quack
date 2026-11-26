@@ -18,6 +18,7 @@ type Param struct {
 	Description string
 	Type        ParamType
 	Choices     []string
+	Env         string
 	// Offered in the app's order. Any other value works too.
 	Hints    []string
 	Presence Presence
@@ -112,3 +113,11 @@ func (d Default) String() string {
 func (Optional) presence() {}
 func (Required) presence() {}
 func (Default) presence()  {}
+
+// DisplayPresence projects a host binding without changing the declared presence or literal fallback.
+func (p Param) DisplayPresence(getenv func(string) string) Presence {
+	if p.Env != "" && getenv(p.Env) != "" {
+		return Default{Values: []string{"${" + p.Env + "}"}}
+	}
+	return p.Presence
+}

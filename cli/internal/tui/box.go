@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -67,7 +68,7 @@ func newField(p wire.Param) field {
 	}
 	if choices != nil {
 		var options []string
-		if !p.Required() {
+		if _, required := p.DisplayPresence(os.Getenv).(wire.Required); !required {
 			options = append(options, "")
 		}
 		return &choiceField{options: append(options, choices...)}
@@ -108,7 +109,7 @@ func (b *paramBox) press(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		for i := range b.fields {
 			f := &b.fields[i]
-			if f.param.Required() && len(f.field.value()) == 0 {
+			if _, required := f.param.DisplayPresence(os.Getenv).(wire.Required); required && len(f.field.value()) == 0 {
 				f.missing = true
 				return false, b.focus(i)
 			}
@@ -356,7 +357,7 @@ func (f *choiceField) blur() {}
 
 func describe(p wire.Param) string {
 	var text []string
-	switch presence := p.Presence.(type) {
+	switch presence := p.DisplayPresence(os.Getenv).(type) {
 	case wire.Required:
 		text = append(text, "Required.")
 	case wire.Default:

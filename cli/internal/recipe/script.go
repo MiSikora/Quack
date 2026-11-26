@@ -410,16 +410,41 @@ func (r *runtime) requireRun() {
 
 func (r *runtime) do(s step.Step, collect func(wire.Notification)) wire.MessageResult {
 	r.requireRun()
-	shown := r.env.hide(s)
+	var shown step.Step
+	var prepared *step.PreparedCall
+	if call, ok := s.(step.Call); ok {
+		p := step.PrepareCall(r.actions, wire.Call(call), nil, func(name string) string {
+			value := r.env.values[name]
+			if value != "" {
+				r.env.read[name] = value
+			}
+			return value
+		})
+		prepared = &p
+		masked := r.env.hide(s).(step.Call)
+		for name, values := range masked.Args {
+			p.Display.Args[name] = values
+		}
+		shown = p.Display
+	} else {
+		shown = r.env.hide(s)
+	}
 	r.steps++
 	number := r.steps
 	r.emit(step.Started{Number: number, Line: step.Line(shown, r.actions)})
-	result, err := step.Do(r.ctx, r.app, s, func(notification wire.Notification) {
+	notify := func(notification wire.Notification) {
 		if collect != nil {
 			collect(notification)
 		}
 		r.emit(step.Notified{Number: number, Notification: notification})
-	})
+	}
+	var result wire.MessageResult
+	var err error
+	if prepared != nil {
+		result, err = prepared.Do(r.ctx, r.app, notify)
+	} else {
+		result, err = step.Do(r.ctx, r.app, s, notify)
+	}
 	if err != nil {
 		r.emit(step.Failed{Number: number, Err: err})
 		panic(r.vm.NewGoError(err))

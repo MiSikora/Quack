@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 
@@ -107,11 +108,14 @@ func writeAction(out *strings.Builder, a wire.Action) {
 	for _, p := range a.Params {
 		out.WriteString(helpIndent + paramUsage(p) + "\n")
 		var text []string
-		switch presence := p.Presence.(type) {
+		switch presence := p.DisplayPresence(os.Getenv).(type) {
 		case wire.Required:
 			text = append(text, "Required.")
 		case wire.Default:
 			text = append(text, "Default: "+presence.String()+".")
+		}
+		if p.Env != "" {
+			text = append(text, "Environment: "+p.Env+".")
 		}
 		if p.Description != "" {
 			text = append(text, sentence(p.Description))

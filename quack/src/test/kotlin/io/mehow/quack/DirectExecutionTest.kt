@@ -78,4 +78,24 @@ class DirectExecutionTest {
     outcome shouldBe Outcome.Ok("Hello Bob x2")
     notifications shouldContainExactly listOf("Greeting Bob")
   }
+
+  @Test
+  fun `environment binding preserves nullability defaults and explicit direct values`() {
+    val optional: Param<String?> = Param.string("optional").env("PATH").hints(listOf("a"))
+    val fallback = Param.string("fallback").env("PATH").withDefault("literal").hints(listOf("b"))
+    val required = Param.string("required").hints(listOf("c")).required().env("PATH")
+    val bound = FakeAction(params = listOf(optional, fallback, required))
+    bound.args()[optional].shouldBeNull()
+    bound.args()[fallback] shouldBe "literal"
+    bound.args().with(required, "explicit")[required] shouldBe "explicit"
+    shouldThrow<IllegalArgumentException> { bound.args()[required] }
+    listOf(optional.env, fallback.env, required.env) shouldContainExactly listOf("PATH", "PATH", "PATH")
+  }
+
+  @Test
+  fun `reject malformed environment names`() {
+    for (name in listOf("", "1TOKEN", "A-B", "A B", "é")) {
+      shouldThrow<IllegalArgumentException> { Param.string("p").env(name) }
+    }
+  }
 }

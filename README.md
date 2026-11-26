@@ -51,6 +51,25 @@ class MyApplication : Application() {
 }
 ```
 
+## Use host environment defaults
+
+Bind an action parameter to an environment variable on the computer running `quack` or `quack-mcp`:
+
+```kotlin
+import io.mehow.quack.env
+
+private val token = Param.string("token").env("QUACK_TOKEN").required()
+private val region = Param.string("region").withDefault("local").env("QUACK_REGION")
+```
+
+An explicit argument wins, including an empty string or an empty list. Otherwise, a nonempty host environment value supplies the argument. An unset or empty variable uses the parameter's literal default, optional null, or required check. A list binding supplies one entry, with commas and spaces kept literally. Environment contents are never expanded again.
+
+`.env()` preserves nullability and works before or after `.required()`, `.withDefault()`, and string `.hints()`. Names must match `[A-Za-z_][A-Za-z0-9_]*`. Android does not read the host environment, so direct Kotlin `Args` calls keep their existing behavior.
+
+Bindings apply to direct commands, interactive forms, recipe `quack.runAction()` calls, and synchronous and asynchronous MCP actions. Discovery keeps the declared required status and literal default and includes only the variable name. Forms and help show `${NAME}` when the variable is available. Recipes and MCP keep explicit `${NAME}` arguments literally; direct CLI arguments retain their existing variable expansion.
+
+Displayed bound arguments, commands, and history use `${NAME}`. Recipe commands and arguments derived from a consumed environment value keep the existing masking. Returned messages, JSON results, notifications, and errors are unchanged. Typed parsing errors can include the supplied value.
+
 ## Run them from your computer
 
 Install the `quack` command with Homebrew:

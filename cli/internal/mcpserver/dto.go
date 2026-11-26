@@ -35,6 +35,7 @@ type actionOutput struct {
 }
 
 type paramOutput struct {
+	Env         string   `json:"env,omitempty"`
 	Name        string   `json:"name"`
 	Type        string   `json:"type"`
 	Description string   `json:"description"`

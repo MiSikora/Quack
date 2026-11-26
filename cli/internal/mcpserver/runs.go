@@ -66,13 +66,13 @@ func newRuns(ctx context.Context) *runs {
 	return &runs{ctx: ctx}
 }
 
-func (r *runs) start(target device.Target, app session.App, call wire.Call) string {
+func (r *runs) start(target device.Target, app session.App, call step.PreparedCall) string {
 	ctx, cancel := context.WithCancel(r.ctx)
 	r.mu.Lock()
 	r.count++
 	started := &run{
 		id:      "r" + strconv.Itoa(r.count),
-		action:  call.Action,
+		action:  call.Display.Action,
 		device:  string(target.Device),
 		app:     target.Package,
 		cancel:  cancel,
@@ -83,7 +83,7 @@ func (r *runs) start(target device.Target, app session.App, call wire.Call) stri
 	go func() {
 		defer cancel()
 		var result wire.MessageResult
-		_, err := session.Run(ctx, app, nil, nil, session.Runnable{Name: call.Action}, call.Args, func(e step.Event) {
+		err := session.RunPrepared(ctx, app, nil, call, func(e step.Event) {
 			switch e := e.(type) {
 			case step.Notified:
 				r.notified(started, notificationOutput(e.Notification))
@@ -230,7 +230,7 @@ func checkCall(actions []wire.Action, call wire.Call) error {
 		}
 	}
 	for _, p := range params {
-		if p.Required() && len(call.Args[p.Name]) == 0 {
+		if _, given := call.Args[p.Name]; p.Required() && !given {
 			return wire.Error{Code: wire.ErrorCodeInvalidArgs, Message: fmt.Sprintf("missing argument '%s'", p.Name)}
 		}
 	}

@@ -7,4 +7,6 @@ quack: malformed reply: invalid character 'o' in literal null (expecting 'u')
 shell emulator-5554: query-receivers
 shell emulator-5554: get-current-user
 shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: wake io.mehow.quack.sample
 request: {"method":"call","action":"app.garbled"}

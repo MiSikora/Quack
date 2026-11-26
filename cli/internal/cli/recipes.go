@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	encodingjson "encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,14 +17,11 @@ import (
 	"quack/internal/wire"
 )
 
-func runPrinted(app session.App, cookbook *recipe.Cookbook, r session.Runnable, args map[string]wire.RawArg, terminal Terminal, json bool) error {
+func runPrinted(app session.App, cookbook *recipe.Cookbook, r session.Runnable, args, shownArgs map[string]wire.RawArg, terminal Terminal, json bool) error {
 	ctx := context.Background()
-	var actions []wire.Action
-	if r.Recipe {
-		var err error
-		if _, actions, err = app.Describe(ctx); err != nil {
-			return err
-		}
+	_, actions, err := app.Describe(ctx)
+	if err != nil {
+		return err
 	}
 	var caught *step.Failed
 	printCaught := func() {
@@ -32,7 +30,7 @@ func runPrinted(app session.App, cookbook *recipe.Cookbook, r session.Runnable, 
 			caught = nil
 		}
 	}
-	data, err := session.Run(ctx, app, actions, cookbook, r, args, func(e step.Event) {
+	record := func(e step.Event) {
 		switch e := e.(type) {
 		case step.Started:
 			printCaught()
@@ -55,7 +53,13 @@ func runPrinted(app session.App, cookbook *recipe.Cookbook, r session.Runnable, 
 				fmt.Fprintln(terminal.Out, e.Text)
 			}
 		}
-	})
+	}
+	var data encodingjson.RawMessage
+	if !r.Recipe {
+		err = session.RunPrepared(ctx, app, actions, step.PrepareCall(actions, wire.Call{Action: r.Name, Args: args}, shownArgs, os.Getenv), record)
+	} else {
+		data, err = session.Run(ctx, app, actions, cookbook, r, args, record)
+	}
 	var failed *session.StepError
 	if errors.As(err, &failed) {
 		return err

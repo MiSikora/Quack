@@ -28,8 +28,8 @@ func TestDecodeGoldenFrames(t *testing.T) {
 		{"error.json", Error{Code: ErrorCodeInvalidArgs, Message: "missing argument 'name'"}},
 		{"actions-result.json", ActionsResult{[]Action{
 			{ID: "app.greet", Description: "Say hello", Params: []Param{
-				{Name: "name", Description: "Who to greet", Type: ParamTypeString, Hints: []string{"Alice", "Bob"}, Presence: Required{}},
-				{Name: "times", Type: ParamTypeInt, Presence: Default{[]string{"1"}}},
+				{Name: "name", Description: "Who to greet", Env: "QUACK_NAME", Type: ParamTypeString, Hints: []string{"Alice", "Bob"}, Presence: Required{}},
+				{Name: "times", Env: "QUACK_TIMES", Type: ParamTypeInt, Presence: Default{[]string{"1"}}},
 			}},
 			{ID: "app.params", Params: []Param{
 				{Name: "text", Type: ParamTypeString, Presence: Optional{}},

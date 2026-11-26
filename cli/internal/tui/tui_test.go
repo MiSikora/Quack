@@ -2434,3 +2434,27 @@ func appFor(source *backend.Backend, serial, pkg string) *fakeApp {
 }
 
 var gone = &device.AppError{Message: "the app is gone"}
+
+func TestBoundRequiredActionFormLeavesInputBlankAndDisplaysPlaceholder(t *testing.T) {
+	t.Setenv("QUACK_TOKEN", "secret")
+	app := newFakeApp()
+	app.Actions()[0].Params[0].Env = "QUACK_TOKEN"
+	h := start(t, app)
+	h.typing("app.greet")
+	h.press("enter")
+	h.waitFor("Default: ${QUACK_TOKEN}.", "› app.greet name='${QUACK_TOKEN}'\n")
+	h.press("enter", "enter")
+	h.waitForLog("› app.greet name='${QUACK_TOKEN}'\nHello, secret!")
+	if got := app.Calls(); len(got) != 1 || got[0].Args["name"][0] != "secret" {
+		t.Fatal(got)
+	}
+}
+
+func TestBoundRequiredChoiceFormOffersOmissionWithoutChangingDescriptor(t *testing.T) {
+	t.Setenv("QUACK_CHOICE", "true")
+	p := wire.Param{Name: "flag", Type: wire.ParamTypeBoolean, Env: "QUACK_CHOICE", Presence: wire.Required{}}
+	field := newField(p).(*choiceField)
+	if !reflect.DeepEqual(field.options, []string{"", "true", "false"}) || !p.Required() {
+		t.Fatalf("choice: %#v, param: %#v", field, p)
+	}
+}

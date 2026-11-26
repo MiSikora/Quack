@@ -65,12 +65,12 @@ func (s tools) listActions(ctx context.Context, _ *mcp.CallToolRequest, in listA
 }
 
 func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runActionInput) (*mcp.CallToolResult, runActionOutput, error) {
-	prepared, form, err := s.prepareCall(ctx, req, in, canElicit(req.Session))
+	prepared, form, err := s.prepareCall(ctx, req, in)
 	if form != nil || err != nil {
 		return form, runActionOutput{}, err
 	}
 	t := newTranscript(progress(ctx, req))
-	if _, err := session.Run(ctx, prepared.app, prepared.actions, nil, session.Runnable{Name: prepared.call.Action}, prepared.call.Args, t.record); err != nil {
+	if err := session.RunPrepared(ctx, prepared.app, prepared.actions, prepared.call, t.record); err != nil {
 		return nil, runActionOutput{}, t.failed(err)
 	}
 	done := t.steps[0]
@@ -78,11 +78,12 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 }
 
 func (s tools) startAction(ctx context.Context, req *mcp.CallToolRequest, in runActionInput) (*mcp.CallToolResult, startActionOutput, error) {
-	prepared, form, err := s.prepareCall(ctx, req, in, true)
+	prepared, form, err := s.prepareCall(ctx, req, in)
 	if form != nil || err != nil {
 		return form, startActionOutput{}, err
 	}
-	if err := checkCall(prepared.actions, prepared.call); err != nil {
+	// Preflight checks argument names and presence. Display has the prepared keys without host values.
+	if err := checkCall(prepared.actions, wire.Call(prepared.call.Display)); err != nil {
 		return nil, startActionOutput{}, err
 	}
 	return nil, startActionOutput{s.runs.start(prepared.target, prepared.app, prepared.call)}, nil
@@ -223,11 +224,11 @@ func stepError(err error) *errorOutput {
 type preparedCall struct {
 	target  device.Target
 	app     session.App
-	call    wire.Call
+	call    step.PreparedCall
 	actions []wire.Action
 }
 
-func (s tools) prepareCall(ctx context.Context, req *mcp.CallToolRequest, in runActionInput, describe bool) (preparedCall, *mcp.CallToolResult, error) {
+func (s tools) prepareCall(ctx context.Context, req *mcp.CallToolRequest, in runActionInput) (preparedCall, *mcp.CallToolResult, error) {
 	args, err := rawArgs(in.Args)
 	if err != nil {
 		return preparedCall{}, nil, err
@@ -236,22 +237,17 @@ func (s tools) prepareCall(ctx context.Context, req *mcp.CallToolRequest, in run
 	if err != nil {
 		return preparedCall{}, nil, err
 	}
-	prepared := preparedCall{target: target, app: app, call: wire.Call{Action: in.Action, Args: args}}
-	if !describe {
-		return prepared, nil, nil
-	}
+	prepared := preparedCall{target: target, app: app}
 	_, prepared.actions, err = app.Describe(ctx)
 	if err != nil {
 		return preparedCall{}, nil, err
 	}
-	if !canElicit(req.Session) {
-		return prepared, nil, nil
-	}
-	if a, ok := wire.FindAction(prepared.actions, in.Action); ok {
+	if a, ok := wire.FindAction(prepared.actions, in.Action); ok && canElicit(req.Session) {
 		if form, err := askForParams(req, in.Action, a.Params, args); form != nil || err != nil {
 			return preparedCall{}, form, err
 		}
 	}
+	prepared.call = step.PrepareCall(prepared.actions, wire.Call{Action: in.Action, Args: args}, nil, os.Getenv)
 	return prepared, nil, nil
 }
 
@@ -302,6 +298,7 @@ func action(a wire.Action) actionOutput {
 	for _, p := range a.Params {
 		params = append(params, paramOutput{
 			Name:        p.Name,
+			Env:         p.Env,
 			Type:        string(p.Type),
 			Description: p.Description,
 			Choices:     p.Choices,
@@ -323,6 +320,9 @@ func rawArgs(values map[string]json.RawMessage) (map[string]wire.RawArg, error) 
 			return nil, fmt.Errorf("argument %q is not JSON: %v", key, err)
 		}
 		items, isList := value.([]any)
+		if isList && len(items) == 0 {
+			args[key] = wire.RawArg{}
+		}
 		if !isList {
 			items = []any{value}
 		}

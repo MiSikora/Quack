@@ -1,0 +1,12 @@
+$ quack app.greet
+--- exit 2
+--- stdout
+--- stderr
+quack: [invalid_args] missing argument 'name'
+--- device
+shell emulator-5554: query-receivers
+shell emulator-5554: get-current-user
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"describe"}
+shell emulator-5554: wake io.mehow.quack.sample
+request: {"method":"call","action":"app.greet"}
