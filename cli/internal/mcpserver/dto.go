@@ -74,16 +74,19 @@ type recipeOutput struct {
 }
 
 type runRecipeInput struct {
-	Recipe string                     `json:"recipe" jsonschema:"the name of the recipe, as list_recipes gives it"`
-	Args   map[string]json.RawMessage `json:"args,omitempty" jsonschema:"the recipe's params by name, as the args of run_action"`
-	Device string                     `json:"device,omitempty" jsonschema:"the device's serial, as list_devices gives it"`
-	App    string                     `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
+	OpenApp bool                       `json:"open_app,omitempty" jsonschema:"whether to show the app main screen before the recipe runs"`
+	Recipe  string                     `json:"recipe" jsonschema:"the name of the recipe, as list_recipes gives it"`
+	Args    map[string]json.RawMessage `json:"args,omitempty" jsonschema:"the recipe's params by name, as the args of run_action"`
+	Device  string                     `json:"device,omitempty" jsonschema:"the device's serial, as list_devices gives it"`
+	App     string                     `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
 }
 
 type runRecipeOutput struct {
-	Steps []stepOutput    `json:"steps"`
-	Log   []string        `json:"log"`
-	Data  json.RawMessage `json:"data,omitempty"`
+	Problems []string        `json:"problems,omitempty"`
+	Error    *errorOutput    `json:"error,omitempty"`
+	Steps    []stepOutput    `json:"steps"`
+	Log      []string        `json:"log"`
+	Data     json.RawMessage `json:"data,omitempty"`
 }
 
 type stepOutput struct {
@@ -122,6 +125,7 @@ type listRunsOutput struct {
 }
 
 type runActionOutput struct {
+	Error         *errorOutput         `json:"error,omitempty"`
 	Notifications []notificationOutput `json:"notifications"`
 	Message       string               `json:"message"`
 	Data          json.RawMessage      `json:"data,omitempty"`

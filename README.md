@@ -178,6 +178,8 @@ quack.recipe({
 
 `quack-mcp` lets AI agents like Claude Code find and run your actions:
 
+MCP honors `ANDROID_SERIAL` when a tool call omits `device`. An explicit `device` takes precedence. Action arguments and result JSON preserve large integers. Forms ask for `long` values as decimal text. `run_recipe` accepts `open_app` to foreground the app before running and includes recipe-loading warnings in `problems`. Failed actions and recipes set `isError` and keep structured notifications, completed steps, and an `error` with a code and message.
+
 ```
 brew install MiSikora/tap/quack-mcp
 claude mcp add quack -- quack-mcp

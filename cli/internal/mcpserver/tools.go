@@ -88,7 +88,7 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 		Description: "Run a recipe of a quack-enabled app with args for its params, and return what each of its steps " +
 			"gave, a call of an action, /open-app, a wait, or a shell or run command: its notifications, and its message and " +
 			"its data or the error it failed with, and the lines the recipe logged. The message of a command is what it " +
-			"printed. A step that fails ends the recipe unless the recipe catches it. Get the recipe names and params from list_recipes. " +
+			"printed. A step that fails ends the recipe unless the recipe catches it. Failures retain completed steps and their data. problems lists recipe-loading warnings even when this recipe succeeds. Use open_app to foreground the app before running. Get the recipe names and params from list_recipes. " +
 			askHelp + targetHelp,
 		InputSchema:  schemaFor[runRecipeInput](),
 		OutputSchema: schemaFor[runRecipeOutput](),
@@ -120,5 +120,5 @@ const instructions = "quack runs debug actions in Android apps on devices that a
 const askHelp = "When the client can show the user a form, the user is asked for the required params that args leave " +
 	"out, so leave out the ones that only the user knows. A user who declines or cancels fails the call. "
 
-const targetHelp = "Leave out device and app when only one quack-enabled app is reachable. When several are, the error " +
+const targetHelp = "When device is omitted, ANDROID_SERIAL from the server environment selects the device if set. Otherwise leave out device and app when only one quack-enabled app is reachable. When several are, the error " +
 	"lists them as --device and --app pairs: pass those values as device and app."

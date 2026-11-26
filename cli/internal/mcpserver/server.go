@@ -71,11 +71,14 @@ func (s tools) runAction(ctx context.Context, req *mcp.CallToolRequest, in runAc
 		return form, runActionOutput{}, err
 	}
 	t := newTranscript(progress(ctx, req))
-	if err := session.RunPrepared(ctx, prepared.app, prepared.actions, prepared.call, t.record); err != nil {
-		return nil, runActionOutput{}, t.failed(err)
-	}
+	err = session.RunPrepared(ctx, prepared.app, prepared.actions, prepared.call, t.record)
 	done := t.steps[0]
-	return nil, runActionOutput{Notifications: done.Notifications, Message: done.Message, Data: done.Data}, nil
+	out := runActionOutput{Notifications: done.Notifications, Message: done.Message, Data: done.Data}
+	if err != nil {
+		out.Error = stepError(err)
+		return t.failure(err), out, nil
+	}
+	return nil, out, nil
 }
 
 func (s tools) startAction(ctx context.Context, req *mcp.CallToolRequest, in runActionInput) (*mcp.CallToolResult, startActionOutput, error) {
@@ -139,7 +142,7 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
-	target, app, err := s.connect(in.Device, in.App, false)
+	target, app, err := s.connect(in.Device, in.App, in.OpenApp)
 	if err != nil {
 		return nil, runRecipeOutput{}, err
 	}
@@ -162,10 +165,12 @@ func (s tools) runRecipe(ctx context.Context, req *mcp.CallToolRequest, in runRe
 	}
 	t := newTranscript(progress(ctx, req))
 	data, err := session.Run(ctx, app, actions, cookbook, session.Runnable{Name: in.Recipe, Recipe: true}, args, t.record)
+	out := runRecipeOutput{Steps: t.steps, Log: t.log, Data: data, Problems: problems}
 	if err != nil {
-		return nil, runRecipeOutput{}, t.failed(err)
+		out.Error = stepError(err)
+		return t.failure(err), out, nil
 	}
-	return nil, runRecipeOutput{Steps: t.steps, Log: t.log, Data: data}, nil
+	return nil, out, nil
 }
 
 type transcript struct {
@@ -208,6 +213,10 @@ func (t *transcript) record(e step.Event) {
 func (t *transcript) print(line string) {
 	t.printed = append(t.printed, line)
 	t.report(line)
+}
+
+func (t *transcript) failure(err error) *mcp.CallToolResult {
+	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: t.failed(err).Error()}}}
 }
 
 func (t *transcript) failed(err error) error {
@@ -262,6 +271,9 @@ func (s tools) connect(serial, pkg string, openApp bool) (device.Target, session
 }
 
 func (s tools) find(serial, pkg string) (device.Target, error) {
+	if serial == "" {
+		serial = os.Getenv("ANDROID_SERIAL")
+	}
 	if pkg != "" && !device.IsPackageName(pkg) {
 		return device.Target{}, errors.New(pkg + " is not a package name")
 	}
