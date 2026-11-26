@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Changed
 - Use platform JSON APIs instead of kotlinx.serialization. The SDK no longer needs its runtime dependency or compiler plugin.
-- Keep action JSON number literals intact and compact multiline data into a single protocol frame.
+- Parse and encode JSON with the platform defaults, and compact multiline data into a single protocol frame.
 - Run codec and endpoint tests with Robolectric while keeping pure Kotlin tests on the JVM runner.
 
 ### CLI and MCP

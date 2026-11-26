@@ -106,7 +106,7 @@ internal class Endpoint(
     return Frame.Result.Message(ok.message, data)
   }
 
-  private fun parseData(action: QuackAction, text: String, verb: String): JsonData? {
+  private fun parseData(action: QuackAction, text: String, verb: String): Any? {
     val data = codec.parseJson(text)
     if (data == null) logger.log(QuackLogger.Level.Error, "Action '${action.id}' $verb json that does not parse: $text", throwable = null)
     return data

@@ -76,7 +76,7 @@ CLI, TUI, and MCP arguments expand `${NAME}` using the host environment. Use `$$
 
 Displayed bound arguments, commands, and history use `${NAME}`. Recipe commands and arguments derived from a consumed environment value keep the existing masking. Returned messages, JSON results, notifications, and errors are unchanged. Typed parsing errors can include the supplied value.
 
-The Android SDK uses platform JSON APIs and has no kotlinx.serialization runtime dependency.
+The Android SDK uses platform JSON APIs and has no kotlinx.serialization runtime dependency. Payloads follow the platform parser's syntax and number conversions.
 
 ## Run them from your computer
 
@@ -193,7 +193,7 @@ brew install MiSikora/tap/quack-mcp
 claude mcp add quack -- quack-mcp
 ```
 
-MCP honors `ANDROID_SERIAL` when a tool call omits `device`. An explicit `device` takes precedence. Action arguments and result JSON preserve large integers. Forms ask for `long` values as decimal text. `run_recipe` accepts `open_app` to foreground the app before running and includes recipe-loading warnings in `problems`. Failed actions and recipes set `isError` and keep structured notifications, completed steps, and an `error` with a code and message.
+MCP honors `ANDROID_SERIAL` when a tool call omits `device`. An explicit `device` takes precedence. MCP forwards JSON numbers without additional rounding. Forms ask for `long` values as decimal text. `run_recipe` accepts `open_app` to foreground the app before running and includes recipe-loading warnings in `problems`. Failed actions and recipes set `isError` and keep structured notifications, completed steps, and an `error` with a code and message.
 
 ## License
 

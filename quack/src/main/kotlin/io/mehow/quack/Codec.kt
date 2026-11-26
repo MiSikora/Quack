@@ -4,19 +4,14 @@ import io.mehow.quack.QuackAction.Param.Presence
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import org.json.JSONTokener
 
 internal class Codec {
   fun decodeRequest(line: String): Request {
-    val json = parseJson(line) ?: return Request.Malformed("request is not a JSON object")
-    val frame =
-      try {
-        JSONObject(json.encoded)
-      } catch (_: JSONException) {
-        return Request.Malformed("request is not a JSON object")
-      }
-    val method = if (frame.has("method")) frame.get("method") else ""
-    val action = if (frame.has("action")) frame.get("action") else ""
-    val args = if (frame.has("args")) frame.get("args") else JSONObject()
+    val frame = parseJson(line) as? JSONObject ?: return Request.Malformed("request is not a JSON object")
+    val method = frame.opt("method") ?: ""
+    val action = frame.opt("action") ?: ""
+    val args = frame.opt("args") ?: JSONObject()
     if (method !is String || action !is String || args !is JSONObject) return Request.Malformed("malformed request")
     return when (method) {
       "describe" -> Request.Describe
@@ -39,16 +34,22 @@ internal class Codec {
             JSONObject()
               .put("protocol", PROTOCOL_VERSION)
               .put("app", JSONObject().put("package", frame.packageName).put("version", frame.version))
-              .toString()
         is Frame.Notification -> "notification" to messageBody(frame.message, frame.data)
         is Frame.Result.Message -> "result" to messageBody(frame.message, frame.data)
-        is Frame.Result.Actions -> "result" to JSONObject().put("actions", JSONArray(frame.actions.map(::actionBody))).toString()
-        is Frame.Error -> "error" to JSONObject().put("code", frame.code.wireName).put("message", frame.message).toString()
+        is Frame.Result.Actions -> "result" to JSONObject().put("actions", JSONArray(frame.actions.map(::actionBody)))
+        is Frame.Error -> "error" to JSONObject().put("code", frame.code.wireName).put("message", frame.message)
       }
-    return "{\"$key\":$body}"
+    return JSONObject().put(key, body).toString()
   }
 
-  fun parseJson(text: String): JsonData? = JsonData.parse(text)
+  fun parseJson(text: String): Any? =
+    try {
+      val parser = JSONTokener(text)
+      val value = parser.nextValue()
+      if (parser.nextClean() == '\u0000') value else null
+    } catch (_: JSONException) {
+      null
+    }
 
   private fun rawArg(value: Any): RawArg? {
     return when (value) {
@@ -62,11 +63,7 @@ internal class Codec {
     }
   }
 
-  private fun messageBody(message: String, data: JsonData?): String {
-    val body = JSONObject().put("message", message).toString()
-    // Validated, compact JSON is embedded unchanged: arbitrary numbers must not go through Double.
-    return if (data == null) body else body.dropLast(1) + ",\"data\":" + data.encoded + "}"
-  }
+  private fun messageBody(message: String, data: Any?): JSONObject = JSONObject().put("message", message).put("data", data)
 
   private fun actionBody(action: QuackAction): JSONObject =
     JSONObject()
@@ -91,7 +88,7 @@ internal class Codec {
 
   private fun defaultBody(value: Any): Any =
     when (value) {
-      is List<*> -> JSONArray(value.map { it.toString() })
+      is List<*> -> JSONArray(value)
       is Enum<*> -> value.name.lowercase()
       else -> value.toString()
     }

@@ -1,5 +1,6 @@
 package io.mehow.quack
 
+import io.kotest.assertions.json.shouldEqualJson
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.json.JSONObject
@@ -14,60 +15,45 @@ class CodecTest {
   private val codec = Codec()
 
   @Test
-  fun `reject platform JSON extensions and malformed values`() {
-    for (text in
-      listOf(
-        "",
-        " ",
-        "{} {}",
-        "null true",
-        "1 2",
-        "[1 2]",
-        "[1,,2]",
-        "\"\\u١٢٣٤\"",
-        "[01]",
-        "[1,]",
-        "{\"a\":1,}",
-        "{unquoted:1}",
-        "{'single':'quotes'}",
-        "/*comment*/{}",
-        "{\"a\"=1}",
-        "[1;2]",
-        "[NaN]",
-        "[Infinity]",
-        "[TRUE]",
-        "[NULL]",
-        "[+1]",
-        "[.5]",
-        "[1.]",
-        "[1e]",
-        "[-]",
-        "[0x10]",
-        "\"\\q\"",
-        "\"\\uZZZZ\"",
-        "\"\\u123\"",
-        "\"literal\nnewline\"",
-      )) codec.parseJson(text) shouldBe null
+  fun `reject incomplete JSON and trailing values`() {
+    for (text in listOf("", " ", "{", "[", "\"unterminated", "{\"a\":}", "[1", "{} {}", "[] false", "1 2")) {
+      codec.parseJson(text) shouldBe null
+    }
   }
 
   @Test
-  fun `preserve arbitrary JSON values and exact numbers inside one frame`() {
-    for ((input, compact) in
+  fun `accept platform JSON syntax and emit ordinary JSON`() {
+    val data = checkNotNull(codec.parseJson("/* comment */ {unquoted: 'value', items: [1; 2]}"))
+    codec.encode(Frame.Result.Message("done", data)) shouldEqualJson
+      """{"result":{"message":"done","data":{"unquoted":"value","items":[1,2]}}}"""
+  }
+
+  @Test
+  fun `encode objects arrays and primitives in one frame`() {
+    for (text in
       listOf(
-        "null" to "null",
-        " true " to "true",
-        "false" to "false",
-        "[]" to "[]",
-        "\"hello \\n world\"" to "\"hello \\n world\"",
-        "[ null, true, false, \"\", \" spaced \" ]" to "[null,true,false,\"\",\" spaced \"]",
-        "{\n\"id\":9223372036854775807,\n\"n\":0.1234567890123456789012345,\"huge\":1e9999\n}" to
-          "{\"id\":9223372036854775807,\"n\":0.1234567890123456789012345,\"huge\":1e9999}",
-        "-0.25E+100" to "-0.25E+100",
+        "null",
+        "true",
+        "false",
+        "[]",
+        "\"hello \\n world\"",
+        "[null,true,\"\",\" spaced \"]",
+        "{\n\"id\":9007199254740993,\"ratio\":0.5\n}",
       )) {
-      val data = checkNotNull(codec.parseJson(input))
-      codec.encode(Frame.Result.Message("done", data)) shouldBe "{\"result\":{\"message\":\"done\",\"data\":$compact}}"
-      codec.encode(Frame.Notification("done", data)) shouldBe "{\"notification\":{\"message\":\"done\",\"data\":$compact}}"
+      val data = checkNotNull(codec.parseJson(text))
+      val result = codec.encode(Frame.Result.Message("done", data))
+      result shouldEqualJson "{\"result\":{\"message\":\"done\",\"data\":$text}}"
+      result.contains('\n') shouldBe false
+      codec.encode(Frame.Notification("done", data)) shouldEqualJson "{\"notification\":{\"message\":\"done\",\"data\":$text}}"
     }
+  }
+
+  @Test
+  fun `use platform number types without converting ordinary longs to doubles`() {
+    val parsed = checkNotNull(codec.parseJson("""{"id":9007199254740993,"n":0.1234567890123456789012345}"""))
+    val data = JSONObject(codec.encode(Frame.Result.Message("done", parsed))).getJSONObject("result").getJSONObject("data")
+    data.get("id") shouldBe 9007199254740993L
+    data.get("n") shouldBe 0.12345678901234568
   }
 
   @Test
@@ -76,6 +62,12 @@ class CodecTest {
     val explicit = JSONObject(codec.encode(Frame.Result.Message("done", codec.parseJson("null")))).getJSONObject("result")
     explicit.has("data") shouldBe true
     explicit.get("data") shouldBe JSONObject.NULL
+  }
+
+  @Test
+  fun `use defaults only when request fields are missing`() {
+    codec.decodeRequest("""{"method":"describe"}""") shouldBe Request.Describe
+    codec.decodeRequest("""{"method":"call"}""") shouldBe Request.Call("", emptyMap())
   }
 
   @Test
@@ -101,12 +93,5 @@ class CodecTest {
     ) shouldBe Request.Call("a", mapOf("empty" to RawArg.Single(""), "tags" to RawArg.Repeated(listOf("", " spaced ", "a,b"))))
     codec.decodeRequest("""{"method":"call","action":"a","args":{"tags":[]}}""") shouldBe
       Request.Call("a", mapOf("tags" to RawArg.Repeated(emptyList())))
-  }
-
-  @Test
-  fun `long string and number tokens do not depend on parser buffer size`() {
-    for (text in listOf("\"" + "x".repeat(32000) + "\"", "9".repeat(4000))) {
-      codec.parseJson(text)?.encoded shouldBe text
-    }
   }
 }
