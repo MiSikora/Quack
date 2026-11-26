@@ -196,6 +196,45 @@ func TestBrowsingWithoutGroupsListsEveryIdSorted(t *testing.T) {
 	h.waitFor("  app.params", "  app.greet", "  app.count", "  account.watch", "  account.delete", "▸ account.create", "6/6")
 }
 
+func TestDownPastTheBottomClosesBrowsingAndUpReopensIt(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, first, next string
+	}{
+		{"grouped", "", "▸ account.   3", "▸ app.       3"},
+		{"ungrouped", flat, "▸ account.create", "▸ account.delete"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := startWithConfig(t, newFakeApp(), tc.config)
+			h.press("up", "ctrl+p")
+			h.waitFor(tc.next)
+			h.press("down")
+			h.waitFor(tc.first)
+			h.press("down")
+			h.waitFor("quack · ", "type or ↑ to find an action")
+			h.waitForNo("▸")
+			h.press("down", "ctrl+n", "ctrl+p")
+			h.waitFor(tc.first)
+			h.press("ctrl+n")
+			h.waitFor("quack · ", "type or ↑ to find an action")
+			h.waitForNo("▸")
+		})
+	}
+}
+
+func TestDownClosesAGroupAndUpReopensTheRoot(t *testing.T) {
+	h, _ := startNamespaces(t)
+	h.press("up", "up", "up", "up", "up", "up", "right", "up")
+	h.waitFor("▸ sync.backup     Back up", "sync. 3/12")
+	h.press("ctrl+n")
+	h.waitFor("▸ sync.backup ƒ", "sync. 3/12")
+	h.press("ctrl+n")
+	h.waitFor("quack · ", "type or ↑ to find an action")
+	h.waitForNo("▸")
+	h.press("up")
+	h.waitFor("  sync.            3", "▸ account.         3", "6/12")
+	h.waitForNo("sync.backup")
+}
+
 func TestEnterAndTabDoNothingWhileNoListShows(t *testing.T) {
 	app := newFakeApp()
 	h := start(t, app)
@@ -592,6 +631,8 @@ func TestSlashListsTheCommands(t *testing.T) {
 	h.typing("/")
 
 	h.waitFor("/toggle-data", "/reload", "/pick-device", "/pick-app", "/open-app", "/init-recipes", "/exit", "/clear", "▸ /cancel", "9/9")
+	h.press("down", "ctrl+n")
+	h.waitFor("▸ /cancel", "> /", "9/9")
 	h.waitForNo("app.greet")
 	h.typing("x")
 	h.waitFor("▸ /exit")

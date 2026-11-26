@@ -169,6 +169,9 @@ func (p *prompt) update(msg tea.KeyPressMsg) tea.Cmd {
 		p.selected = min(max(0, len(choices)-1), p.selected+1)
 		return nil
 	case "down", "ctrl+n":
+		if p.browsing && p.input.Value() == "" && p.selected == 0 {
+			p.browsing, p.group = false, ""
+		}
 		p.selected = max(0, p.selected-1)
 		return nil
 	case "right":
