@@ -158,6 +158,7 @@ var scenarios = []scenario{
 	{name: "recipe", args: []string{"--recipe", "setup"}, recipes: sampleRecipes},
 	{name: "recipe-json", args: []string{"--json", "--recipe", "setup"}, recipes: sampleRecipes},
 	{name: "recipe-open-app-flag", args: []string{"--open-app", "--recipe", "greet"}, recipes: sampleRecipes},
+	{name: "recipe-shorthand", args: []string{"-r", "greet", "name=Alice"}, recipes: sampleRecipes},
 	{name: "recipe-args", args: []string{"--recipe", "greet", "name=Alice"}, recipes: sampleRecipes},
 	{name: "recipe-args-variable", args: []string{"--recipe", "greet", "name=${QUACK_NAME}"}, recipes: sampleRecipes, env: []string{"QUACK_NAME=Carol"}},
 	{name: "recipe-args-refused", args: []string{"--recipe", "greet", "nope=1"}, recipes: sampleRecipes},

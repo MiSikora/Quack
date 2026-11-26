@@ -31,7 +31,7 @@ options:
       --project-dir dir          use the project rooted at dir for recipes
       --init-recipes             write the files that let editors check recipes, and with --app start a project with a recipe of the app
       --open-app                 show the app's main screen first, instead of starting it in the background
-      --recipe name              run the app's recipe name
+  -r, --recipe name              run the app's recipe name
       --start-timeout duration   how long to wait for the app to answer (default 15s)
       --version                  show quack's version
   -h, --help                     show this help

@@ -149,7 +149,7 @@ quack.recipe({
 })
 ```
 
-Run it with `quack --recipe greetAndGoBack name=Goose`, or find it in `quack`, where recipes are marked `ƒ` and `$` lists only them. A step that fails throws. `quack.d.ts` in `.quack/recipes/` documents the whole API.
+Run it with `quack --recipe greetAndGoBack name=Goose` or `quack -r greetAndGoBack name=Goose`, or find it in `quack`, where recipes are marked `ƒ` and `$` lists only them. A step that fails throws. `quack.d.ts` in `.quack/recipes/` documents the whole API.
 
 Recipes can run other recipes and import your own files, but not npm packages. Only a recipe declared in a mapped file is listed, so shared recipes can live in an unmapped dir:
 

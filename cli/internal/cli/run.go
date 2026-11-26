@@ -75,7 +75,7 @@ func parseOptions(argv []string, terminal Terminal) (options, error) {
 	command.ProjectDirFlag(fs, &opts.projectDir)
 	command.BoolFlag(fs, &opts.initRecipes, "init-recipes", "", "write the files that let editors check recipes, and with --app start a project with a recipe of the app")
 	command.BoolFlag(fs, &opts.openApp, "open-app", "", "show the app's main screen first, instead of starting it in the background")
-	fs.StringVar(&opts.recipe, "recipe", "", "run the app's recipe `name`")
+	fs.StringVarP(&opts.recipe, "recipe", "r", "", "run the app's recipe `name`")
 	fs.DurationVar(&opts.startTimeout, "start-timeout", 15*time.Second, "how long to wait for the app to answer")
 	command.BoolFlag(fs, &opts.version, "version", "", "show quack's version")
 	command.BoolFlag(fs, &opts.help, "help", "h", "show this help")
