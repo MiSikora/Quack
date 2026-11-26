@@ -62,7 +62,7 @@ func askForParams(req *mcp.CallToolRequest, what string, params []wire.Param, ar
 		switch v := value.(type) {
 		case string:
 			if p.Type.IsList() {
-				args[name] = wire.SplitList(v)
+				args[name] = append(wire.RawArg{}, wire.SplitList(v)...)
 			} else {
 				args[name] = wire.RawArg{v}
 			}
@@ -75,12 +75,14 @@ func askForParams(req *mcp.CallToolRequest, what string, params []wire.Param, ar
 	return nil, nil
 }
 
-// A long loses precision beyond 2^53, as the args of run_action do. A string_list takes comma-separated values,
-// since a form's arrays only pick from choices.
+// Longs use decimal text because the form transport decodes JSON numbers through float64.
+// A string_list takes comma-separated values, since a form's arrays only pick from choices.
 func fieldSchema(p wire.Param) *jsonschema.Schema {
 	field := &jsonschema.Schema{Title: p.Name, Description: p.Description, Type: "string"}
 	switch p.Type {
-	case wire.ParamTypeInt, wire.ParamTypeLong:
+	case wire.ParamTypeLong:
+		field.Description = strings.TrimSpace(p.Description + " Enter a whole number as decimal text.")
+	case wire.ParamTypeInt:
 		field.Type = "integer"
 	case wire.ParamTypeDouble:
 		field.Type = "number"

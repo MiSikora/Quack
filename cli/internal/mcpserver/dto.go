@@ -46,10 +46,8 @@ type paramOutput struct {
 }
 
 type runActionInput struct {
-	Action string `json:"action" jsonschema:"the id of the action, as list_actions gives it"`
-	// The SDK's validation turns numbers into float64, so a long beyond 2^53 loses precision unless it comes as a
-	// string.
-	Args    map[string]json.RawMessage `json:"args,omitempty" jsonschema:"the action's params by name: a string, a number or a boolean, or an array of them for a string_list param. Leave out params to use their defaults. Pass a long beyond 2^53 as a string, since JSON numbers that large lose precision on the way."`
+	Action  string                     `json:"action" jsonschema:"the id of the action, as list_actions gives it"`
+	Args    map[string]json.RawMessage `json:"args,omitempty" jsonschema:"the action's params by name: a string, a number or a boolean, or an array of them for a string_list param. Leave out params to use their defaults."`
 	Device  string                     `json:"device,omitempty" jsonschema:"the device's serial, as list_devices gives it"`
 	App     string                     `json:"app,omitempty" jsonschema:"the app's package, as list_devices gives it"`
 	OpenApp bool                       `json:"open_app,omitempty" jsonschema:"whether to show the app's main screen before the action runs, instead of starting the app in the background"`

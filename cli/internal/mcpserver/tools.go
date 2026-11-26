@@ -26,16 +26,16 @@ func Serve(ctx context.Context, version string, location recipe.Location, startT
 func New(ctx context.Context, backend session.Backend, version string, location recipe.Location) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "quack", Version: version}, &mcp.ServerOptions{Instructions: instructions})
 	s := tools{backend: backend, runs: newRuns(ctx), location: location}
-	mcp.AddTool(server, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name:        "list_devices",
 		Description: "List the devices adb knows, each with its state and the quack-enabled apps on it.",
 	}, s.listDevices)
-	mcp.AddTool(server, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name: "list_actions",
 		Description: "List the actions of a quack-enabled app with their params. A string param may give hints: values " +
 			"the app suggests, such as known names, though others work too. " + targetHelp,
 	}, s.listActions)
-	mcp.AddTool(server, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name: "run_action",
 		Description: "Run an action of a quack-enabled app and return its notifications, each a message with optional " +
 			"data, and its message and its data. Get the action ids and their params from list_actions. The args reach " +
@@ -44,7 +44,7 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 		InputSchema:  schemaFor[runActionInput](),
 		OutputSchema: schemaFor[runActionOutput](),
 	}, s.runAction)
-	mcp.AddTool(server, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name: "start_action",
 		Description: "Start an action as run_action does, without waiting for it to end, and return the id of its run. " +
 			"Use it for an action that waits for something outside the call before it ends, such as another device, " +
@@ -53,7 +53,7 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 		InputSchema:  schemaFor[runActionInput](),
 		OutputSchema: schemaFor[startActionOutput](),
 	}, s.startAction)
-	mcp.AddTool(server, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name: "read_run",
 		Description: "Read a run that start_action started: its notifications from index after on, and next to pass " +
 			"as after to the following read. Once the run has ended, done is true and the run's message and data, or " +
@@ -63,12 +63,12 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 			"oldest one kept.",
 		OutputSchema: schemaFor[readRunOutput](),
 	}, s.readRun)
-	mcp.AddTool(server, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name: "cancel_run",
 		Description: "Cancel a run that start_action started. The app sees the action canceled, and read_run gives " +
 			"the run's end as the error canceled. A run that has ended stays as it was.",
 	}, s.cancelRun)
-	mcp.AddTool(server, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name: "list_runs",
 		Description: "List the runs that start_action started in this session, oldest first, with their action, " +
 			"device and app, whether they are done, and next, their count of notifications so far. Use it to find a " +
@@ -76,14 +76,14 @@ func New(ctx context.Context, backend session.Backend, version string, location 
 			" are gone.",
 		OutputSchema: schemaFor[listRunsOutput](),
 	}, s.listRuns)
-	mcp.AddTool(server, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name: "list_recipes",
 		Description: "List the recipes of a quack-enabled app with their params and files: scripts that the user keeps " +
 			"on this computer, in the .quack dir of a project or in their config, which run the app's actions, commands " +
 			"on the device or on this computer, and waits, and decide what to do with what they return. problems lists " +
 			"the recipe files and settings that quack left out. " + targetHelp,
 	}, s.listRecipes)
-	mcp.AddTool(server, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name: "run_recipe",
 		Description: "Run a recipe of a quack-enabled app with args for its params, and return what each of its steps " +
 			"gave, a call of an action, /open-app, a wait, or a shell or run command: its notifications, and its message and " +
