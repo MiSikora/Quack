@@ -18,6 +18,7 @@ type picker struct {
 	step        pickerStep
 	device      adb.Device
 	want        device.Target
+	current     device.Target
 	auto        bool
 	skipPackage bool
 	back        bool
@@ -49,6 +50,7 @@ type pickRow struct {
 	device  adb.Device
 	pkg     string
 	matched []int
+	current bool
 }
 
 func newPicker(want device.Target, width int) *picker {
@@ -91,7 +93,7 @@ func (p *picker) allRows(devices []seenDevice) []pickRow {
 	var rows []pickRow
 	if p.step == packageStep {
 		for _, pkg := range p.packages(devices, p.device) {
-			rows = append(rows, pickRow{key: pkg, label: pkg, ok: true, device: p.device, pkg: pkg})
+			rows = append(rows, pickRow{key: pkg, label: pkg, ok: true, device: p.device, pkg: pkg, current: p.current == (device.Target{Device: p.device, Package: pkg})})
 		}
 		return rows
 	}
@@ -103,7 +105,7 @@ func (p *picker) allRows(devices []seenDevice) []pickRow {
 		if d.Model != "" {
 			label = d.Model + " · " + label
 		}
-		row := pickRow{key: string(d.Device), label: label, device: d.Device}
+		row := pickRow{key: string(d.Device), label: label, device: d.Device, current: p.current.Device == d.Device}
 		count := len(p.packages(devices, row.device))
 		if p.want.Package != "" && d.inspected && count == 0 {
 			continue
@@ -222,6 +224,11 @@ func (p *picker) selectedIndex(rows []pickRow) int {
 	if i := slices.IndexFunc(rows, func(r pickRow) bool { return r.key == p.selected && r.ok }); i >= 0 {
 		return i
 	}
+	if p.selected == "" && p.input.Value() == "" {
+		if i := slices.IndexFunc(rows, func(r pickRow) bool { return r.current && r.ok }); i >= 0 {
+			return i
+		}
+	}
 	if i := slices.IndexFunc(rows, func(r pickRow) bool { return r.ok }); i >= 0 {
 		return i
 	}
@@ -298,14 +305,18 @@ func (p *picker) list(devices []seenDevice, listed bool, height int) []string {
 	var lines []string
 	for i, r := range rows[first : first+count] {
 		padding := strings.Repeat(" ", labelWidth-ansi.StringWidth(r.label)+3)
+		note := r.note
+		if r.current {
+			note = strings.TrimSpace("(current) " + note)
+		}
 		var line string
 		switch {
 		case !r.ok:
-			line = statusStyle.Render("  " + r.label + padding + r.note)
+			line = statusStyle.Render("  " + r.label + padding + note)
 		case first+i == selected:
-			line = selectedStyle.Render("▸ ") + highlight(r.label, r.matched, selectedStyle) + padding + statusStyle.Render(r.note)
+			line = selectedStyle.Render("▸ ") + highlight(r.label, r.matched, selectedStyle) + padding + statusStyle.Render(note)
 		default:
-			line = "  " + highlight(r.label, r.matched, lipgloss.NewStyle()) + padding + statusStyle.Render(r.note)
+			line = "  " + highlight(r.label, r.matched, lipgloss.NewStyle()) + padding + statusStyle.Render(note)
 		}
 		lines = append(lines, ansi.Truncate(line, p.width, "…"))
 	}

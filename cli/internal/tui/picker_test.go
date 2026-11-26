@@ -640,3 +640,37 @@ func (h *harness) checkRed(before, red, after string) {
 		h.t.Errorf("the info line is not %q, %q in red, then %q in:\n%q", before, red, after, h.raw())
 	}
 }
+
+func TestDevicePickerInitiallySelectsCurrentAndKeepsMarkerWhenCursorMoves(t *testing.T) {
+	source := newFakeSource(newFakeApp(), deviceInfo("emulator-5554", "Pixel 8", "device", "io.mehow.quack.sample"), deviceInfo("second", "Pixel 7", "device", "io.mehow.other"))
+	appFor(source, "second", "io.mehow.other")
+	h := startPicking(t, source, device.Target{Device: "second", Package: "io.mehow.other"}, false)
+	h.waitFor("quack · io.mehow.other 1.0 · second", "type or ↑")
+	h.typing("/pick-device")
+	h.press("enter")
+	h.waitFor("▸ Pixel 7", "(current)")
+	h.press("down")
+	h.waitFor("  Pixel 7", "(current)", "▸ Pixel 8")
+	h.press("enter")
+	h.waitFor("quack · io.mehow.quack.sample 1.0 · emulator-5554", "type or ↑")
+	h.typing("/pick-device")
+	h.press("enter")
+	h.waitFor("▸ Pixel 8", "(current)")
+}
+
+func TestPackagePickerSelectsCurrentAndDoesNotSearchItsMarker(t *testing.T) {
+	source := newFakeSource(newFakeApp(), deviceInfo("emulator-5554", "Pixel 8", "device", "com.example.other", "io.mehow.quack.sample"))
+	appFor(source, "emulator-5554", "com.example.other")
+	h := startPicking(t, source, device.Target{Device: "emulator-5554", Package: "io.mehow.quack.sample"}, false)
+	h.waitFor("type or ↑")
+	h.typing("/pick-app")
+	h.press("enter")
+	h.waitFor("▸ io.mehow.quack.sample", "(current)")
+	h.press("down")
+	h.waitFor("  io.mehow.quack.sample", "(current)", "▸ com.example.other")
+	h.typing("current")
+	h.waitFor("no match", "0/2")
+	if strings.Contains(strings.Join(h.panel(), "\n"), "(current)") {
+		t.Fatal("current marker must not be a searchable label")
+	}
+}

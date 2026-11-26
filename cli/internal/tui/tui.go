@@ -473,6 +473,9 @@ func (m *model) openPicker(setup func(*picker)) tea.Cmd {
 	m.box = nil
 	m.prompt.input.Blur()
 	m.picker = newPicker(device.Target{}, m.width)
+	if m.connection.app != nil {
+		m.picker.current = m.connection.target
+	}
 	setup(m.picker)
 	return tea.Batch(m.picker.input.Focus(), m.tracker.inspectAll(), m.tracker.poll(m.clock))
 }
